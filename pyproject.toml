@@ -1,0 +1,24 @@
+[project]
+name = "brain-image-implementation"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dreamsim",
+    "torch",
+    "torchvision",
+    "torchsummary",
+    "tensorboard",
+    "torch_geometric",
+    "numpy",
+    "scikit-learn",
+    "matplotlib",
+    "seaborn",
+    "pandas",
+    "jupyter",
+    "ipykernel",
+    "lightning",
+    "einops",
+    "Pillow",
+]
