@@ -21,4 +21,5 @@ dependencies = [
     "lightning",
     "einops",
     "Pillow",
+    "pydantic",
 ]

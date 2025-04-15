@@ -1,10 +1,12 @@
 README.md
 pyproject.toml
+src/config.py
 src/brain_image_implementation.egg-info/PKG-INFO
 src/brain_image_implementation.egg-info/SOURCES.txt
 src/brain_image_implementation.egg-info/dependency_links.txt
 src/brain_image_implementation.egg-info/requires.txt
 src/brain_image_implementation.egg-info/top_level.txt
+src/data/configs.py
 src/nice_egg/eeg_encoder.py
 src/nice_egg/nice_stand.py
 src/nice_egg/spatial_modules.py

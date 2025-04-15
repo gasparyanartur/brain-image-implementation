@@ -20,3 +20,4 @@ Requires-Dist: ipykernel
 Requires-Dist: lightning
 Requires-Dist: einops
 Requires-Dist: Pillow
+Requires-Dist: pydantic
