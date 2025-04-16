@@ -1,4 +1,5 @@
-*.egg-info
+/*.egg-info
+*.egg-info*
 /*venv
 /data
 /models
