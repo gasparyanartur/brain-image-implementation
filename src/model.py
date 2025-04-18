@@ -1,0 +1,411 @@
+# Adapted from https://github.com/eeyhsong/NICE-EEG
+from typing import Literal
+from pydantic import BaseModel
+import torch
+import torch.nn as nn
+import einops
+import math
+import itertools as it
+from lightning import LightningModule
+
+from configs import BaseConfig
+from data import EEGDataset, EEGDatasetConfig, prepare_datasets
+
+
+class EEGEncoderConfig(BaseConfig):
+    config_tag: str = "eeg_encoder"
+
+    embed_dim: int = 40
+    encoded_dim: int = 1440  # Result of embed dim * final spatial * final temporal
+    proj_dim: int = 768
+
+    temporal_kernel_size: int = 25
+    spatial_kernel_size: int = 17
+    temporal_pool_size: int = 41
+    temporal_stride: int = 1
+    hidden_dim: int = 40
+    dropout: float = 0.5
+
+
+class DebugLayer(nn.Module):
+    def __init__(self, note: str = ""):
+        super(DebugLayer, self).__init__()
+        self.note = note
+
+    def forward(self, x):
+        print(f"(debug): {x.shape} - {self.note}")
+        return x
+
+
+class PatchEmbedding(nn.Module):
+    def __init__(
+        self,
+        embed_dim: int,
+        temporal_kernel_size: int,
+        spatial_kernel_size: int,
+        temporal_pool_size: int,
+        temporal_stride: int,
+        hidden_dim: int,
+        dropout: float = 0.5,
+    ):
+        super().__init__()
+
+        self.spatiotemporal_conv = nn.Sequential(
+            nn.Conv2d(1, hidden_dim, kernel_size=(1, temporal_kernel_size)),
+            nn.Conv2d(
+                hidden_dim,
+                hidden_dim,
+                kernel_size=(1, temporal_pool_size),
+                stride=(1, temporal_stride),
+                bias=False,
+            ),
+            nn.BatchNorm2d(hidden_dim),
+            nn.ELU(inplace=True),
+            nn.Conv2d(
+                hidden_dim, hidden_dim, kernel_size=(spatial_kernel_size, 1), bias=False
+            ),
+            nn.BatchNorm2d(hidden_dim),
+            nn.ELU(inplace=True),
+            nn.Dropout(dropout),
+        )
+
+        self.projection = nn.Conv2d(hidden_dim, embed_dim, kernel_size=(1, 1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = einops.rearrange(x, "b s t -> b 1 s t")
+        x = self.spatiotemporal_conv(x)
+        x = self.projection(x)
+        x = einops.rearrange(x, "b e (s) (t) -> b (s t) e")
+        return x
+
+    def jit_compile(self):
+        # Compile the model for faster inference
+        self.spatiotemporal_conv = torch.jit.script(self.spatiotemporal_conv)
+        self.projection = torch.jit.script(self.projection)
+        return self
+
+
+class EEGEncoder(nn.Module):
+    def __init__(
+        self,
+        config: EEGEncoderConfig = EEGEncoderConfig(),
+    ):
+        super(EEGEncoder, self).__init__()
+
+        self.patch_embedding = PatchEmbedding(
+            embed_dim=config.embed_dim,
+            temporal_kernel_size=config.temporal_kernel_size,
+            spatial_kernel_size=config.spatial_kernel_size,
+            temporal_pool_size=config.temporal_pool_size,
+            temporal_stride=config.temporal_stride,
+            hidden_dim=config.hidden_dim,
+            dropout=config.dropout,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.patch_embedding(x)
+        x = x.flatten(start_dim=1)
+
+        return x
+
+    def jit_compile(self):
+        self.patch_embedding = self.patch_embedding.jit_compile()
+        return self
+
+
+class LatentProjector(nn.Module):
+    def __init__(
+        self,
+        embed_dim: int = 1440,
+        proj_dim: int = 768,
+        dropout: float = 0.5,
+    ):
+        super().__init__()
+
+        self.l_proj = nn.Linear(embed_dim, proj_dim)
+        self.l_inner = nn.Sequential(
+            nn.GELU(),
+            nn.Linear(proj_dim, proj_dim),
+            nn.Dropout(dropout),
+        )
+        self.norm = nn.LayerNorm(proj_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_res = x = self.l_proj(x)
+        x = self.l_inner(x) + x_res
+        x = self.norm(x)
+
+        return x
+
+
+class NICEConfig(BaseConfig):
+    config_tag: str = "nice"
+    eeg_config: EEGEncoderConfig = EEGEncoderConfig()
+
+    model_name: Literal[
+        "synclr",
+        "aligned_synclr",
+    ] = "aligned_synclr"
+    project_dim: int = 256
+    img_latent_dim: int = 768
+
+    batch_size: int = 256
+    eval_batch_size: int = 200
+    encoder_lr: float = 1e-2
+    projector_lr: float = 5e-3
+    lr_scheduler: Literal["none", "cosine_anneal"] = "none"
+    betas: tuple[float, float] = (0.9, 0.999)
+    min_lr: float = 2e-4
+    warmup_epochs: int = 2
+    warmup_start_frac: float = 0.1
+    max_epochs: int = 400
+    num_workers: int = 8
+    temperature_init: float = math.log(1 / 0.07)
+    data_seed: int = 42
+
+
+class NICEModel(LightningModule):
+    def __init__(
+        self,
+        config: NICEConfig = NICEConfig(),
+        dataset_config: EEGDatasetConfig = EEGDatasetConfig(),
+        compile: bool = True,
+        init_weights: bool = True,
+    ):
+        super(NICEModel, self).__init__()
+
+        self.config = config
+        self.eeg_encoder = EEGEncoder(eeg_config)  # type: ignore #
+        self.eeg_projector = LatentProjector(
+            embed_dim=config.eeg_config.encoded_dim,
+            proj_dim=config.project_dim,
+        )
+        self.img_projector = LatentProjector(
+            embed_dim=config.img_latent_dim,
+            proj_dim=config.project_dim,
+        )
+        self.temperature = nn.Parameter(
+            torch.tensor(config.temperature_init, dtype=torch.float32)
+        )
+        self.loss = nn.CrossEntropyLoss()
+
+        if init_weights:
+            self._init_normal_weights()
+
+        self.train_dataset, self.val_dataset, self.test_dataset = prepare_datasets(
+            dataset_config,
+            model=config.model_name,
+            seed=config.data_seed,
+        )
+
+        if compile:
+            self.eeg_encoder = self.eeg_encoder.jit_compile()  # type: ignore
+            self.eeg_projector = torch.jit.script(self.eeg_projector)
+            self.img_projector = torch.jit.script(self.img_projector)
+
+        self.save_hyperparameters(
+            "eeg_encoder",
+            "eeg_projector",
+            "img_projector",
+            "temperature",
+            "loss",
+            "config",
+            "dataset_config",
+        )
+
+    def _init_normal_weights(self):
+        """Initialize weights for the model."""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, mean=0.0, std=0.02)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.normal_(m.weight, mean=0.0, std=0.02)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.normal_(m.weight, mean=1.0, std=0.02)
+                nn.init.zeros_(m.bias)
+
+    def configure_optimizers(self):
+        """Configure optimizers for the model."""
+        optimizer = torch.optim.Adam(
+            [
+                {"params": self.eeg_encoder.parameters(), "lr": self.config.encoder_lr},
+                {
+                    "params": it.chain(
+                        self.eeg_projector.parameters(),
+                        self.img_projector.parameters(),
+                        [self.temperature],
+                    ),
+                    "lr": self.config.projector_lr,
+                },
+            ],
+            betas=self.config.betas,
+        )
+
+        schedulers = []
+        milestones = []
+        if self.config.warmup_epochs > 0:
+            schedulers.append(
+                torch.optim.lr_scheduler.LinearLR(
+                    optimizer,
+                    start_factor=self.config.warmup_start_frac,
+                    total_iters=self.config.warmup_epochs,
+                )
+            )
+            milestones.append(self.config.warmup_epochs)
+
+        match self.config.lr_scheduler:
+            case "none":
+                pass
+            case "cosine_anneal":
+                schedulers.append(
+                    torch.optim.lr_scheduler.CosineAnnealingLR(
+                        optimizer,
+                        T_max=self.config.max_epochs,
+                        eta_min=self.config.min_lr,
+                    )
+                )
+            case _:
+                raise ValueError(f"Unknown lr_scheduler: {self.config.lr_scheduler}")
+
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=schedulers,
+            milestones=milestones,
+        )
+        return [optimizer], [scheduler]
+
+    def _setup_dataloader(self, dataset: EEGDataset, batch_size: int, shuffle: bool):
+        """Setup dataloader for the dataset."""
+        return torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=self.config.num_workers,
+            pin_memory=True,
+            persistent_workers=True,
+        )
+
+    def train_dataloader(self):
+        """Return the training dataloader."""
+        self._setup_dataloader(
+            self.train_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=True,
+        )
+
+    def val_dataloader(self):
+        """Return the validation dataloader."""
+        self._setup_dataloader(
+            self.val_dataset,
+            batch_size=self.config.eval_batch_size,
+            shuffle=False,
+        )
+
+    def test_dataloader(self):
+        """Return the test dataloader."""
+        self._setup_dataloader(
+            self.test_dataset,
+            batch_size=self.config.eval_batch_size,
+            shuffle=False,
+        )
+
+    def forward(self, img_latent: torch.Tensor, eeg_data: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the model."""
+        eeg_latent = self.eeg_encoder(eeg_data)
+        eeg_latent = self.eeg_projector(eeg_latent)
+        img_latent = self.img_projector(img_latent)
+
+        sim = compute_similarity(
+            eeg_latent=eeg_latent,
+            img_latent=img_latent,
+            temperature=self.temperature,
+        )
+
+        return sim
+
+    def get_loss(self, sim: torch.Tensor) -> torch.Tensor:
+        """Compute cross-entropy loss."""
+        loss = compute_cross_entropy_loss(sim)
+        return loss
+
+    def get_top_n_accuracy(self, sim: torch.Tensor, n: int = 1) -> float:
+        """Compute top-n accuracy."""
+        labels = torch.arange(sim.size(0), device=sim.device)
+        top_n = sim.topk(n, dim=-1).indices
+
+        correct = top_n == labels.unsqueeze(1)
+        return (correct.any(dim=-1).float().sum() / correct.size(0)).item()
+
+    def training_step(self, batch, batch_idx):
+        """Training step for the model."""
+        img_latent = batch["img_latent"]
+        eeg_data = batch["eeg_data"]
+
+        sim = self(img_latent, eeg_data)
+        loss = self.get_loss(sim)
+
+        self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=False)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        img_latent = batch["img_latent"]
+        eeg_data = batch["eeg_data"]
+
+        sim = self(img_latent, eeg_data)
+        loss = self.get_loss(sim)
+
+        top1_acc = self.get_top_n_accuracy(sim, n=1)
+        top3_acc = self.get_top_n_accuracy(sim, n=3)
+        top5_acc = self.get_top_n_accuracy(sim, n=5)
+
+        self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("val/top1_acc", top1_acc, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("val/top3_acc", top3_acc, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("val/top5_acc", top5_acc, prog_bar=False, on_step=False, on_epoch=True)
+
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        img_latent = batch["img_latent"]
+        eeg_data = batch["eeg_data"]
+
+        sim = self(img_latent, eeg_data)
+        loss = self.get_loss(sim)
+        top1_acc = self.get_top_n_accuracy(sim, n=1)
+        top3_acc = self.get_top_n_accuracy(sim, n=3)
+        top5_acc = self.get_top_n_accuracy(sim, n=5)
+
+        self.log("test/loss", loss, prog_bar=True, on_step=False, on_epoch=False)
+        self.log("test/top1_acc", top1_acc, prog_bar=True, on_step=False, on_epoch=True)
+        self.log(
+            "test/top3_acc", top3_acc, prog_bar=False, on_step=False, on_epoch=True
+        )
+        self.log(
+            "test/top5_acc", top5_acc, prog_bar=False, on_step=False, on_epoch=True
+        )
+        return loss
+
+
+@torch.jit.script
+def compute_cross_entropy_loss(sim: torch.Tensor) -> torch.Tensor:
+    """Compute cross-entropy loss."""
+    labels = torch.arange(sim.size(0), device=sim.device)
+    loss_e = nn.functional.cross_entropy(sim, labels)
+    loss_i = nn.functional.cross_entropy(sim.T, labels)
+    loss = (loss_e + loss_i) / 2
+    return loss
+
+
+@torch.jit.script
+def compute_similarity(
+    eeg_latent: torch.Tensor,
+    img_latent: torch.Tensor,
+    temperature: torch.Tensor,
+) -> torch.Tensor:
+    """Compute similarity between EEG and image latents."""
+    eeg_latent = nn.functional.normalize(eeg_latent, dim=-1)
+    img_latent = nn.functional.normalize(img_latent, dim=-1)
+    sim = (eeg_latent @ img_latent.T) * torch.exp(temperature)
+    return sim

@@ -5,3 +5,5 @@
 /models
 /logs
 /uv.lock
+*__pycache__*
+/outputs

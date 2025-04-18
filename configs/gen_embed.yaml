@@ -1,0 +1,9 @@
+
+data: data
+batch_size: 256
+models:
+  - synclr
+  - aligned_synclr
+splits:
+  - train
+  - test
