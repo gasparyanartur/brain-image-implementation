@@ -14,6 +14,7 @@ from configs import BaseConfig
 from data import EEGDatasetConfig, batch_load_images, get_image_paths
 from data import preprocess_image
 from model import load_image_encoder
+from utils import DEVICE
 
 
 class EmbeddingGenerationConfig(BaseConfig):
@@ -23,6 +24,7 @@ class EmbeddingGenerationConfig(BaseConfig):
     models: list[str] = ["synclr", "aligned_synclr"]
     splits: list[Literal["train", "test"]] = ["train", "test"]
     img_size: tuple[int, int] = (224, 224)
+    models_path: Path = Path("models")
 
 
 def generate_latents(
@@ -30,17 +32,19 @@ def generate_latents(
     img_paths: list[Path],
     batch_size: int = 32,
     img_size: tuple[int, int] = (224, 224),
-    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    device: torch.device = DEVICE,
+    dtype: torch.dtype = torch.float16,
 ) -> torch.Tensor:
     """Generate embeddings for a given split of images."""
     embed_model.eval()
-    embed_model.to(device)
+    embed_model.to(device=device, dtype=dtype)
+    embed_model.requires_grad_(False)
 
     latents = []
     with torch.no_grad():
         for i in tqdm.tqdm(range(0, len(img_paths), batch_size)):
             paths = img_paths[i : i + batch_size]
-            imgs = batch_load_images(paths).to(device)
+            imgs = batch_load_images(paths).to(device, dtype=dtype)
             imgs = preprocess_image(imgs, img_size=img_size)
 
             latent = embed_model(imgs).detach().cpu()
@@ -54,15 +58,13 @@ def run_generation(
     embed_dir: Path,
     model_name: str,
     split: Literal["train", "test"],
+    models_path: Path = Path("models"),
     batch_size: int = 512,
     img_size: tuple[int, int] = (224, 224),
 ) -> None:
     """Run the embedding generation process."""
 
-    image_encoder = load_image_encoder(model_name)
-    image_encoder.eval()
-    image_encoder.requires_grad_(False)
-
+    image_encoder = load_image_encoder(model_name, models_path=models_path)
     logging.info(f"Generating {split} embeddings for model {model_name}")
 
     img_paths = get_image_paths(
@@ -94,6 +96,7 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
                 batch_size=config.batch_size,
                 model_name=model_name,
                 split=split,
+                models_path=config.models_path,
                 img_size=config.img_size,
             )
 
