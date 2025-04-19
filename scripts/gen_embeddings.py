@@ -1,3 +1,4 @@
+import hydra
 import logging
 from pathlib import Path
 from typing import Literal
@@ -12,6 +13,7 @@ import tqdm
 from configs import BaseConfig
 from data import EEGDatasetConfig, batch_load_images, get_image_paths
 from data import preprocess_image
+from model import load_image_encoder
 
 
 class EmbeddingGenerationConfig(BaseConfig):
@@ -57,17 +59,9 @@ def run_generation(
 ) -> None:
     """Run the embedding generation process."""
 
-    match model_name:
-        case "synclr":
-            model = load_synclr_as_dino(16)
-        case "aligned_synclr":
-            dreamsim_model, _ = dreamsim(dreamsim_type="synclr_vitb16")
-            model = dreamsim_model.base_model.model.extractor_list[0].model  # type: ignore[union-attr]
-        case _:
-            raise ValueError(f"Unknown model: {model_name}")
-
-    model.eval()
-    model.requires_grad_(False)
+    image_encoder = load_image_encoder(model_name)
+    image_encoder.eval()
+    image_encoder.requires_grad_(False)
 
     logging.info(f"Generating {split} embeddings for model {model_name}")
 
@@ -77,7 +71,7 @@ def run_generation(
     )
 
     train_embeddings = generate_latents(
-        model, img_paths, batch_size=batch_size, img_size=img_size
+        image_encoder, img_paths, batch_size=batch_size, img_size=img_size
     )
 
     dst_dir = embed_dir / model_name / f"{split}_embeddings.pt"
@@ -106,8 +100,6 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
 
 @hydra.main(config_path="../configs", config_name="gen_embed", version_base=None)
 def main(cfg: DictConfig):
-
-    print(os.getcwd())
     config = EmbeddingGenerationConfig.from_hydra_config(cfg)
 
     logging.basicConfig(
@@ -120,7 +112,4 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
-    import os
-
-    print(os.getcwd())
     main()
