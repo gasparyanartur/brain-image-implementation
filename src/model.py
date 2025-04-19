@@ -1,4 +1,6 @@
 # Adapted from https://github.com/eeyhsong/NICE-EEG
+import logging
+from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel
 import torch
@@ -10,6 +12,35 @@ from lightning import LightningModule
 
 from configs import BaseConfig
 from data import EEGDataset, EEGDatasetConfig, prepare_datasets
+import dreamsim
+from dreamsim.feature_extraction.load_synclr_as_dino import load_synclr_as_dino
+from dreamsim.feature_extraction.vision_transformer import VisionTransformer
+
+
+def load_image_encoder(model_name: str, models_path: Path) -> VisionTransformer:
+    try:
+        logging.info(f"Loading {model_name} model...")
+        match model_name:
+            case "synclr":
+                model = load_synclr_as_dino(16, cache_dir=models_path)
+            case "aligned_synclr":
+                dreamsim_model, _ = dreamsim(
+                    dreamsim_type="synclr_vitb16", cache_dir=models_path
+                )
+                model = (
+                    dreamsim_model(dreamsim_type="synclr_vitb16", cache_dir=models_path)
+                    .base_model.model.extractor_list[0]
+                    .model
+                )
+            case _:
+                raise ValueError(f"Unknown model: {model_name}")
+    except Exception as e:
+        logging.error(f"Error loading {model_name} model: {e}")
+        raise e
+    else:
+        logging.info(f"Model {model_name} loaded successfully.")
+
+    return model
 
 
 class EEGEncoderConfig(BaseConfig):
