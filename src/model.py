@@ -380,12 +380,13 @@ class NICEModel(LightningModule):
         img_latent = batch["img_latent"]
         eeg_data = batch["eeg_data"]
 
-        sim = self(img_latent, eeg_data)
-        loss = self.get_loss(sim)
+        with torch.no_grad():
+            sim = self(img_latent, eeg_data)
+            loss = self.get_loss(sim)
 
-        top1_acc = self.get_top_n_accuracy(sim, n=1)
-        top3_acc = self.get_top_n_accuracy(sim, n=3)
-        top5_acc = self.get_top_n_accuracy(sim, n=5)
+            top1_acc = self.get_top_n_accuracy(sim, n=1)
+            top3_acc = self.get_top_n_accuracy(sim, n=3)
+            top5_acc = self.get_top_n_accuracy(sim, n=5)
 
         self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/top1_acc", top1_acc, prog_bar=False, on_step=False, on_epoch=True)
@@ -398,11 +399,12 @@ class NICEModel(LightningModule):
         img_latent = batch["img_latent"]
         eeg_data = batch["eeg_data"]
 
-        sim = self(img_latent, eeg_data)
-        loss = self.get_loss(sim)
-        top1_acc = self.get_top_n_accuracy(sim, n=1)
-        top3_acc = self.get_top_n_accuracy(sim, n=3)
-        top5_acc = self.get_top_n_accuracy(sim, n=5)
+        with torch.no_grad():
+            sim = self(img_latent, eeg_data)
+            loss = self.get_loss(sim)
+            top1_acc = self.get_top_n_accuracy(sim, n=1)
+            top3_acc = self.get_top_n_accuracy(sim, n=3)
+            top5_acc = self.get_top_n_accuracy(sim, n=5)
 
         self.log("test/loss", loss, prog_bar=True, on_step=False, on_epoch=False)
         self.log("test/top1_acc", top1_acc, prog_bar=True, on_step=False, on_epoch=True)

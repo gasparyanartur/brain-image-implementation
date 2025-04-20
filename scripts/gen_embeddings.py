@@ -14,7 +14,7 @@ from configs import BaseConfig
 from data import EEGDatasetConfig, batch_load_images, get_image_paths
 from data import preprocess_image
 from model import load_image_encoder
-from utils import DEVICE
+from utils import DEVICE, DTYPE
 
 
 class EmbeddingGenerationConfig(BaseConfig):
@@ -33,7 +33,7 @@ def generate_latents(
     batch_size: int = 32,
     img_size: tuple[int, int] = (224, 224),
     device: torch.device = DEVICE,
-    dtype: torch.dtype = torch.float16,
+    dtype: torch.dtype = DTYPE,
 ) -> torch.Tensor:
     """Generate embeddings for a given split of images."""
     embed_model.eval()
