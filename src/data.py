@@ -54,13 +54,11 @@ class EEGDataset(Dataset):
             self.config.dataset_path / self.config.images_dir,
             split=split,
         )
-        self.img_latents = torch.from_numpy(
-            np.load(
-                self.config.dataset_path
-                / self.config.latents_dir
-                / model_name
-                / f"{img_embed_name}.npy"
-            )
+        self.img_latents = torch.load(
+            self.config.dataset_path
+            / self.config.latents_dir
+            / model_name
+            / f"{img_embed_name}.pt"
         )
 
         self.eeg_data_paths = [

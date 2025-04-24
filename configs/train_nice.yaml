@@ -1,1 +1,5 @@
 dtype: float32
+nice_config:
+  model_name: synclr
+  encoder_lr: 0.001
+  projector_lr: 0.002

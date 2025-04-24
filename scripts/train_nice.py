@@ -24,13 +24,13 @@ class TrainNICEConfig(TrainConfig):
 
     nice_config: NICEConfig = NICEConfig()
     dataset_config: EEGDatasetConfig = EEGDatasetConfig()
-    img_encoder_name: Literal["synclr", "aligned_synclr"] = "synclr"
     save_top_k: int = 1
     compile_model: bool = True
     log_path: Path = Path("logs")
     checkpoint_path: Path | None = None
-    dtype: str = "float16"
+    dtype: str = "float32"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    precision: Literal[16, 32, 64] = 16
 
 
 def train_nice(
@@ -59,16 +59,17 @@ def train_nice(
 
     logger = TensorBoardLogger(
         save_dir=config.log_path,
-        name=config.img_encoder_name,
+        name=config.nice_config.model_name,
         default_hp_metric=False,
     )
 
     trainer = Trainer(
-        max_epochs=config.max_epochs,
+        max_epochs=config.nice_config.max_epochs,
         callbacks=[checkpoint_callback, lr_monitor],
         logger=logger,
         enable_progress_bar=True,
         accelerator=config.device,
+        precision=config.precision,
     )
 
     trainer.fit(model, ckpt_path=config.checkpoint_path)

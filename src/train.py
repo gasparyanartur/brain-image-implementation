@@ -7,7 +7,6 @@ from configs import BaseConfig
 class TrainConfig(BaseConfig):
     config_tag: str = "train"
 
-    max_epochs: int = 100
     batch_size: int = 64
     num_workers: int = 4
     learning_rate: float = 1e-3
