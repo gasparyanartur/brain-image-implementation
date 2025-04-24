@@ -2,10 +2,7 @@ import hydra
 import logging
 from pathlib import Path
 from typing import Literal
-from dreamsim.model import dreamsim
-from dreamsim.feature_extraction.load_synclr_as_dino import load_synclr_as_dino
 import hydra
-import numpy as np
 from omegaconf import DictConfig
 import torch
 import tqdm
@@ -14,17 +11,19 @@ from configs import BaseConfig
 from data import EEGDatasetConfig, batch_load_images, get_image_paths
 from data import preprocess_image
 from model import load_image_encoder
-from utils import DEVICE, DTYPE
+from utils import DEVICE, DTYPE, get_dtype
 
 
 class EmbeddingGenerationConfig(BaseConfig):
     config_tag: str = "gen_embed"
-    data_config: EEGDatasetConfig = EEGDatasetConfig()
+    data_config: EEGDatasetConfig = EEGDatasetConfig(config_tag="data")
     batch_size: int = 32
     models: list[str] = ["synclr", "aligned_synclr"]
     splits: list[Literal["train", "test"]] = ["train", "test"]
     img_size: tuple[int, int] = (224, 224)
     models_path: Path = Path("models")
+    dtype: str = "float16"
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def generate_latents(
@@ -61,6 +60,8 @@ def run_generation(
     models_path: Path = Path("models"),
     batch_size: int = 512,
     img_size: tuple[int, int] = (224, 224),
+    device: torch.device = DEVICE,
+    dtype: torch.dtype = DTYPE,
 ) -> None:
     """Run the embedding generation process."""
 
@@ -73,7 +74,12 @@ def run_generation(
     )
 
     train_embeddings = generate_latents(
-        image_encoder, img_paths, batch_size=batch_size, img_size=img_size
+        image_encoder,
+        img_paths,
+        batch_size=batch_size,
+        img_size=img_size,
+        device=device,
+        dtype=dtype,
     )
 
     dst_dir = embed_dir / model_name / f"{split}_embeddings.pt"
@@ -98,6 +104,8 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
                 split=split,
                 models_path=config.models_path,
                 img_size=config.img_size,
+                device=torch.device(config.device),
+                dtype=get_dtype(config.dtype),
             )
 
 

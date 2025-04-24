@@ -16,6 +16,8 @@ from lightning.pytorch.loggers import TensorBoardLogger
 
 from pathlib import Path
 
+from utils import get_dtype
+
 
 class TrainNICEConfig(TrainConfig):
     config_tag: str = "train_nice"
@@ -37,10 +39,10 @@ def train_nice(
     torch.set_float32_matmul_precision("medium")
 
     device = torch.device(config.device)
-    dtype = torch.dtype(config.dtype)
+    dtype = get_dtype(config.dtype)
 
     model = NICEModel(
-        config=config,
+        config=config.nice_config,
         dataset_config=config.dataset_config,
         compile=config.compile_model,
     )
@@ -66,10 +68,10 @@ def train_nice(
         callbacks=[checkpoint_callback, lr_monitor],
         logger=logger,
         enable_progress_bar=True,
-        accelerator=device,
+        accelerator=config.device,
     )
 
-    trainer.fit(model, checkpoint_path=config.checkpoint_path)
+    trainer.fit(model, ckpt_path=config.checkpoint_path)
     return model
 
 
@@ -80,7 +82,7 @@ def train_nice(
 )
 def main(cfg: DictConfig):
     config = TrainNICEConfig.from_hydra_config(cfg)
-    logging.BasicConfig(
+    logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )

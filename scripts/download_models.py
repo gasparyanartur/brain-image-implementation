@@ -17,7 +17,7 @@ class DownloadModelsConfig(BaseConfig):
 
 @hydra.main(config_path="../configs", config_name="download_models", version_base=None)
 def main(cfg: DictConfig):
-    config = DownloadModelsConfig(**cfg)
+    config = DownloadModelsConfig.from_hydra_config(cfg)
     logging.basicConfig(level=logging.INFO)
 
     dreamsim_types = []
@@ -46,7 +46,7 @@ def main(cfg: DictConfig):
     logging.info(f"Validating models: {dreamsim_types}")
     for model in config.models:
         try:
-            load_image_encoder(model_name=model, model_path=config.model_path)
+            load_image_encoder(model_name=model, models_path=config.model_path)
         except Exception as e:
             return
 
