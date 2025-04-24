@@ -6,3 +6,4 @@ models:
 splits:
   - train
   - test
+dtype: float32

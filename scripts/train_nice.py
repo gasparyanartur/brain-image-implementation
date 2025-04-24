@@ -89,3 +89,7 @@ def main(cfg: DictConfig):
     logging.info(f"Training NICE model with config: {config}")
 
     train_nice(config)
+
+
+if __name__ == "__main__":
+    main()

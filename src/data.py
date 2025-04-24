@@ -31,6 +31,7 @@ class EEGDataset(Dataset):
         config: EEGDatasetConfig,
         split: Literal["train", "test"],
         model_name: str = "synclr",
+        dtype: torch.dtype = torch.float16,
     ):
         self.config = config
         self.split = split
@@ -72,6 +73,7 @@ class EEGDataset(Dataset):
         self.eeg_data, self.times, self.ch_names = load_all_eeg_data(
             self.eeg_data_paths
         )
+        self.eeg_data = self.eeg_data.to(dtype=dtype)
 
     def __len__(self):
         return len(self.eeg_data)
@@ -97,9 +99,10 @@ def prepare_datasets(
     model: str = "synclr",
     seed: int = 42,
     train_val_split: float = 0.8,
+    dtype: torch.dtype = torch.float16,
 ) -> tuple[EEGDataset, EEGDataset, EEGDataset]:
-    train_dataset = EEGDataset(config, split="train", model_name=model)
-    test_dataset = EEGDataset(config, split="test", model_name=model)
+    train_dataset = EEGDataset(config, split="train", model_name=model, dtype=dtype)
+    test_dataset = EEGDataset(config, split="test", model_name=model, dtype=dtype)
 
     split_rng = manual_seed(seed)
     train_dataset, val_dataset = random_split(
@@ -208,8 +211,10 @@ def load_all_eeg_data(
         eeg_data, times, ch_names = load_eeg_data(eeg_path)
         eeg_data = preprocess_eeg_data(eeg_data)
 
+        all_eeg_data.append(eeg_data)
+
         if all_times is None:
-            all_times = torch.tensor(times)
+            all_times = times
 
         if not all_ch_names:
             all_ch_names = ch_names

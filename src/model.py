@@ -198,11 +198,12 @@ class NICEModel(LightningModule):
         dataset_config: EEGDatasetConfig = EEGDatasetConfig(),
         compile: bool = True,
         init_weights: bool = True,
+        train_val_split: float = 0.8,
     ):
         super(NICEModel, self).__init__()
 
         self.config = config
-        self.eeg_encoder = EEGEncoder(eeg_config)  # type: ignore #
+        self.eeg_encoder = EEGEncoder(config.eeg_config)
         self.eeg_projector = LatentProjector(
             embed_dim=config.eeg_config.encoded_dim,
             proj_dim=config.project_dim,
@@ -223,19 +224,18 @@ class NICEModel(LightningModule):
             dataset_config,
             model=config.model_name,
             seed=config.data_seed,
+            train_val_split=train_val_split,
         )
 
         if compile:
             self.eeg_encoder = self.eeg_encoder.jit_compile()  # type: ignore
             self.eeg_projector = torch.jit.script(self.eeg_projector)
             self.img_projector = torch.jit.script(self.img_projector)
+            # self.eeg_encoder = torch.compile(self.eeg_encoder)
+            # self.eeg_projector = torch.compile(self.eeg_projector)
+            # self.img_projector = torch.compile(self.img_projector)
 
         self.save_hyperparameters(
-            "eeg_encoder",
-            "eeg_projector",
-            "img_projector",
-            "temperature",
-            "loss",
             "config",
             "dataset_config",
         )
@@ -296,6 +296,9 @@ class NICEModel(LightningModule):
             case _:
                 raise ValueError(f"Unknown lr_scheduler: {self.config.lr_scheduler}")
 
+        if len(schedulers) < 2 and len(milestones) > 0:
+            milestones.pop()
+
         scheduler = torch.optim.lr_scheduler.SequentialLR(
             optimizer,
             schedulers=schedulers,
@@ -314,25 +317,25 @@ class NICEModel(LightningModule):
             persistent_workers=True,
         )
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> torch.utils.data.DataLoader:
         """Return the training dataloader."""
-        self._setup_dataloader(
+        return self._setup_dataloader(
             self.train_dataset,
             batch_size=self.config.batch_size,
             shuffle=True,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> torch.utils.data.DataLoader:
         """Return the validation dataloader."""
-        self._setup_dataloader(
+        return self._setup_dataloader(
             self.val_dataset,
             batch_size=self.config.eval_batch_size,
             shuffle=False,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> torch.utils.data.DataLoader:
         """Return the test dataloader."""
-        self._setup_dataloader(
+        return self._setup_dataloader(
             self.test_dataset,
             batch_size=self.config.eval_batch_size,
             shuffle=False,
@@ -367,8 +370,8 @@ class NICEModel(LightningModule):
 
     def training_step(self, batch, batch_idx):
         """Training step for the model."""
-        img_latent = batch["img_latent"]
-        eeg_data = batch["eeg_data"]
+        img_latent = batch["img_latent"].to(self.device, dtype=self.dtype)
+        eeg_data = batch["eeg_data"].to(self.device, dtype=self.dtype)
 
         sim = self(img_latent, eeg_data)
         loss = self.get_loss(sim)
@@ -377,8 +380,8 @@ class NICEModel(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        img_latent = batch["img_latent"]
-        eeg_data = batch["eeg_data"]
+        img_latent = batch["img_latent"].to(self.device, dtype=self.dtype)
+        eeg_data = batch["eeg_data"].to(self.device, dtype=self.dtype)
 
         with torch.no_grad():
             sim = self(img_latent, eeg_data)
@@ -396,8 +399,8 @@ class NICEModel(LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        img_latent = batch["img_latent"]
-        eeg_data = batch["eeg_data"]
+        img_latent = batch["img_latent"].to(self.device, dtype=self.dtype)
+        eeg_data = batch["eeg_data"].to(self.device, dtype=self.dtype)
 
         with torch.no_grad():
             sim = self(img_latent, eeg_data)
