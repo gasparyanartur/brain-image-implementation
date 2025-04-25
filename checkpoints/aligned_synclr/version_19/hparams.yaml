@@ -1,0 +1,67 @@
+config: !!python/object:model.NICEConfig
+  __dict__:
+    batch_size: 256
+    betas: !!python/tuple
+    - 0.9
+    - 0.999
+    config_tag: nice
+    data_seed: 42
+    eeg_config: !!python/object:model.EEGEncoderConfig
+      __dict__:
+        config_tag: eeg_encoder
+        dropout: 0.5
+        embed_dim: 40
+        encoded_dim: 1440
+        hidden_dim: 40
+        proj_dim: 768
+        spatial_kernel_size: 17
+        temporal_kernel_size: 25
+        temporal_pool_size: 41
+        temporal_stride: 1
+      __pydantic_extra__: null
+      __pydantic_fields_set__: !!set {}
+      __pydantic_private__: null
+    encoder_lr: 0.001
+    eval_batch_size: 200
+    img_latent_dim: 768
+    lr_scheduler: none
+    max_epochs: 400
+    min_lr: 0.0002
+    model_name: aligned_synclr
+    num_workers: 8
+    project_dim: 256
+    projector_lr: 0.002
+    temperature_init: 2.659260036932778
+    warmup_epochs: 2
+    warmup_start_frac: 0.1
+  __pydantic_extra__: null
+  __pydantic_fields_set__: !!set
+    encoder_lr: null
+    model_name: null
+    projector_lr: null
+  __pydantic_private__: null
+dataset_config: !!python/object:data.EEGDatasetConfig
+  __dict__:
+    config_tag: data
+    dataset_path: !!python/object/apply:pathlib.PosixPath
+    - data
+    - things-eeg2
+    eeg_dir: eeg
+    images_dir: imgs
+    latents_dir: img-latents
+    subs:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    - 10
+    test_imgs_per_concept: 1
+    train_imgs_per_concept: 10
+  __pydantic_extra__: null
+  __pydantic_fields_set__: !!set {}
+  __pydantic_private__: null

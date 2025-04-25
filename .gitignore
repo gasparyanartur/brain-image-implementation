@@ -7,3 +7,4 @@
 /uv.lock
 *__pycache__*
 /outputs
+test_outputs/

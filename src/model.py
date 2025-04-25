@@ -396,7 +396,12 @@ class NICEModel(LightningModule):
         self.log("val/top3_acc", top3_acc, prog_bar=False, on_step=False, on_epoch=True)
         self.log("val/top5_acc", top5_acc, prog_bar=False, on_step=False, on_epoch=True)
 
-        return loss
+        return {
+            "loss": loss,
+            "top1_acc": top1_acc,
+            "top3_acc": top3_acc,
+            "top5_acc": top5_acc,
+        }
 
     def test_step(self, batch, batch_idx):
         img_latent = batch["img_latent"].to(self.device, dtype=self.dtype)
@@ -409,7 +414,7 @@ class NICEModel(LightningModule):
             top3_acc = self.get_top_n_accuracy(sim, n=3)
             top5_acc = self.get_top_n_accuracy(sim, n=5)
 
-        self.log("test/loss", loss, prog_bar=True, on_step=False, on_epoch=False)
+        self.log("test/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("test/top1_acc", top1_acc, prog_bar=True, on_step=False, on_epoch=True)
         self.log(
             "test/top3_acc", top3_acc, prog_bar=False, on_step=False, on_epoch=True
@@ -417,7 +422,12 @@ class NICEModel(LightningModule):
         self.log(
             "test/top5_acc", top5_acc, prog_bar=False, on_step=False, on_epoch=True
         )
-        return loss
+        return {
+            "loss": loss,
+            "top1_acc": top1_acc,
+            "top3_acc": top3_acc,
+            "top5_acc": top5_acc,
+        }
 
 
 @torch.jit.script
