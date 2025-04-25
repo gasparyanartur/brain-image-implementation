@@ -3,10 +3,9 @@ from typing import Literal
 
 import hydra
 from omegaconf import DictConfig
+from configs import BaseConfig
 from data import EEGDatasetConfig
 from model import NICEConfig, NICEModel
-from train import TrainConfig
-
 
 import torch
 from lightning.pytorch import Trainer
@@ -19,7 +18,7 @@ from pathlib import Path
 from utils import get_dtype
 
 
-class TrainNICEConfig(TrainConfig):
+class TrainNICEConfig(BaseConfig):
     config_tag: str = "train_nice"
 
     nice_config: NICEConfig = NICEConfig()
@@ -30,13 +29,19 @@ class TrainNICEConfig(TrainConfig):
     checkpoint_path: Path | None = None
     dtype: str = "float32"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    precision: Literal[16, 32, 64] = 16
+    precision: Literal[16, 32, 64] = 32
+    train_val_split: float = 0.9
+
+    num_workers: int = 4
+    compile_model: bool = True
+    log_path: Path = Path("logs")
+    checkpoint_path: Path | None = None
 
 
 def train_nice(
     config: TrainNICEConfig,
 ):
-    torch.set_float32_matmul_precision("medium")
+    torch.set_float32_matmul_precision("high")
 
     device = torch.device(config.device)
     dtype = get_dtype(config.dtype)
@@ -45,6 +50,7 @@ def train_nice(
         config=config.nice_config,
         dataset_config=config.dataset_config,
         compile=config.compile_model,
+        train_val_split=config.train_val_split,
     )
     model.to(device=device, dtype=dtype)
 

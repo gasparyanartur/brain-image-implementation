@@ -29,6 +29,19 @@ In my implementation, I import the aligned (pretrained) Dreamsim model along wit
 
 ### EEG Encoder
 
+
+### Results
+
+I trained both models with 256
+
+|metric|unaligned_synclr|aligned_synclr|
+|---|---|---|
+|nice_loss|1.861|1.164
+|top1_acc|0.477|0.650
+|top3_acc|0.705|0.868
+|top5_acc|0.799|0.923
+
+
 ## Reflections
 
 - 
