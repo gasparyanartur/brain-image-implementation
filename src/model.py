@@ -178,14 +178,16 @@ class NICEConfig(BaseConfig):
 
     batch_size: int = 256
     eval_batch_size: int = 200
-    encoder_lr: float = 1e-2
-    projector_lr: float = 5e-3
-    lr_scheduler: Literal["none", "cosine_anneal"] = "none"
+    encoder_lr: float = 8e-3
+    projector_lr: float = 8e-3
+    lr_scheduler: Literal["none", "cosine_anneal"] = "cosine_anneal"
     betas: tuple[float, float] = (0.9, 0.999)
-    min_lr: float = 2e-4
-    warmup_epochs: int = 2
+    encoder_min_lr: float = 1e-4
+    projector_min_lr: float = 1e-4
+    projector_warmup_epochs: int = 2
+    encoder_warmup_epochs: int = 4
     warmup_start_frac: float = 0.1
-    max_epochs: int = 400
+    max_epochs: int = 100
     num_workers: int = 8
     temperature_init: float = math.log(1 / 0.07)
     data_seed: int = 42
@@ -201,6 +203,7 @@ class NICEModel(LightningModule):
         train_val_split: float = 0.8,
     ):
         super(NICEModel, self).__init__()
+        self.automatic_optimization = False
 
         self.config = config
         self.eeg_encoder = EEGEncoder(config.eeg_config)
@@ -255,56 +258,110 @@ class NICEModel(LightningModule):
 
     def configure_optimizers(self):
         """Configure optimizers for the model."""
-        optimizer = torch.optim.Adam(
+
+        encoder_optimizer = torch.optim.Adam(
+            self.eeg_encoder.parameters(),
+            lr=self.config.encoder_lr,
+            betas=self.config.betas,
+        )
+        projector_optimizer = torch.optim.Adam(
             [
-                {"params": self.eeg_encoder.parameters(), "lr": self.config.encoder_lr},
                 {
-                    "params": it.chain(
-                        self.eeg_projector.parameters(),
-                        self.img_projector.parameters(),
-                        [self.temperature],
-                    ),
+                    "params": self.eeg_projector.parameters(),
+                    "lr": self.config.projector_lr,
+                },
+                {
+                    "params": self.img_projector.parameters(),
+                    "lr": self.config.projector_lr,
+                },
+                {
+                    "params": [self.temperature],
                     "lr": self.config.projector_lr,
                 },
             ],
             betas=self.config.betas,
         )
 
-        schedulers = []
-        milestones = []
-        if self.config.warmup_epochs > 0:
-            schedulers.append(
+        encoder_schedulers = []
+        projector_schedulers = []
+        projector_milestones = []
+        encoder_milestones = []
+        if self.config.encoder_warmup_epochs > 0:
+            encoder_schedulers.append(
                 torch.optim.lr_scheduler.LinearLR(
-                    optimizer,
+                    encoder_optimizer,
                     start_factor=self.config.warmup_start_frac,
-                    total_iters=self.config.warmup_epochs,
+                    total_iters=self.config.encoder_warmup_epochs,
                 )
             )
-            milestones.append(self.config.warmup_epochs)
+            encoder_milestones.append(self.config.encoder_warmup_epochs)
+
+        if self.config.projector_warmup_epochs > 0:
+            projector_schedulers.append(
+                torch.optim.lr_scheduler.LinearLR(
+                    projector_optimizer,
+                    start_factor=self.config.warmup_start_frac,
+                    total_iters=self.config.projector_warmup_epochs,
+                )
+            )
+            projector_milestones.append(self.config.projector_warmup_epochs)
 
         match self.config.lr_scheduler:
             case "none":
-                pass
+                encoder_schedulers.append(
+                    torch.optim.lr_scheduler.ConstantLR(
+                        encoder_optimizer,
+                        factor=1.0,
+                    )
+                )
+                projector_schedulers.append(
+                    torch.optim.lr_scheduler.ConstantLR(
+                        projector_optimizer,
+                        factor=1.0,
+                    )
+                )
             case "cosine_anneal":
-                schedulers.append(
+                encoder_schedulers.append(
                     torch.optim.lr_scheduler.CosineAnnealingLR(
-                        optimizer,
+                        encoder_optimizer,
                         T_max=self.config.max_epochs,
-                        eta_min=self.config.min_lr,
+                        eta_min=self.config.encoder_min_lr,
+                    )
+                )
+                projector_schedulers.append(
+                    torch.optim.lr_scheduler.CosineAnnealingLR(
+                        projector_optimizer,
+                        T_max=self.config.max_epochs,
+                        eta_min=self.config.projector_min_lr,
                     )
                 )
             case _:
                 raise ValueError(f"Unknown lr_scheduler: {self.config.lr_scheduler}")
 
-        if len(schedulers) < 2 and len(milestones) > 0:
-            milestones.pop()
-
-        scheduler = torch.optim.lr_scheduler.SequentialLR(
-            optimizer,
-            schedulers=schedulers,
-            milestones=milestones,
+        encoder_scheduler = torch.optim.lr_scheduler.SequentialLR(
+            encoder_optimizer,
+            schedulers=encoder_schedulers,
+            milestones=encoder_milestones,
         )
-        return [optimizer], [scheduler]
+        projector_scheduler = torch.optim.lr_scheduler.SequentialLR(
+            projector_optimizer,
+            schedulers=projector_schedulers,
+            milestones=projector_milestones,
+        )
+        return [
+            {
+                "optimizer": encoder_optimizer,
+                "lr_scheduler": encoder_scheduler,
+                "interval": "step",
+                "frequency": 1,
+            },
+            {
+                "optimizer": projector_optimizer,
+                "lr_scheduler": projector_scheduler,
+                "interval": "step",
+                "frequency": 1,
+            },
+        ]
 
     def _setup_dataloader(self, dataset: EEGDataset, batch_size: int, shuffle: bool):
         """Setup dataloader for the dataset."""
@@ -369,6 +426,14 @@ class NICEModel(LightningModule):
         return (correct.any(dim=-1).float().sum() / correct.size(0)).item()
 
     def training_step(self, batch, batch_idx):
+        optimizers = self.optimizers()
+        if not isinstance(optimizers, list):
+            optimizers = [optimizers]
+
+        schedulers = self.lr_schedulers()
+        if not isinstance(schedulers, list):
+            schedulers = [schedulers]
+
         """Training step for the model."""
         img_latent = batch["img_latent"].to(self.device, dtype=self.dtype)
         eeg_data = batch["eeg_data"].to(self.device, dtype=self.dtype)
@@ -377,6 +442,20 @@ class NICEModel(LightningModule):
         loss = self.get_loss(sim)
 
         self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=False)
+
+        for opt in optimizers:
+            opt.zero_grad()
+
+        self.manual_backward(loss)
+
+        for opt in optimizers:
+            opt.step()
+
+        # Step the schedulers on epoch end
+        if batch_idx == len(self.train_dataloader()) - 1:
+            for scheduler in schedulers:
+                scheduler.step()
+
         return loss
 
     def validation_step(self, batch, batch_idx):
