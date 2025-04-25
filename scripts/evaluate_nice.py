@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 from typing import Any, Literal
@@ -10,7 +11,7 @@ from configs import BaseConfig
 from model import NICEModel
 from data import EEGDatasetConfig
 
-from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 
 
 def move_all_to_cpu(items: dict[str, Any]) -> dict[str, Any]:
@@ -60,29 +61,24 @@ def evaluate_nice(
         default_hp_metric=False,
     )
 
+    csv_logger = CSVLogger(
+        save_dir=config.output_path,
+        name=model.config.model_name,
+    )
+
     trainer = Trainer(
         accelerator=config.device,
         precision=config.precision,
         enable_progress_bar=True,
-        logger=logger,
+        logger=[logger, csv_logger],
     )
 
     logging.info("Evaluating model...")
-    outputs = trainer.test(
+    trainer.test(
         model=model,
         dataloaders=test_loader,
     )
     logging.info("Evaluation complete.")
-
-    logging.info("Outputs:")
-    for output in outputs:
-        output = move_all_to_cpu(output)  # type: ignore
-        logging.info(output)
-
-    # Save the outputs to the output path
-    output_path = config.output_path / "outputs.pt"
-    torch.save(outputs, output_path)
-    logging.info(f"Outputs saved to {output_path}")
 
 
 @hydra.main(
