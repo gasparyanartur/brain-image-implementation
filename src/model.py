@@ -1,4 +1,5 @@
-# Adapted from https://github.com/eeyhsong/NICE-EEG
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 from typing import Literal
@@ -39,7 +40,18 @@ def load_image_encoder(model_name: str, models_path: Path) -> VisionTransformer:
     return model
 
 
-class EEGEncoderConfig(BaseConfig):
+class ModelConfig(BaseConfig):
+    def create_model(self) -> Model:
+        raise NotImplementedError
+
+
+class Model(LightningModule):
+    def __init__(self, config: ModelConfig):
+        super().__init__()
+        self.config = config
+
+
+class EEGEncoderConfig(ModelConfig):
     embed_dim: int = 40
     encoded_dim: int = 1440  # Result of embed dim * final spatial * final temporal
     proj_dim: int = 768
@@ -50,6 +62,9 @@ class EEGEncoderConfig(BaseConfig):
     temporal_stride: int = 1
     hidden_dim: int = 40
     dropout: float = 0.5
+
+    def create_model(self) -> EEGEncoder:
+        return EEGEncoder(self)
 
 
 class DebugLayer(nn.Module):
@@ -73,6 +88,7 @@ class PatchEmbedding(nn.Module):
         hidden_dim: int,
         dropout: float = 0.5,
     ):
+        # Adapted from https://github.com/eeyhsong/NICE-EEG
         super().__init__()
 
         self.spatiotemporal_conv = nn.Sequential(
@@ -110,12 +126,13 @@ class PatchEmbedding(nn.Module):
         return self
 
 
-class EEGEncoder(nn.Module):
+class EEGEncoder(Model):
     def __init__(
         self,
         config: EEGEncoderConfig = EEGEncoderConfig(),
     ):
-        super(EEGEncoder, self).__init__()
+        # Adapted from https://github.com/eeyhsong/NICE-EEG
+        super(EEGEncoder, self).__init__(config)
 
         self.patch_embedding = PatchEmbedding(
             embed_dim=config.embed_dim,
@@ -163,16 +180,14 @@ class LatentProjector(nn.Module):
         return x
 
 
-class NICEConfig(BaseConfig):
+class NICEConfig(ModelConfig):
     eeg_config: EEGEncoderConfig = EEGEncoderConfig()
-
     model_name: Literal[
         "synclr",
         "aligned_synclr",
-    ] = "aligned_synclr"
+    ]
     project_dim: int = 256
     img_latent_dim: int = 768
-
     batch_size: int = 256
     eval_batch_size: int = 200
     encoder_lr: float = 8e-3
@@ -190,17 +205,16 @@ class NICEConfig(BaseConfig):
     data_seed: int = 42
 
 
-class NICEModel(LightningModule):
+class NICEModel(Model):
     def __init__(
         self,
-        config: NICEConfig = NICEConfig(),
+        config: NICEConfig,
         dataset_config: EEGDatasetConfig = EEGDatasetConfig(),
         compile: bool = True,
         init_weights: bool = True,
     ):
-        super(NICEModel, self).__init__()
+        super(NICEModel, self).__init__(config)
         self.automatic_optimization = False
-
         self.config = config
         self.eeg_encoder = EEGEncoder(config.eeg_config)
         self.eeg_projector = LatentProjector(
@@ -389,6 +403,8 @@ class NICEModel(LightningModule):
     def get_top_n_accuracy(self, sim: torch.Tensor, n: int = 1) -> float:
         """Compute top-n accuracy."""
         labels = torch.arange(sim.size(0), device=sim.device)
+        # Ensure n doesn't exceed batch size
+        n = min(n, sim.size(0))
         top_n = sim.topk(n, dim=-1).indices
 
         correct = top_n == labels.unsqueeze(1)

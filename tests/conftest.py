@@ -6,6 +6,9 @@ import numpy as np
 from pathlib import Path
 import tempfile
 import shutil
+from src.model import NICEConfig
+from src.data import EEGDatasetConfig
+from src.trainer import NICETrainerConfig
 
 
 @pytest.fixture
@@ -37,8 +40,17 @@ def temp_data_dir():
         "ch_names": ["Pz", "P3", "P7", "O1", "Oz", "O2"],
         "times": np.linspace(-0.2, 0.8, 100),
     }
-    np.save(data_dir / "eeg" / "sub-01" / "preprocessed_eeg_training.npy", eeg_data)
-    np.save(data_dir / "eeg" / "sub-01" / "preprocessed_eeg_test.npy", eeg_data)
+    eeg_obj = np.array([eeg_data], dtype=object)
+    np.save(
+        data_dir / "eeg" / "sub-01" / "preprocessed_eeg_training.npy",
+        eeg_obj,
+        allow_pickle=True,
+    )
+    np.save(
+        data_dir / "eeg" / "sub-01" / "preprocessed_eeg_test.npy",
+        eeg_obj,
+        allow_pickle=True,
+    )
 
     # Create mock image latents
     train_embeddings = torch.randn(10, 768)
@@ -88,3 +100,84 @@ def sample_image_tensor():
 def device():
     """Get the device to use for testing."""
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def create_mock_eeg_image_data_dir(
+    tmp_path, n_concepts=2, n_reps=4, n_channels=17, n_timesteps=100, latent_dim=768
+):
+    data_dir = tmp_path / "things-eeg2"
+    for split in ["training_images", "test_images"]:
+        for concept in [f"concept{i + 1}" for i in range(n_concepts)]:
+            (data_dir / "imgs" / split / concept).mkdir(parents=True, exist_ok=True)
+            (data_dir / "imgs" / split / concept / "img1.jpg").touch()
+    (data_dir / "img-latents" / "synclr").mkdir(parents=True, exist_ok=True)
+    (data_dir / "eeg" / "sub-01").mkdir(parents=True, exist_ok=True)
+    eeg_data = {
+        "preprocessed_eeg_data": torch.randn(
+            n_concepts, n_reps, n_channels, n_timesteps
+        ).numpy(),
+        "ch_names": ["Pz", "P3", "P7"],
+        "times": torch.linspace(-0.2, 0.8, n_timesteps).numpy(),
+    }
+    eeg_obj = np.array([eeg_data], dtype=object)
+    np.save(
+        data_dir / "eeg" / "sub-01" / "preprocessed_eeg_training.npy",
+        eeg_obj,
+        allow_pickle=True,
+    )
+    np.save(
+        data_dir / "eeg" / "sub-01" / "preprocessed_eeg_test.npy",
+        eeg_obj,
+        allow_pickle=True,
+    )
+    train_embeddings = torch.randn(n_concepts, latent_dim)
+    test_embeddings = torch.randn(n_concepts, latent_dim)
+    torch.save(
+        train_embeddings, data_dir / "img-latents" / "synclr" / "train_embeddings.pt"
+    )
+    torch.save(
+        test_embeddings, data_dir / "img-latents" / "synclr" / "test_embeddings.pt"
+    )
+    return data_dir
+
+
+@pytest.fixture
+def mock_eeg_image_data_dir(tmp_path):
+    return create_mock_eeg_image_data_dir(tmp_path)
+
+
+@pytest.fixture
+def nice_config():
+    return NICEConfig(
+        model_name="synclr", batch_size=2, eval_batch_size=2, max_epochs=5
+    )
+
+
+@pytest.fixture
+def eeg_dataset_config(mock_eeg_image_data_dir):
+    return EEGDatasetConfig(
+        data_path=mock_eeg_image_data_dir,
+        batch_size=2,
+        val_batch_size=2,
+        subs=[1],
+        num_workers=0,
+    )
+
+
+@pytest.fixture
+def nice_trainer_config(nice_config, eeg_dataset_config, tmp_path):
+    return NICETrainerConfig(
+        num_epochs=5,
+        learning_rate=1e-2,
+        batch_size=2,
+        num_workers=0,
+        pin_memory=False,
+        submodel_config=nice_config,
+        dataset_config=eeg_dataset_config,
+        log_dir=tmp_path / "logs",
+        checkpoint_dir=tmp_path / "ckpts",
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        log_every_n_steps=1,
+        save_checkpoints=False,
+    )

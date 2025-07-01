@@ -5,27 +5,20 @@ import hydra
 from omegaconf import DictConfig
 from src.configs import BaseConfig
 from src.data import EEGDatasetConfig
-from src.model import NICEConfig, NICEModel
+from src.model import NICEConfig
+from src.trainer import NICETrainerConfig, NICETrainer
 
 import torch
-from lightning.pytorch import Trainer
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import TensorBoardLogger
-
-
 from pathlib import Path
-
 from src.utils import get_dtype
 
 
 class TrainNICEConfig(BaseConfig):
-    nice_config: NICEConfig = NICEConfig()
-    dataset_config: EEGDatasetConfig = EEGDatasetConfig()
+    trainer_config: NICETrainerConfig = NICETrainerConfig()
     save_top_k: int = 1
     dtype: str = "float32"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     precision: Literal[16, 32, 64] = 32
-    train_val_split: float = 0.9
 
     num_workers: int = 4
     compile_model: bool = True
@@ -38,42 +31,22 @@ def train_nice(
 ):
     torch.set_float32_matmul_precision("high")
 
-    device = torch.device(config.device)
-    dtype = get_dtype(config.dtype)
+    # Create trainer
+    trainer = config.trainer_config.create_trainer()
 
-    model = NICEModel(
-        config=config.nice_config,
-        dataset_config=config.dataset_config,
-        compile=config.compile_model,
-    )
-    model.to(device=device, dtype=dtype)
+    # Load checkpoint if provided
+    if config.checkpoint_path and config.checkpoint_path.exists():
+        logging.info(f"Loading checkpoint from {config.checkpoint_path}")
+        trainer.load_checkpoint(config.checkpoint_path)
 
-    checkpoint_callback = ModelCheckpoint(
-        monitor="val/loss",
-        filename="checkpoint/{epoch:02d}-{val/loss:.2f}",
-        save_top_k=config.save_top_k,
-        mode="min",
-    )
+    # Start training
+    trainer.train()
 
-    lr_monitor = LearningRateMonitor(logging_interval="step")
+    # Test the model
+    logging.info("Running final test...")
+    test_metrics = trainer.test()
 
-    logger = TensorBoardLogger(
-        save_dir=config.log_path,
-        name=config.nice_config.model_name,
-        default_hp_metric=False,
-    )
-
-    trainer = Trainer(
-        max_epochs=config.nice_config.max_epochs,
-        callbacks=[checkpoint_callback, lr_monitor],
-        logger=logger,
-        enable_progress_bar=True,
-        accelerator=config.device,
-        precision=config.precision,
-    )
-
-    trainer.fit(model, ckpt_path=config.checkpoint_path)
-    return model
+    return trainer.get_model()
 
 
 @hydra.main(
