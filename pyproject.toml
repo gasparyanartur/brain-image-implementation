@@ -11,22 +11,28 @@ dependencies = [
     "torchsummary",
     "tensorboard",
     "torch_geometric",
+    "lightning",
+    "triton",
+
     "numpy",
+    "einops",
+    "pandas",
     "scikit-learn",
     "matplotlib",
     "seaborn",
-    "pandas",
+    "Pillow",
     "jupyter",
     "ipykernel",
-    "lightning",
-    "einops",
-    "Pillow",
+
+    "tqdm",
     "pydantic",
     "hydra-core",
-    "triton",
+    "omegaconf",
 ]
 
-
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["src"]

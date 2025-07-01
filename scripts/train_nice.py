@@ -3,9 +3,9 @@ from typing import Literal
 
 import hydra
 from omegaconf import DictConfig
-from configs import BaseConfig
-from data import EEGDatasetConfig
-from model import NICEConfig, NICEModel
+from src.configs import BaseConfig
+from src.data import EEGDatasetConfig
+from src.model import NICEConfig, NICEModel
 
 import torch
 from lightning.pytorch import Trainer
@@ -15,7 +15,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 
 from pathlib import Path
 
-from utils import get_dtype
+from src.utils import get_dtype
 
 
 class TrainNICEConfig(BaseConfig):
@@ -24,9 +24,6 @@ class TrainNICEConfig(BaseConfig):
     nice_config: NICEConfig = NICEConfig()
     dataset_config: EEGDatasetConfig = EEGDatasetConfig()
     save_top_k: int = 1
-    compile_model: bool = True
-    log_path: Path = Path("logs")
-    checkpoint_path: Path | None = None
     dtype: str = "float32"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     precision: Literal[16, 32, 64] = 32

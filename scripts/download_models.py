@@ -1,12 +1,11 @@
 import logging
 from pathlib import Path
 import dreamsim
-from dreamsim.feature_extraction.load_synclr_as_dino import load_synclr_as_dino
 import hydra
 from omegaconf import DictConfig
 
-from configs import BaseConfig
-from model import load_image_encoder
+from src.configs import BaseConfig
+from src.model import load_image_encoder
 
 
 class DownloadModelsConfig(BaseConfig):
@@ -48,6 +47,7 @@ def main(cfg: DictConfig):
         try:
             load_image_encoder(model_name=model, models_path=config.model_path)
         except Exception as e:
+            logging.error(f"Error loading {model} model: {e}")
             return
 
     logging.info("All models downloaded and validated successfully.")

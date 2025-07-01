@@ -2,16 +2,19 @@ import hydra
 import logging
 from pathlib import Path
 from typing import Literal
-import hydra
 from omegaconf import DictConfig
 import torch
 import tqdm
 
-from configs import BaseConfig
-from data import EEGDatasetConfig, batch_load_images, get_image_paths
-from data import preprocess_image
-from model import load_image_encoder
-from utils import DEVICE, DTYPE, get_dtype
+from src.configs import BaseConfig
+from src.data import (
+    EEGDatasetConfig,
+    batch_load_images,
+    get_image_paths,
+    preprocess_image,
+)
+from src.model import load_image_encoder
+from src.utils import DEVICE, DTYPE, get_dtype
 
 
 class EmbeddingGenerationConfig(BaseConfig):

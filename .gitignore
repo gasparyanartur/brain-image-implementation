@@ -1,4 +1,20 @@
-/*.egg-info
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Data
+/data
+
+# Logs
+/logs
+/outputs/*.egg-info
 *.egg-info*
 /*venv
 /data
@@ -7,4 +23,4 @@
 /uv.lock
 *__pycache__*
 /outputs
-test_outputs/
+test_outputs/aa

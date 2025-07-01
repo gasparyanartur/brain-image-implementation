@@ -7,9 +7,9 @@ import hydra
 from lightning import Trainer
 import torch
 import tqdm
-from configs import BaseConfig
-from model import NICEModel
-from data import EEGDatasetConfig
+from src.configs import BaseConfig
+from src.model import NICEModel
+from src.data import EEGDatasetConfig
 
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 

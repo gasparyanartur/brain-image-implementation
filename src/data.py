@@ -1,4 +1,6 @@
-import multiprocessing as mp
+from __future__ import annotations
+
+from abc import abstractmethod
 from pathlib import Path
 from typing import Iterable, Literal, cast
 
@@ -8,8 +10,58 @@ from torch import Tensor, manual_seed
 from torch.utils.data import Dataset, random_split
 import torchvision
 from torchvision.transforms import v2 as tv2
+from lightning.pytorch import LightningDataModule
 
-from configs import BaseConfig
+from src.configs import DEFAULT_BATCH_SIZE, BaseConfig
+
+
+class DataConfig(BaseConfig):
+    data_path: Path = Path("data")
+    batch_size: int = DEFAULT_BATCH_SIZE
+    val_batch_size: int = DEFAULT_BATCH_SIZE
+    limit_train_size: float = 1.0
+    limit_val_size: float = 1.0
+    limit_test_size: float = 1.0
+
+    def create_datamodule(self) -> DataModule:
+        raise NotImplementedError
+
+
+class DataModule(LightningDataModule):
+    def __init__(self, config: DataConfig):
+        super().__init__()
+
+        self.config = config
+
+    @abstractmethod
+    def get_metadata(self) -> dict:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_train_dataset(self) -> torch.utils.data.Dataset:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_val_dataset(self) -> torch.utils.data.Dataset:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_test_dataset(self) -> torch.utils.data.Dataset:
+        raise NotImplementedError
+
+    def train_dataloader(self):
+        return self._create_dataloader(self.get_train_dataset())
+
+    def val_dataloader(self):
+        return self._create_dataloader(self.get_val_dataset(), shuffle=False)
+
+    def test_dataloader(self):
+        return self._create_dataloader(self.get_test_dataset(), shuffle=False)
+
+    def _create_dataloader(self, dataset, shuffle=True):
+        return torch.utils.data.DataLoader(
+            dataset, batch_size=self.config.batch_size, shuffle=shuffle
+        )
 
 
 class EEGDatasetConfig(BaseConfig):
@@ -75,8 +127,8 @@ class EEGDataset(Dataset):
         return len(self.eeg_data)
 
     def __getitem__(self, idx: int):
-        img_idx = idx % (
-            len(self.img_paths)
+        img_idx = (
+            idx % (len(self.img_paths))
         )  # EEG has stacked over subs, so we need to find the right sample within the sub
 
         img_path = self.img_paths[img_idx]
