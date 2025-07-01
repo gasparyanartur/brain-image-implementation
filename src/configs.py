@@ -8,8 +8,6 @@ DEFAULT_BATCH_SIZE = 32
 
 
 class BaseConfig(BaseModel, ABC):
-    config_tag: str
-
     @classmethod
     def from_hydra_config(cls, cfg):
         """Create an instance of the config class from a Hydra config."""
@@ -21,3 +19,4 @@ class GlobalConfig:
         os.environ.get("PROJECT_WORKSPACE_DIR", Path(__file__).parent.parent)
     )
     CONFIGS_DIR: Path = WORKSPACE_DIR / "src" / "configs"
+    DATA_DIR: Path = WORKSPACE_DIR / "data"

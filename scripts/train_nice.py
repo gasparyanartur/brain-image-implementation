@@ -19,8 +19,6 @@ from src.utils import get_dtype
 
 
 class TrainNICEConfig(BaseConfig):
-    config_tag: str = "train_nice"
-
     nice_config: NICEConfig = NICEConfig()
     dataset_config: EEGDatasetConfig = EEGDatasetConfig()
     save_top_k: int = 1
@@ -47,7 +45,6 @@ def train_nice(
         config=config.nice_config,
         dataset_config=config.dataset_config,
         compile=config.compile_model,
-        train_val_split=config.train_val_split,
     )
     model.to(device=device, dtype=dtype)
 

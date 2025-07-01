@@ -9,7 +9,6 @@ from src.model import load_image_encoder
 
 
 class DownloadModelsConfig(BaseConfig):
-    config_tag: str = "download_models"
     models: list[str] = ["synclr", "aligned_synclr"]
     model_path: Path = Path("models")
 

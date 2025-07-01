@@ -11,7 +11,7 @@ import itertools as it
 from lightning import LightningModule
 
 from src.configs import BaseConfig
-from src.data import EEGDataset, EEGDatasetConfig, prepare_datasets
+from src.data import EEGDataModule, EEGDatasetConfig
 import dreamsim
 from dreamsim.feature_extraction.load_synclr_as_dino import load_synclr_as_dino
 from dreamsim.feature_extraction.vision_transformer import VisionTransformer
@@ -40,8 +40,6 @@ def load_image_encoder(model_name: str, models_path: Path) -> VisionTransformer:
 
 
 class EEGEncoderConfig(BaseConfig):
-    config_tag: str = "eeg_encoder"
-
     embed_dim: int = 40
     encoded_dim: int = 1440  # Result of embed dim * final spatial * final temporal
     proj_dim: int = 768
@@ -166,7 +164,6 @@ class LatentProjector(nn.Module):
 
 
 class NICEConfig(BaseConfig):
-    config_tag: str = "nice"
     eeg_config: EEGEncoderConfig = EEGEncoderConfig()
 
     model_name: Literal[
@@ -200,7 +197,6 @@ class NICEModel(LightningModule):
         dataset_config: EEGDatasetConfig = EEGDatasetConfig(),
         compile: bool = True,
         init_weights: bool = True,
-        train_val_split: float = 0.8,
     ):
         super(NICEModel, self).__init__()
         self.automatic_optimization = False
@@ -223,12 +219,8 @@ class NICEModel(LightningModule):
         if init_weights:
             self._init_normal_weights()
 
-        self.train_dataset, self.val_dataset, self.test_dataset = prepare_datasets(
-            dataset_config,
-            model=config.model_name,
-            seed=config.data_seed,
-            train_val_split=train_val_split,
-        )
+        # Create the data module
+        self.data_module = EEGDataModule(dataset_config, model_name=config.model_name)
 
         if compile:
             self.eeg_encoder = self.eeg_encoder.jit_compile()  # type: ignore
@@ -363,40 +355,17 @@ class NICEModel(LightningModule):
             },
         ]
 
-    def _setup_dataloader(self, dataset: EEGDataset, batch_size: int, shuffle: bool):
-        """Setup dataloader for the dataset."""
-        return torch.utils.data.DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=self.config.num_workers,
-            pin_memory=True,
-            persistent_workers=True,
-        )
-
     def train_dataloader(self) -> torch.utils.data.DataLoader:
         """Return the training dataloader."""
-        return self._setup_dataloader(
-            self.train_dataset,
-            batch_size=self.config.batch_size,
-            shuffle=True,
-        )
+        return self.data_module.train_dataloader()
 
     def val_dataloader(self) -> torch.utils.data.DataLoader:
         """Return the validation dataloader."""
-        return self._setup_dataloader(
-            self.val_dataset,
-            batch_size=self.config.eval_batch_size,
-            shuffle=False,
-        )
+        return self.data_module.val_dataloader()
 
     def test_dataloader(self) -> torch.utils.data.DataLoader:
         """Return the test dataloader."""
-        return self._setup_dataloader(
-            self.test_dataset,
-            batch_size=self.config.eval_batch_size,
-            shuffle=False,
-        )
+        return self.data_module.test_dataloader()
 
     def forward(self, img_latent: torch.Tensor, eeg_data: torch.Tensor) -> torch.Tensor:
         """Forward pass through the model."""

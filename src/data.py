@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Iterable, Literal, cast
 
@@ -12,11 +12,11 @@ import torchvision
 from torchvision.transforms import v2 as tv2
 from lightning.pytorch import LightningDataModule
 
-from src.configs import DEFAULT_BATCH_SIZE, BaseConfig
+from src.configs import DEFAULT_BATCH_SIZE, BaseConfig, GlobalConfig
 
 
-class DataConfig(BaseConfig):
-    data_path: Path = Path("data")
+class DataConfig(BaseConfig, ABC):
+    data_path: Path
     batch_size: int = DEFAULT_BATCH_SIZE
     val_batch_size: int = DEFAULT_BATCH_SIZE
     limit_train_size: float = 1.0
@@ -58,23 +58,77 @@ class DataModule(LightningDataModule):
     def test_dataloader(self):
         return self._create_dataloader(self.get_test_dataset(), shuffle=False)
 
-    def _create_dataloader(self, dataset, shuffle=True):
+    def _create_dataloader(self, dataset, shuffle=True, batch_size=None):
+        if batch_size is None:
+            batch_size = self.config.batch_size
         return torch.utils.data.DataLoader(
-            dataset, batch_size=self.config.batch_size, shuffle=shuffle
+            dataset, batch_size=batch_size, shuffle=shuffle
         )
 
 
-class EEGDatasetConfig(BaseConfig):
-    config_tag: str = "data"
+class EEGDatasetConfig(DataConfig):
+    data_path: Path = GlobalConfig.DATA_DIR / "things-eeg2"
 
-    dataset_path: Path = Path("data/things-eeg2")
-    images_dir: str = "imgs"
+    imgs_dir: str = "imgs"
     eeg_dir: str = "eeg"
     latents_dir: str = "img-latents"
 
     train_imgs_per_concept: int = 10
     test_imgs_per_concept: int = 1
     subs: list[int] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    # Dataloader configuration
+    num_workers: int = 8
+    eval_batch_size: int = DEFAULT_BATCH_SIZE
+
+
+class EEGDataModule(DataModule):
+    def __init__(self, config: EEGDatasetConfig, model_name: str = "synclr"):
+        super().__init__(config)
+        self.config: EEGDatasetConfig = config
+        self.model_name = model_name
+
+    def get_metadata(self) -> dict:
+        return {}
+
+    def get_train_dataset(self) -> EEGDataset:
+        return EEGDataset(self.config, split="train", model_name=self.model_name)
+
+    def get_val_dataset(self) -> EEGDataset:
+        return EEGDataset(self.config, split="test", model_name=self.model_name)
+
+    def get_test_dataset(self) -> EEGDataset:
+        return EEGDataset(self.config, split="test", model_name=self.model_name)
+
+    def train_dataloader(self):
+        return self._create_dataloader(
+            self.get_train_dataset(), batch_size=self.config.batch_size, shuffle=True
+        )
+
+    def val_dataloader(self):
+        return self._create_dataloader(
+            self.get_val_dataset(), batch_size=self.config.val_batch_size, shuffle=False
+        )
+
+    def test_dataloader(self):
+        return self._create_dataloader(
+            self.get_test_dataset(),
+            batch_size=self.config.val_batch_size,
+            shuffle=False,
+        )
+
+    def _create_dataloader(self, dataset, shuffle=True, batch_size=None):
+        if batch_size is None:
+            batch_size = self.config.batch_size
+        num_workers = getattr(self.config, "num_workers", 8)
+        return torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            pin_memory=True,
+            persistent_workers=num_workers > 0,
+        )
 
 
 class EEGDataset(Dataset):
@@ -102,18 +156,18 @@ class EEGDataset(Dataset):
             eeg_name = "preprocessed_eeg_test"
 
         self.img_paths = get_image_paths(
-            self.config.dataset_path / self.config.images_dir,
+            self.config.data_path / self.config.imgs_dir,
             split=split,
         )
         self.img_latents = torch.load(
-            self.config.dataset_path
+            self.config.data_path
             / self.config.latents_dir
             / model_name
             / f"{img_embed_name}.pt"
         )
 
         self.eeg_data_paths = [
-            self.config.dataset_path
+            self.config.data_path
             / self.config.eeg_dir
             / f"sub-{sub:02}"
             / f"{eeg_name}.npy"

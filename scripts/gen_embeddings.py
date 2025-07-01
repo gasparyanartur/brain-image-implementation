@@ -18,8 +18,6 @@ from src.utils import DEVICE, DTYPE, get_dtype
 
 
 class EmbeddingGenerationConfig(BaseConfig):
-    config_tag: str = "gen_embed"
-    data_config: EEGDatasetConfig = EEGDatasetConfig(config_tag="data")
     batch_size: int = 32
     models: list[str] = ["synclr", "aligned_synclr"]
     splits: list[Literal["train", "test"]] = ["train", "test"]
@@ -94,7 +92,7 @@ def run_generation(
 
 def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
     data_dir = config.data_config.dataset_path
-    img_dir = data_dir / config.data_config.images_dir
+    img_dir = data_dir / config.data_config.imgs_dir
     embed_dir = data_dir / config.data_config.latents_dir
 
     for split in config.splits:

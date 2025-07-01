@@ -25,8 +25,6 @@ def move_all_to_cpu(items: dict[str, Any]) -> dict[str, Any]:
 
 
 class EvaluateNiceConfig(BaseConfig):
-    config_tag: str = "eval_nice"
-
     checkpoint_path: Path = Path("models")
     output_path: Path = Path("test_outputs")
     dtype: str = "float32"
