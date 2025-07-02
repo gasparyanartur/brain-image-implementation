@@ -1,32 +1,19 @@
-import pytest
 import torch
-import numpy as np
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
-import tempfile
-import shutil
-import pickle
 
 from src.data import (
-    DataConfig,
-    DataModule,
     EEGDatasetConfig,
     EEGDataModule,
     EEGDataset,
-    prepare_datasets,
-    load_image_from_path,
-    batch_load_images,
     load_eeg_data,
     preprocess_image,
     preprocess_eeg_data,
     get_image_paths,
     load_all_eeg_data,
 )
-from src.configs import DEFAULT_BATCH_SIZE
 
 
-def test_eeg_dataset_creation(mock_eeg_image_data_dir):
-    config = EEGDatasetConfig(data_path=mock_eeg_image_data_dir, subs=[1])
+def test_eeg_dataset_creation(mock_data_directory):
+    config = EEGDatasetConfig(data_path=mock_data_directory["data_dir"], subs=[1])
     train_dataset = EEGDataset(config, split="train", model_name="synclr")
     assert len(train_dataset) > 0
     assert len(train_dataset.img_paths) > 0
@@ -39,8 +26,8 @@ def test_eeg_dataset_creation(mock_eeg_image_data_dir):
     assert len(test_dataset.eeg_data) > 0
 
 
-def test_eeg_dataset_getitem(mock_eeg_image_data_dir):
-    config = EEGDatasetConfig(data_path=mock_eeg_image_data_dir, subs=[1])
+def test_eeg_dataset_getitem(mock_data_directory):
+    config = EEGDatasetConfig(data_path=mock_data_directory["data_dir"], subs=[1])
     dataset = EEGDataset(config, split="train", model_name="synclr")
     if len(dataset) > 0:
         item = dataset[0]
@@ -53,9 +40,9 @@ def test_eeg_dataset_getitem(mock_eeg_image_data_dir):
         assert isinstance(item["eeg_data"], torch.Tensor)
 
 
-def test_eeg_data_module(mock_eeg_image_data_dir):
+def test_eeg_data_module(mock_data_directory):
     config = EEGDatasetConfig(
-        data_path=mock_eeg_image_data_dir,
+        data_path=mock_data_directory["data_dir"],
         batch_size=4,
         val_batch_size=2,
         subs=[1],
@@ -92,8 +79,8 @@ def test_preprocess_image():
     assert torch.all(processed_image >= 0) and torch.all(processed_image <= 1)
 
 
-def test_get_image_paths(mock_eeg_image_data_dir):
-    img_dir = mock_eeg_image_data_dir / "imgs"
+def test_get_image_paths(mock_data_directory):
+    img_dir = mock_data_directory["data_dir"] / "imgs"
     train_paths = get_image_paths(img_dir, split="train")
     assert len(train_paths) > 0
     assert "training_images" in str(train_paths[0])
@@ -102,28 +89,39 @@ def test_get_image_paths(mock_eeg_image_data_dir):
     assert "test_images" in str(test_paths[0])
 
 
-def test_load_eeg_data(mock_eeg_image_data_dir):
+def test_load_eeg_data(mock_data_directory):
     eeg_file = (
-        mock_eeg_image_data_dir / "eeg" / "sub-01" / "preprocessed_eeg_training.npy"
+        mock_data_directory["data_dir"]
+        / "eeg"
+        / "sub-01"
+        / "preprocessed_eeg_training.npy"
     )
     loaded_data, times, ch_names = load_eeg_data(eeg_file)
     assert isinstance(loaded_data, torch.Tensor)
     assert isinstance(times, torch.Tensor)
     assert isinstance(ch_names, list)
-    assert loaded_data.shape[1:] == (17, 100)
+    assert loaded_data.shape[-2:] == (17, 100)
     assert times.shape == (100,)
-    assert len(ch_names) == 3
+    assert len(ch_names) == 17
 
 
-def test_load_all_eeg_data(mock_eeg_image_data_dir):
+def test_load_all_eeg_data(mock_data_config, mock_data_directory):
     eeg_file1 = (
-        mock_eeg_image_data_dir / "eeg" / "sub-01" / "preprocessed_eeg_training.npy"
+        mock_data_directory["data_dir"]
+        / "eeg"
+        / "sub-01"
+        / "preprocessed_eeg_training.npy"
     )
-    eeg_file2 = mock_eeg_image_data_dir / "eeg" / "sub-01" / "preprocessed_eeg_test.npy"
+    eeg_file2 = (
+        mock_data_directory["data_dir"] / "eeg" / "sub-01" / "preprocessed_eeg_test.npy"
+    )
     all_data, times, ch_names = load_all_eeg_data([eeg_file1, eeg_file2])
     assert isinstance(all_data, torch.Tensor)
     assert isinstance(times, torch.Tensor)
     assert isinstance(ch_names, list)
-    assert all_data.shape[1:] == (17, 100)
-    assert times.shape == (100,)
-    assert len(ch_names) == 3
+    assert all_data.shape[1:] == (
+        len(mock_data_config["channels"]),
+        mock_data_config["num_timesteps"],
+    )
+    assert times.shape == (mock_data_config["num_timesteps"],)
+    assert len(ch_names) == len(mock_data_config["channels"])

@@ -188,8 +188,6 @@ class NICEConfig(ModelConfig):
     ]
     project_dim: int = 256
     img_latent_dim: int = 768
-    batch_size: int = 256
-    eval_batch_size: int = 200
     encoder_lr: float = 8e-3
     projector_lr: float = 8e-3
     lr_scheduler: Literal["none", "cosine_anneal"] = "cosine_anneal"

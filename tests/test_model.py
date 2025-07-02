@@ -8,59 +8,6 @@ from src.model import NICEModel, NICEConfig
 from src.data import EEGDatasetConfig
 
 
-@pytest.fixture
-def temp_data_dir():
-    """Create a temporary directory with mock data structure."""
-    temp_dir = tempfile.mkdtemp()
-    data_dir = Path(temp_dir) / "things-eeg2"
-
-    # Create directory structure
-    (data_dir / "imgs" / "training_images" / "concept1").mkdir(
-        parents=True, exist_ok=True
-    )
-    (data_dir / "imgs" / "test_images" / "concept1").mkdir(parents=True, exist_ok=True)
-    (data_dir / "eeg" / "sub-01").mkdir(parents=True, exist_ok=True)
-    (data_dir / "img-latents" / "synclr").mkdir(parents=True, exist_ok=True)
-
-    # Create mock image files
-    (data_dir / "imgs" / "training_images" / "concept1" / "img1.jpg").touch()
-    (data_dir / "imgs" / "test_images" / "concept1" / "img1.jpg").touch()
-
-    # Create mock EEG data
-    eeg_data = {
-        "preprocessed_eeg_data": torch.randn(10, 4, 17, 100).numpy(),
-        "ch_names": ["Pz", "P3", "P7"],
-        "times": torch.linspace(-0.2, 0.8, 100).numpy(),
-    }
-    import numpy as np
-
-    np.save(
-        data_dir / "eeg" / "sub-01" / "preprocessed_eeg_training.npy",
-        eeg_data,  # type: ignore
-        allow_pickle=True,
-    )
-    np.save(
-        data_dir / "eeg" / "sub-01" / "preprocessed_eeg_test.npy",
-        eeg_data,  # type: ignore
-        allow_pickle=True,
-    )
-
-    # Create mock image latents
-    train_embeddings = torch.randn(10, 768)
-    test_embeddings = torch.randn(5, 768)
-    torch.save(
-        train_embeddings, data_dir / "img-latents" / "synclr" / "train_embeddings.pt"
-    )
-    torch.save(
-        test_embeddings, data_dir / "img-latents" / "synclr" / "test_embeddings.pt"
-    )
-
-    yield data_dir
-
-    # Cleanup
-    shutil.rmtree(temp_dir)
-
-
 def test_nice_model_creation():
     """Test that NICE model can be created successfully."""
     config = NICEConfig(model_name="synclr")
@@ -137,11 +84,11 @@ def test_nice_model_accuracy_computation():
     assert top1_acc <= top3_acc <= top5_acc
 
 
-def test_nice_model_with_data_module(temp_data_dir):
+def test_nice_model_with_data_module(mock_data_directory):
     """Test that NICE model works with data module."""
     config = NICEConfig(model_name="synclr")
     dataset_config = EEGDatasetConfig(
-        data_path=temp_data_dir,
+        data_path=mock_data_directory["data_dir"],
         subs=[1],
         num_workers=0,  # Use 0 for testing
     )

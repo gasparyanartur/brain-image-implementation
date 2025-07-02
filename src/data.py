@@ -19,6 +19,8 @@ class DataConfig(BaseConfig, ABC):
     data_path: Path
     batch_size: int = DEFAULT_BATCH_SIZE
     val_batch_size: int = DEFAULT_BATCH_SIZE
+    eval_batch_size: int = DEFAULT_BATCH_SIZE
+    shuffle_train: bool = True
     limit_train_size: float = 1.0
     limit_val_size: float = 1.0
     limit_test_size: float = 1.0
@@ -83,7 +85,7 @@ class EEGDatasetConfig(DataConfig):
 
 
 class EEGDataModule(DataModule):
-    def __init__(self, config: EEGDatasetConfig, model_name: str = "synclr"):
+    def __init__(self, config: EEGDatasetConfig, model_name: str):
         super().__init__(config)
         self.config: EEGDatasetConfig = config
         self.model_name = model_name
@@ -92,7 +94,11 @@ class EEGDataModule(DataModule):
         return {}
 
     def get_train_dataset(self) -> EEGDataset:
-        return EEGDataset(self.config, split="train", model_name=self.model_name)
+        return EEGDataset(
+            self.config,
+            split="train",
+            model_name=self.model_name,
+        )
 
     def get_val_dataset(self) -> EEGDataset:
         return EEGDataset(self.config, split="test", model_name=self.model_name)
@@ -102,7 +108,9 @@ class EEGDataModule(DataModule):
 
     def train_dataloader(self):
         return self._create_dataloader(
-            self.get_train_dataset(), batch_size=self.config.batch_size, shuffle=True
+            self.get_train_dataset(),
+            batch_size=self.config.batch_size,
+            shuffle=self.config.shuffle_train,
         )
 
     def val_dataloader(self):
@@ -181,8 +189,8 @@ class EEGDataset(Dataset):
         return len(self.eeg_data)
 
     def __getitem__(self, idx: int):
-        img_idx = (
-            idx % (len(self.img_paths))
+        img_idx = idx % (
+            len(self.img_paths)
         )  # EEG has stacked over subs, so we need to find the right sample within the sub
 
         img_path = self.img_paths[img_idx]
