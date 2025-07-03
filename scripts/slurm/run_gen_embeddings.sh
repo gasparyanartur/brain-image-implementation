@@ -18,9 +18,16 @@ echo "Node: $SLURM_NODELIST"
 echo "Working Directory: $(pwd)"
 echo "Date: $(date)"
 
+image_path=${APPTAINER_IMAGE_PATH:-/home/projinfo/brain_2025_07_03.sif}
+
 # Run the embedding generation script
-echo "Starting embedding generation..."
-python scripts/gen_embeddings.py
+apptainer exec --nv \
+    --bind /proj:/proj \
+    --bind /home:/home \
+    --bind $PWD:/brain \
+    --home /brain \
+    $image_path \
+    python /brain/scripts/gen_embeddings.py
 
 # Check exit status
 if [ $? -eq 0 ]; then
