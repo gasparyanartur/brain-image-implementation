@@ -6,7 +6,7 @@ from omegaconf import DictConfig
 import torch
 import tqdm
 
-from src.configs import BaseConfig
+from src.configs import BaseConfig, GlobalConfig
 from src.data import (
     EEGDatasetConfig,
     batch_load_images,
@@ -25,6 +25,11 @@ class EmbeddingGenerationConfig(BaseConfig):
     models_path: Path = Path("models")
     dtype: str = "float16"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    data_config: EEGDatasetConfig = EEGDatasetConfig()
+
+    output_dir: Path | None = (
+        None  # If None, will be the same as the data_config.data_path / data_config.latents_dir
+    )
 
 
 def generate_latents(
@@ -55,7 +60,7 @@ def generate_latents(
 
 def run_generation(
     img_dir: Path,
-    embed_dir: Path,
+    output_dir: Path,
     model_name: str,
     split: Literal["train", "test"],
     models_path: Path = Path("models"),
@@ -83,7 +88,7 @@ def run_generation(
         dtype=dtype,
     )
 
-    dst_dir = embed_dir / model_name / f"{split}_embeddings.pt"
+    dst_dir = output_dir / model_name / f"{split}_embeddings.pt"
     dst_dir.parent.mkdir(parents=True, exist_ok=True)
 
     logging.info(f"Saving {split} embeddings to {dst_dir}")
@@ -91,15 +96,23 @@ def run_generation(
 
 
 def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
-    data_dir = config.data_config.dataset_path
-    img_dir = data_dir / config.data_config.imgs_dir
-    embed_dir = data_dir / config.data_config.latents_dir
+    img_dir = config.data_config.data_path / config.data_config.imgs_dir
+    embed_dir = (
+        config.output_dir
+        or config.data_config.data_path / config.data_config.latents_dir
+    )
+
+    if not img_dir.exists():
+        raise FileNotFoundError(f"Image directory {img_dir} does not exist")
+
+    if not embed_dir.exists():
+        embed_dir.mkdir(parents=True, exist_ok=True)
 
     for split in config.splits:
         for model_name in config.models:
             run_generation(
                 img_dir,
-                embed_dir=embed_dir,
+                embed_dir,
                 batch_size=config.batch_size,
                 model_name=model_name,
                 split=split,
@@ -110,7 +123,11 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
             )
 
 
-@hydra.main(config_path="../configs", config_name="gen_embed", version_base=None)
+@hydra.main(
+    config_path=str(GlobalConfig.CONFIGS_DIR),
+    config_name="gen_embeddings",
+    version_base=None,
+)
 def main(cfg: DictConfig):
     config = EmbeddingGenerationConfig.from_hydra_config(cfg)
 

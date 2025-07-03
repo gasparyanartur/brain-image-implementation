@@ -1,0 +1,21 @@
+batch_size: 256
+models:
+  - synclr
+  - aligned_synclr
+splits:
+  - train
+  - test
+img_size: [224, 224]
+models_path: models
+dtype: float32
+device: cuda
+output_dir: null
+
+data_config:
+  data_path: data/things-eeg2
+  imgs_dir: imgs
+  eeg_dir: eeg
+  latents_dir: img-latents
+  train_imgs_per_concept: 10
+  test_imgs_per_concept: 1
+  subs: [1,2,3,4,5,6,7,8,9,10]

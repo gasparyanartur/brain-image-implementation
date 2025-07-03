@@ -4,13 +4,10 @@ from typing import Literal
 import hydra
 from omegaconf import DictConfig
 from src.configs import BaseConfig
-from src.data import EEGDatasetConfig
-from src.model import NICEConfig
-from src.trainer import NICETrainerConfig, NICETrainer
+from src.trainer import NICETrainerConfig
 
 import torch
 from pathlib import Path
-from src.utils import get_dtype
 
 
 class TrainNICEConfig(BaseConfig):

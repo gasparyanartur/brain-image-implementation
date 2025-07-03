@@ -24,6 +24,7 @@ class DataConfig(BaseConfig, ABC):
     limit_train_size: float = 1.0
     limit_val_size: float = 1.0
     limit_test_size: float = 1.0
+    num_workers: int = 8
 
     def create_datamodule(self) -> DataModule:
         raise NotImplementedError
@@ -78,10 +79,6 @@ class EEGDatasetConfig(DataConfig):
     train_imgs_per_concept: int = 10
     test_imgs_per_concept: int = 1
     subs: list[int] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-
-    # Dataloader configuration
-    num_workers: int = 8
-    eval_batch_size: int = DEFAULT_BATCH_SIZE
 
 
 class EEGDataModule(DataModule):
@@ -189,8 +186,8 @@ class EEGDataset(Dataset):
         return len(self.eeg_data)
 
     def __getitem__(self, idx: int):
-        img_idx = idx % (
-            len(self.img_paths)
+        img_idx = (
+            idx % (len(self.img_paths))
         )  # EEG has stacked over subs, so we need to find the right sample within the sub
 
         img_path = self.img_paths[img_idx]
