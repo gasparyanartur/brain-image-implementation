@@ -1,0 +1,56 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+%labels
+    Author Your Name
+    Version v1.0
+    Description Brain Image Implementation with uv
+
+%environment
+    export PYTHONUNBUFFERED=1
+    export PYTHONDONTWRITEBYTECODE=1
+    export DEBIAN_FRONTEND=noninteractive
+    export PATH="/root/.cargo/bin:$PATH"
+
+%post
+    # Install system dependencies
+    apt-get update && apt-get install -y \
+        curl \
+        git \
+        build-essential \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install uv
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    # Add uv to PATH
+    export PATH="/root/.local/bin:$PATH"
+
+    # Set working directory
+    mkdir -p /app
+    cd /app
+
+    # Copy application files (these will be copied during build)
+    # The actual copying happens in the %files section
+
+%files
+    pyproject.toml /app/
+    README.md /app/
+    src/ /app/src/
+    scripts/ /app/scripts/
+    tests/ /app/tests/
+
+%post
+    # Install Python dependencies using uv
+    cd /app
+    uv pip install -e . --system
+
+    # Create a non-root user
+    useradd --create-home --shell /bin/bash app
+    chown -R app:app /app
+
+%runscript
+    exec /bin/bash "$@"
+
+%startscript
+    exec /bin/bash "$@" 

@@ -12,15 +12,15 @@ wheels/
 # Data
 /data
 
+# Models
+/models
+/outputs
+
 # Logs
 /logs
-/outputs/*.egg-info
+
+# Build
 *.egg-info*
-/*venv
-/data
-/models
-/logs
-/uv.lock
 *__pycache__*
-/outputs
-test_outputs/aa
+*.sif
+*.sif.lock
