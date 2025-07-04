@@ -47,6 +47,7 @@ if [ -f /workspace/pyproject.toml ]; then
     echo "Detected runtime project in /workspace. Syncing dependencies..."
     cd /workspace
     uv sync --system
+    uv pip install -e . --system
     exec "$@"
 else
     echo "No runtime project detected. Using build-time /app."
@@ -59,6 +60,7 @@ if [ -f /workspace/pyproject.toml ]; then
     echo "Detected runtime project in /workspace. Syncing dependencies..."
     cd /workspace
     uv sync --system
+    uv pip install -e . --system
     exec /bin/bash "$@"
 else
     echo "No runtime project detected. Using build-time /app."
