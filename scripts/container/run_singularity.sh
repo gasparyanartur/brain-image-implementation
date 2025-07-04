@@ -6,7 +6,7 @@ if [ -z "$image_path" ]; then
     image_path=$(ls -t images/brain_*.sif | head -n 1)
 fi
 
-apptainer shell \
+apptainer run \
 --nv \
 --home /workspace \
 --bind $PWD:/workspace \
