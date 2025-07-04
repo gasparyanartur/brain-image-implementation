@@ -6,6 +6,8 @@ apptainer shell \
 --nv \
 --home /workspace \
 --bind $PWD:/workspace \
+--bind /proj:/proj \
+--bind /home:/home \
 --workdir /workspace \
 --pwd /workspace \
 $image_path "$@"
