@@ -21,12 +21,7 @@ echo "Date: $(date)"
 image_path=${APPTAINER_IMAGE_PATH:-/home/x_artga/projdir/images/brain_2025_07_03.sif}
 
 # Run the embedding generation script
-apptainer exec --nv \
-    --bind /proj:/proj \
-    --bind /home:/home \
-    --bind $PWD:/workspace \
-    --home /workspace \
-    $image_path \
+./scripts/container/run_singularity.sh \
     python /workspace/scripts/gen_embeddings.py
 
 # Check exit status
