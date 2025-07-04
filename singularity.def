@@ -13,25 +13,18 @@ From: python:3.12-slim
     export PATH="/root/.cargo/bin:$PATH"
 
 %post
-    # Install system dependencies
+    # Install system dependencies and uv in one layer
     apt-get update && apt-get install -y \
         curl \
         git \
         build-essential \
-        && rm -rf /var/lib/apt/lists/*
+        && rm -rf /var/lib/apt/lists/* \
+        && curl -LsSf https://astral.sh/uv/install.sh | sh \
+        && export PATH="/root/.local/bin:$PATH"
 
-    # Install uv
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-
-    # Add uv to PATH
-    export PATH="/root/.local/bin:$PATH"
-
-    # Set working directory
+    # Set working directory and prepare for app
     mkdir -p /app
     cd /app
-
-    # Copy application files (these will be copied during build)
-    # The actual copying happens in the %files section
 
 %files
     pyproject.toml /app/
@@ -62,4 +55,13 @@ else
 fi
 
 %startscript
-    exec /bin/bash "$@" 
+if [ -f /workspace/pyproject.toml ]; then
+    echo "Detected runtime project in /workspace. Syncing dependencies..."
+    cd /workspace
+    uv sync --system
+    exec /bin/bash "$@"
+else
+    echo "No runtime project detected. Using build-time /app."
+    cd /app
+    exec /bin/bash "$@"
+fi 

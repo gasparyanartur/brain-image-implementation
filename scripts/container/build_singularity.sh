@@ -5,7 +5,8 @@
 set -e
 
 # Configuration
-IMAGE_NAME="brain-image-implementation"
+DATETIME=$(date +%Y_%m_%d_%H_%M_%S)
+IMAGE_NAME="brain_${DATETIME}"
 TAG="latest"
 DEFINITION_FILE="singularity.def"
 
