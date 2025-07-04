@@ -7,7 +7,6 @@
 #SBATCH --gpus=1
 #SBATCH --time=2-00:00:00
 #SBATCH --output=logs/gen_embeddings/slurm/%j.out
-#SBATCH --error=logs/gen_embeddings/slurm/%j.err
 #SBATCH --account=berzelius-2025-35
 
 

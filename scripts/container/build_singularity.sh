@@ -31,8 +31,7 @@ else
 fi
 
 # Build the Singularity/Apptainer image
-${BUILD_CMD} \
-    --fakeroot \
+sudo ${BUILD_CMD} \
     "${IMAGE_NAME}.sif" \
     "${DEFINITION_FILE}"
 
