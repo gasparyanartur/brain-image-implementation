@@ -2,8 +2,12 @@
 
 image_path=${APPTAINER_IMAGE}
 if [ -z "$image_path" ]; then
-    echo "APPTAINER_IMAGE is not set"
-    exit 1
+    # Find the latest image in the images directory
+    image_path=$(ls -t images/brain_*.sif | head -n 1)
+    if [ -z "$image_path" ]; then
+        echo "No image found in images directory"
+        exit 1
+    fi
 fi
 
 dest_dir=${APPTAINER_IMAGE_DEST_DIR:-/home/x_artga/projdir/images}

@@ -8,7 +8,7 @@ set -e
 DATETIME=$(date +%Y_%m_%d_%H_%M_%S)
 IMAGE_NAME="brain_${DATETIME}"
 TAG="latest"
-DEFINITION_FILE="singularity.def"
+DEFINITION_FILE="images/singularity.def"
 
 # Colors for output
 RED='\033[0;31m'
