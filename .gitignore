@@ -15,6 +15,7 @@ wheels/
 # Models
 /models
 /outputs
+/checkpoints
 
 # Logs
 /logs
@@ -24,3 +25,4 @@ wheels/
 *__pycache__*
 *.sif
 *.sif.lock
+/images
