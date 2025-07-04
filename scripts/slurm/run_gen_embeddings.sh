@@ -18,7 +18,7 @@ echo "Node: $SLURM_NODELIST"
 echo "Working Directory: $(pwd)"
 echo "Date: $(date)"
 
-image_path=${APPTAINER_IMAGE_PATH:-/home/projinfo/brain_2025_07_03.sif}
+image_path=${APPTAINER_IMAGE_PATH:-/home/x_artga/projdir/images/brain_2025_07_03.sif}
 
 # Run the embedding generation script
 apptainer exec --nv \
