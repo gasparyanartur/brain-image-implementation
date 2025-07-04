@@ -6,6 +6,7 @@ if [ -z "$image_path" ]; then
     image_path=$(ls -t images/brain_*.sif | head -n 1)
 fi
 
+echo "Running singularity image: $image_path"
 apptainer run \
 --nv \
 --home /workspace \
