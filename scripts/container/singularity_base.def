@@ -5,6 +5,9 @@ From: images/python312.sif
     Maintainer Artur Gajewski
     Description Python 3.12 base image with curl, git, build tools, and uv
 
+%environment
+    export UV_PROJECT_ENVIRONMENT=/usr/local
+
 %post
     export DEBIAN_FRONTEND=noninteractive
 
@@ -19,3 +22,5 @@ From: images/python312.sif
     mv ~/.local/bin/uv /usr/local/bin/uv
     chmod +x /usr/local/bin/uv
     
+    # Install torch and torchvision
+    uv pip install torch torchvision triton lightning --system

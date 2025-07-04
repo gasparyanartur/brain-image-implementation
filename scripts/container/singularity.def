@@ -29,7 +29,7 @@ From: images/singularity_base.sif
     # Install Python dependencies using uv
 
     cd /app
-    uv pip install -e . --system
+    uv pip install . --system
 
     # Create a non-root user
     useradd --create-home --shell /bin/bash app
@@ -50,11 +50,9 @@ fi
 if [ -f /workspace/pyproject.toml ]; then
     echo "Detected runtime project in /workspace. Syncing dependencies..."
     cd /workspace
-    uv pip install -e . --system
     exec /bin/bash "$@"
 else
     echo "No runtime project detected. Using build-time /app."
     cd /app
-    uv pip install -e . --system
     exec /bin/bash "$@"
 fi 
