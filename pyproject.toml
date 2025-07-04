@@ -1,5 +1,5 @@
 [project]
-name = "brain-image-implementation"
+name = "brain_image"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -37,6 +37,12 @@ test = ["pytest>=7.0.0", "pytest-cov>=4.0.0", "pytest-mock>=3.10.0"]
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = true
+
+[tool.setuptools]
+package-dir = {brain_image = "src/brain_image"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

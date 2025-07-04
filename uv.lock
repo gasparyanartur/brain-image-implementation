@@ -252,7 +252,7 @@ css = [
 ]
 
 [[package]]
-name = "brain-image-implementation"
+name = "brain-image"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
