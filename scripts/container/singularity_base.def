@@ -1,5 +1,5 @@
 Bootstrap: localimage
-From: python312.sif
+From: images/python312.sif
 
 %labels
     Maintainer Artur Gajewski

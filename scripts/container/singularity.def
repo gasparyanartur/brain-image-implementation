@@ -1,5 +1,5 @@
 Bootstrap: localimage
-From: brain_base.sif
+From: images/singularity_base.sif
 
 %labels
     Author Your Name
@@ -11,6 +11,7 @@ From: brain_base.sif
     export PYTHONDONTWRITEBYTECODE=1
     export DEBIAN_FRONTEND=noninteractive
     export PATH="/root/.cargo/bin:$PATH"
+    export UV_PROJECT_ENVIRONMENT=/usr/local
 
 %post
     # Set working directory and prepare for app
@@ -26,6 +27,7 @@ From: brain_base.sif
 
 %post
     # Install Python dependencies using uv
+
     cd /app
     uv pip install -e . --system
 
@@ -37,8 +39,6 @@ From: brain_base.sif
 if [ -f /workspace/pyproject.toml ]; then
     echo "Detected runtime project in /workspace. Syncing dependencies..."
     cd /workspace
-    uv sync --system
-    uv pip install -e . --system
     exec "$@"
 else
     echo "No runtime project detected. Using build-time /app."
@@ -50,11 +50,11 @@ fi
 if [ -f /workspace/pyproject.toml ]; then
     echo "Detected runtime project in /workspace. Syncing dependencies..."
     cd /workspace
-    uv sync --system
     uv pip install -e . --system
     exec /bin/bash "$@"
 else
     echo "No runtime project detected. Using build-time /app."
     cd /app
+    uv pip install -e . --system
     exec /bin/bash "$@"
 fi 

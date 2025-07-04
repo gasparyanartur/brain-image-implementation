@@ -8,7 +8,7 @@ set -e
 DATETIME=$(date +%Y_%m_%d_%H_%M_%S)
 IMAGE_NAME="brain_${DATETIME}"
 TAG="latest"
-DEFINITION_FILE="images/singularity.def"
+DEFINITION_FILE="scripts/container/singularity.def"
 
 # Colors for output
 RED='\033[0;31m'
@@ -17,6 +17,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}Building Singularity/Apptainer image: ${IMAGE_NAME}.sif${NC}"
+
+image_file="images/brain_${DATETIME}.sif"
 
 # Check if apptainer or singularity is available
 if command -v apptainer &> /dev/null; then
@@ -32,13 +34,13 @@ fi
 
 # Build the Singularity/Apptainer image
 sudo ${BUILD_CMD} \
-    "${IMAGE_NAME}.sif" \
+    "${image_file}" \
     "${DEFINITION_FILE}"
 
 echo -e "${GREEN}Singularity/Apptainer image built successfully!${NC}"
 echo -e "${YELLOW}To run the container:${NC}"
-echo -e "  apptainer shell ${IMAGE_NAME}.sif"
+echo -e "  apptainer shell ${image_file}"
 echo -e "  # or"
-echo -e "  singularity shell ${IMAGE_NAME}.sif"
+echo -e "  singularity shell ${image_file}"
 echo -e "${YELLOW}To run a script:${NC}"
 echo -e "  apptainer exec ${IMAGE_NAME}.sif python scripts/gen_embeddings.py" 
