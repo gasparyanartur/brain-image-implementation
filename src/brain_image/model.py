@@ -11,8 +11,8 @@ import math
 import itertools as it
 from lightning import LightningModule
 
-from src.configs import BaseConfig
-from src.data import EEGDataModule, EEGDatasetConfig
+from brain_image.configs import BaseConfig
+from brain_image.data import EEGDataModule, EEGDatasetConfig
 import dreamsim
 from dreamsim.feature_extraction.load_synclr_as_dino import load_synclr_as_dino
 from dreamsim.feature_extraction.vision_transformer import VisionTransformer

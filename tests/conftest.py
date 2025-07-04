@@ -3,9 +3,9 @@
 import pytest
 import torch
 import numpy as np
-from src.model import NICEConfig
-from src.data import EEGDatasetConfig
-from src.trainer import NICETrainerConfig
+from brain_image.model import NICEConfig
+from brain_image.data import EEGDatasetConfig
+from brain_image.trainer import NICETrainerConfig
 
 
 @pytest.fixture

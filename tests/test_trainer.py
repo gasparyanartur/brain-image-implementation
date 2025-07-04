@@ -9,9 +9,9 @@ import torch.utils.data
 import lightning
 from typing import cast
 
-from src.trainer import NICETrainerConfig, NICETrainer
-from src.model import NICEConfig, EEGEncoderConfig, NICEModel
-from src.data import EEGDatasetConfig
+from brain_image.trainer import NICETrainerConfig, NICETrainer
+from brain_image.model import NICEConfig, EEGEncoderConfig, NICEModel
+from brain_image.data import EEGDatasetConfig
 
 
 @pytest.fixture

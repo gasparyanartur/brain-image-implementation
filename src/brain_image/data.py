@@ -12,7 +12,7 @@ import torchvision
 from torchvision.transforms import v2 as tv2
 from lightning.pytorch import LightningDataModule
 
-from src.configs import DEFAULT_BATCH_SIZE, BaseConfig, GlobalConfig
+from brain_image.configs import DEFAULT_BATCH_SIZE, BaseConfig, GlobalConfig
 
 
 class DataConfig(BaseConfig, ABC):
@@ -186,8 +186,8 @@ class EEGDataset(Dataset):
         return len(self.eeg_data)
 
     def __getitem__(self, idx: int):
-        img_idx = (
-            idx % (len(self.img_paths))
+        img_idx = idx % (
+            len(self.img_paths)
         )  # EEG has stacked over subs, so we need to find the right sample within the sub
 
         img_path = self.img_paths[img_idx]

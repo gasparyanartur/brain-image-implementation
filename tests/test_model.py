@@ -4,8 +4,8 @@ import tempfile
 import shutil
 from pathlib import Path
 
-from src.model import NICEModel, NICEConfig
-from src.data import EEGDatasetConfig
+from brain_image.model import NICEModel, NICEConfig
+from brain_image.data import EEGDatasetConfig
 
 
 def test_nice_model_creation():

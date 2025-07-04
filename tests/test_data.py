@@ -1,6 +1,6 @@
 import torch
 
-from src.data import (
+from brain_image.data import (
     EEGDatasetConfig,
     EEGDataModule,
     EEGDataset,

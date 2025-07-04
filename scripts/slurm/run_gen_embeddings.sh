@@ -24,10 +24,10 @@ image_path=${APPTAINER_IMAGE_PATH:-/home/x_artga/projdir/images/brain_2025_07_03
 apptainer exec --nv \
     --bind /proj:/proj \
     --bind /home:/home \
-    --bind $PWD:/brain \
-    --home /brain \
+    --bind $PWD:/workspace \
+    --home /workspace \
     $image_path \
-    python /brain/scripts/gen_embeddings.py
+    python /workspace/scripts/gen_embeddings.py
 
 # Check exit status
 if [ $? -eq 0 ]; then

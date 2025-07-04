@@ -6,15 +6,15 @@ from omegaconf import DictConfig
 import torch
 import tqdm
 
-from src.configs import BaseConfig, GlobalConfig
-from src.data import (
+from brain_image.configs import BaseConfig, GlobalConfig, get_device
+from brain_image.data import (
     EEGDatasetConfig,
     batch_load_images,
     get_image_paths,
     preprocess_image,
 )
-from src.model import load_image_encoder
-from src.utils import DEVICE, DTYPE, get_dtype
+from brain_image.model import load_image_encoder
+from brain_image.utils import DTYPE, get_dtype
 
 
 class EmbeddingGenerationConfig(BaseConfig):
@@ -24,7 +24,7 @@ class EmbeddingGenerationConfig(BaseConfig):
     img_size: tuple[int, int] = (224, 224)
     models_path: Path = Path("models")
     dtype: str = "float16"
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str | None = None
     data_config: EEGDatasetConfig = EEGDatasetConfig()
 
     output_dir: Path | None = (
@@ -37,7 +37,7 @@ def generate_latents(
     img_paths: list[Path],
     batch_size: int = 32,
     img_size: tuple[int, int] = (224, 224),
-    device: torch.device = DEVICE,
+    device: torch.device = get_device(),
     dtype: torch.dtype = DTYPE,
 ) -> torch.Tensor:
     """Generate embeddings for a given split of images."""
@@ -66,7 +66,7 @@ def run_generation(
     models_path: Path = Path("models"),
     batch_size: int = 512,
     img_size: tuple[int, int] = (224, 224),
-    device: torch.device = DEVICE,
+    device: torch.device = get_device(),
     dtype: torch.dtype = DTYPE,
 ) -> None:
     """Run the embedding generation process."""
@@ -118,7 +118,7 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
                 split=split,
                 models_path=config.models_path,
                 img_size=config.img_size,
-                device=torch.device(config.device),
+                device=torch.device(config.device) if config.device else get_device(),
                 dtype=get_dtype(config.dtype),
             )
 

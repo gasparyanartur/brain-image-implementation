@@ -50,7 +50,16 @@ From: python:3.12-slim
     chown -R app:app /app
 
 %runscript
-    exec /bin/bash "$@"
+if [ -f /workspace/pyproject.toml ]; then
+    echo "Detected runtime project in /workspace. Syncing dependencies..."
+    cd /workspace
+    uv sync --system
+    exec "$@"
+else
+    echo "No runtime project detected. Using build-time /app."
+    cd /app
+    exec "$@"
+fi
 
 %startscript
     exec /bin/bash "$@" 

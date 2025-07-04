@@ -7,9 +7,9 @@ import hydra
 from lightning import Trainer
 import torch
 import tqdm
-from src.configs import BaseConfig
-from src.model import NICEModel
-from src.data import EEGDatasetConfig
+from brain_image.configs import BaseConfig, get_device
+from brain_image.model import NICEModel
+from brain_image.data import EEGDatasetConfig
 
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 
@@ -28,14 +28,14 @@ class EvaluateNiceConfig(BaseConfig):
     checkpoint_path: Path = Path("models")
     output_path: Path = Path("test_outputs")
     dtype: str = "float32"
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str | None = None
     precision: Literal[16, 32, 64] = 16
 
 
 def evaluate_nice(
     config: EvaluateNiceConfig,
 ):
-    device = torch.device(config.device)
+    device = torch.device(config.device or get_device())
     dtype = torch.float32 if config.dtype == "float32" else torch.float16
 
     # Load the NICE model
@@ -65,7 +65,7 @@ def evaluate_nice(
     )
 
     trainer = Trainer(
-        accelerator=config.device,
+        accelerator=config.device or "auto",
         precision=config.precision,
         enable_progress_bar=True,
         logger=[logger, csv_logger],

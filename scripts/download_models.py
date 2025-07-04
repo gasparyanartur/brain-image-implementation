@@ -4,8 +4,8 @@ import dreamsim
 import hydra
 from omegaconf import DictConfig
 
-from src.configs import BaseConfig
-from src.model import load_image_encoder
+from brain_image.configs import BaseConfig
+from brain_image.model import load_image_encoder
 
 
 class DownloadModelsConfig(BaseConfig):

@@ -7,9 +7,9 @@ from torch.utils.data import DataLoader
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger, Logger
-from src.data import EEGDatasetConfig
-from src.configs import BaseConfig
-from src.model import Model, NICEModel, NICEConfig
+from brain_image.data import EEGDatasetConfig
+from brain_image.configs import BaseConfig
+from brain_image.model import Model, NICEModel, NICEConfig
 
 
 class TrainConfig(BaseConfig):
