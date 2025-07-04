@@ -1,6 +1,10 @@
 #!/bin/bash
 
-image_path=${APPTAINER_IMAGE_PATH:-/home/x_artga/projdir/images/brain_2025_07_04_10_44_01.sif}
+image_path=${APPTAINER_IMAGE_PATH}
+# if image_path is not set, use the latest image path
+if [ -z "$image_path" ]; then
+    image_path=$(ls -t images/brain_*.sif | head -n 1)
+fi
 
 apptainer shell \
 --nv \
