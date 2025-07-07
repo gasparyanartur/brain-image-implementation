@@ -8,17 +8,15 @@ fi
 
 mount_points=()
 
-if [ -z "/proj" ]; then
+if [ -d "/proj" ]; then
     echo "Mounting /proj"
     mount_points+=("/proj")
 fi
 
-if [ -z "/home" ]; then
+if [ -d "/home" ]; then
     echo "Mounting /home"
     mount_points+=("/home")
 fi
-
-echo "Mount points: ${mount_points[@]}"
 
 echo "Launching shell in singularity image: $image_path"
 apptainer shell \
