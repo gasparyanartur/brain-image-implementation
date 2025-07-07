@@ -22,6 +22,7 @@ echo "Running singularity image: $image_path"
 
 # Set environment variables for the container
 export PROJECT_WORKSPACE_DIR=/workspace
+export PYTHONPATH="/workspace/src:$PYTHONPATH"
 
 apptainer run \
 --nv \

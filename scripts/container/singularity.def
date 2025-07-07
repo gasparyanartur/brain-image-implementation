@@ -43,8 +43,10 @@ From: images/singularity_base.sif
 
 %runscript
 if [ -f /workspace/pyproject.toml ]; then
-    echo "Detected runtime project in /workspace. Syncing dependencies..."
+    echo "Detected runtime project in /workspace. Using local package..."
     cd /workspace
+    # Add the local src directory to Python path to override installed package
+    export PYTHONPATH="/workspace/src:$PYTHONPATH"
     exec "$@"
 else
     echo "No runtime project detected. Using build-time /app."
@@ -54,8 +56,10 @@ fi
 
 %startscript
 if [ -f /workspace/pyproject.toml ]; then
-    echo "Detected runtime project in /workspace. Syncing dependencies..."
+    echo "Detected runtime project in /workspace. Using local package..."
     cd /workspace
+    # Add the local src directory to Python path to override installed package
+    export PYTHONPATH="/workspace/src:$PYTHONPATH"
     exec /bin/bash "$@"
 else
     echo "No runtime project detected. Using build-time /app."
