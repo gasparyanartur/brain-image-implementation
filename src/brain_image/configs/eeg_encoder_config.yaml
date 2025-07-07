@@ -1,0 +1,12 @@
+# EEG Encoder Configuration
+embed_dim: 40
+encoded_dim: 1440  # Result of embed dim * final spatial * final temporal
+proj_dim: 768
+
+# Convolutional parameters
+temporal_kernel_size: 25
+spatial_kernel_size: 17
+temporal_pool_size: 41
+temporal_stride: 1
+hidden_dim: 40
+dropout: 0.5 

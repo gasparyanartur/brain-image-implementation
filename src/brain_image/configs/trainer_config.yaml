@@ -1,0 +1,74 @@
+# NICE Trainer Configuration
+run_name: nice
+num_epochs: 100
+num_workers: 8
+
+# Training settings
+compile_model: true
+init_weights: true
+
+# Logging and checkpointing
+log_dir: logs
+checkpoint_dir: checkpoints
+enable_barebones: false
+overfit_batches: 0
+precision: 32
+val_check_interval: 0.25
+log_every_n_steps: 50
+enable_progress_bar: true
+enable_model_summary: true
+save_checkpoints: true
+save_top_k: 1
+
+# Device settings
+device: cuda
+accelerator: auto
+
+# Model configuration (references nice_config.yaml)
+submodel_config:
+  model_name: aligned_synclr
+  project_dim: 256
+  img_latent_dim: 768
+  encoder_lr: 8e-3
+  projector_lr: 8e-3
+  lr_scheduler: cosine_anneal
+  betas: [0.9, 0.999]
+  encoder_min_lr: 1e-4
+  projector_min_lr: 1e-4
+  projector_warmup_epochs: 2
+  encoder_warmup_epochs: 4
+  warmup_start_frac: 0.1
+  max_epochs: 100
+  num_workers: 8
+  temperature_init: 2.659260
+  data_seed: 42
+  
+  # EEG Encoder Configuration
+  eeg_config:
+    embed_dim: 40
+    encoded_dim: 1440
+    proj_dim: 768
+    temporal_kernel_size: 25
+    spatial_kernel_size: 17
+    temporal_pool_size: 41
+    temporal_stride: 1
+    hidden_dim: 40
+    dropout: 0.5
+
+# Dataset configuration (references data_config.yaml)
+dataset_config:
+  data_path: data/things-eeg2
+  imgs_dir: imgs
+  eeg_dir: eeg
+  latents_dir: img-latents
+  train_imgs_per_concept: 10
+  test_imgs_per_concept: 1
+  subs: [1,2,3,4,5,6,7,8,9,10]
+  batch_size: 32
+  val_batch_size: 32
+  eval_batch_size: 32
+  shuffle_train: true
+  limit_train_size: 1.0
+  limit_val_size: 1.0
+  limit_test_size: 1.0
+  num_workers: 8 

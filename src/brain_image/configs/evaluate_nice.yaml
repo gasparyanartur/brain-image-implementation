@@ -1,1 +1,5 @@
 checkpoint_path: checkpoints/aligned_synclr/version_20/checkpoints/checkpoint/epoch=55-val/loss=1.16.ckpt
+output_path: test_outputs
+dtype: float32
+device: cuda
+precision: 16

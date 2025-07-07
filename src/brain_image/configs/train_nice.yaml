@@ -1,3 +1,14 @@
+# Training configuration
+defaults:
+  - trainer_config
+  - _self_
+
+# Additional training settings
+save_top_k: 1
 dtype: float32
-nice_config:
-  model_name: synclr
+device: cuda
+precision: 32
+num_workers: 4
+compile_model: true
+log_path: logs
+checkpoint_path: null
