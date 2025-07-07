@@ -1,0 +1,31 @@
+# Main configuration file - entry point for all configurations
+# This file defines the structure and allows easy swapping of components
+
+# Default configurations for each component
+defaults:
+  # Dataset configuration - can be swapped with: dataset=other_dataset
+  - dataset: eeg_dataset
+  # Model configuration - can be swapped with: model=other_model  
+  - model: nice_model
+  # Trainer configuration - can be swapped with: trainer=other_trainer
+  - trainer: nice_trainer
+  # Encoder configuration - can be swapped with: encoder=other_encoder
+  - encoder: eeg_encoder
+  # Override with local settings
+  - _self_
+
+# Global settings that apply to all configurations
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+
+# Common settings
+device: cuda
+precision: 16
+num_workers: 4
+compile_model: true
+log_path: logs
+checkpoint_path: null  # Path to checkpoint to resume from 

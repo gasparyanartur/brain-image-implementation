@@ -1,13 +1,20 @@
-# Training configuration
+# Training configuration for NICE model
+
+# Default components for NICE training
 defaults:
-  - trainer_config
+  - dataset: eeg_dataset
+  - model: nice_model
+  - trainer: nice_trainer
+  - encoder: eeg_encoder
   - _self_
 
-# Additional training settings
-save_top_k: 1
-dtype: float32
+# Script-specific settings
+script_name: train_nice
+description: "Training script for NICE model with EEG data"
+
+# Global overrides for this script
 device: cuda
-precision: 32
+precision: 16
 num_workers: 4
 compile_model: true
 log_path: logs

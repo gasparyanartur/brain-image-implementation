@@ -45,11 +45,12 @@ class NICETrainerConfig(TrainConfig):
     compile_model: bool = True
     init_weights: bool = True
 
-    # Model configuration
-    submodel_config: NICEConfig = NICEConfig(
+    # Model configuration - these will be populated by Hydra composition
+    model: NICEConfig = NICEConfig(
         model_name="aligned_synclr",
     )
-    dataset_config: EEGDatasetConfig = EEGDatasetConfig()
+    dataset: EEGDatasetConfig = EEGDatasetConfig()
+    encoder: Any = None  # Will be populated by Hydra
 
     def create_trainer(self) -> NICETrainer:
         return NICETrainer(self)
@@ -177,8 +178,8 @@ class Trainer:
 class NICETrainer(Trainer):
     def __init__(self, config: NICETrainerConfig):
         model = NICEModel(
-            config=config.submodel_config,
-            dataset_config=config.dataset_config,
+            config=config.model,
+            dataset_config=config.dataset,
             compile=config.compile_model,
             init_weights=config.init_weights,
         )

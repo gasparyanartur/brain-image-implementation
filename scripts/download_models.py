@@ -20,8 +20,13 @@ class DownloadModelsConfig(BaseConfig):
     version_base=None,
 )
 def main(cfg: DictConfig):
-    config = DownloadModelsConfig.from_hydra_config(cfg)
+    """Main function for model downloading with clean configuration."""
+
+    # Setup logging
     logging.basicConfig(level=logging.INFO)
+
+    # Create config from the composed configuration
+    config = DownloadModelsConfig(models=cfg.models, model_path=Path(cfg.model_path))
 
     dreamsim_types = []
     for model in config.models:

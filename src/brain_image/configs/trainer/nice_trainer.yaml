@@ -1,0 +1,27 @@
+# NICE Trainer Configuration
+
+# Training settings
+run_name: nice
+num_epochs: 100
+num_workers: 8
+
+# Model compilation and initialization
+compile_model: true
+init_weights: true
+
+# Logging and checkpointing
+log_dir: logs
+checkpoint_dir: checkpoints
+enable_barebones: false
+overfit_batches: 0
+precision: 16
+val_check_interval: 0.25
+log_every_n_steps: 50
+enable_progress_bar: true
+enable_model_summary: true
+save_checkpoints: true
+save_top_k: 1
+
+# Device settings
+device: cuda
+accelerator: auto 

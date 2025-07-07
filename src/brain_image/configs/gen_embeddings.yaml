@@ -1,7 +1,11 @@
+# Embedding generation configuration
+
+# Default components
 defaults:
-  - data_config
+  - dataset: eeg_dataset
   - _self_
 
+# Generation settings
 batch_size: 256
 models:
   - synclr

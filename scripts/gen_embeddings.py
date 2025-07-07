@@ -129,12 +129,32 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
     version_base=None,
 )
 def main(cfg: DictConfig):
-    config = EmbeddingGenerationConfig.from_hydra_config(cfg)
+    """Main function for embedding generation with clean configuration."""
 
+    # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
+
+    # Create config from the composed configuration
+    from brain_image.data import EEGDatasetConfig
+
+    dataset_config = EEGDatasetConfig(**cfg.dataset)
+
+    # Create the embedding generation config
+    config = EmbeddingGenerationConfig(
+        batch_size=cfg.batch_size,
+        models=cfg.models,
+        splits=cfg.splits,
+        img_size=tuple(cfg.img_size),
+        models_path=Path(cfg.models_path),
+        dtype=cfg.dtype,
+        device=cfg.device,
+        data_config=dataset_config,
+        output_dir=Path(cfg.output_dir) if cfg.output_dir else None,
+    )
+
     logging.info("Starting embedding generation")
     logging.info(f"Config: {config}")
     generate_all_embeddings(config)

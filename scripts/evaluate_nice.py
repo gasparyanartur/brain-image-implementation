@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import hydra
+from omegaconf import DictConfig
 from lightning import Trainer
 import torch
 from brain_image.configs import BaseConfig, get_device
@@ -83,14 +84,25 @@ def evaluate_nice(
     config_name="evaluate_nice",
     version_base=None,
 )
-def main(cfg: EvaluateNiceConfig):
-    config = EvaluateNiceConfig.from_hydra_config(cfg)
+def main(cfg: DictConfig):
+    """Main function for NICE evaluation with clean configuration."""
+
+    # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
-    logging.info(f"Evaluating NICE model with config: {config}")
 
+    # Create config from the composed configuration
+    config = EvaluateNiceConfig(
+        checkpoint_path=Path(cfg.checkpoint_path),
+        output_path=Path(cfg.output_path),
+        dtype=cfg.dtype,
+        device=cfg.device,
+        precision=cfg.precision,
+    )
+
+    logging.info(f"Evaluating NICE model with config: {config}")
     evaluate_nice(config)
 
 
