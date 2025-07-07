@@ -19,12 +19,17 @@ if [ -d "/home" ]; then
 fi
 
 echo "Running singularity image: $image_path"
+
+# Set environment variables for the container
+export PROJECT_WORKSPACE_DIR=/workspace
+
 apptainer run \
 --nv \
 --bind $PWD:/workspace \
 --home /workspace \
 --workdir /workspace \
 --pwd /workspace \
+--env PROJECT_WORKSPACE_DIR=/workspace \
 $(
     for mount_point in "${mount_points[@]}"; do
         echo "--bind $mount_point:$mount_point"
