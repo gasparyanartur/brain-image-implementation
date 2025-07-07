@@ -28,7 +28,9 @@ def main(cfg: DictConfig):
     logging.info(
         f"Downloading models: {dreamsim_types} to {config.model_path.absolute()}"
     )
-    config.model_path.mkdir(parents=True, exist_ok=True)
+    if not config.model_path.exists():
+        config.model_path.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Created directory: {config.model_path.absolute()}")
 
     for dreamsim_type in dreamsim_types:
         try:
