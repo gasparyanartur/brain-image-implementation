@@ -3,8 +3,8 @@ from typing import Literal
 
 import hydra
 from omegaconf import DictConfig
-from brain_image.configs import BaseConfig
-from brain_image.trainer import NICETrainerConfig
+from src.brain_image.configs import BaseConfig
+from src.brain_image.trainer import NICETrainerConfig
 
 import torch
 from pathlib import Path

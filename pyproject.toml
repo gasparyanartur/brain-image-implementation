@@ -42,11 +42,10 @@ build-backend = "setuptools.build_meta"
 package = true
 
 [tool.setuptools]
-package-dir = {brain_image = "src/brain_image"}
+packages = ["brain_image"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
+[tool.setuptools.package-dir]
+brain_image = "src/brain_image"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
