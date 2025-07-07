@@ -20,8 +20,8 @@ fi
 
 echo "Mount points: ${mount_points[@]}"
 
-echo "Running singularity image: $image_path"
-apptainer run \
+echo "Launching shell in singularity image: $image_path"
+apptainer shell \
 --nv \
 --bind $PWD:/workspace \
 --home /workspace \

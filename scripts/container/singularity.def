@@ -13,21 +13,27 @@ From: images/singularity_base.sif
     export PATH="/root/.cargo/bin:$PATH"
     export UV_PROJECT_ENVIRONMENT=/usr/local
 
-%post
-    # Set working directory and prepare for app
-    mkdir -p /app
-    cd /app
-
 %files
     pyproject.toml /app/
     README.md /app/
-    src/ /app/src/
+    src/brain_image /app/src/brain_image
     scripts/ /app/scripts/
     tests/ /app/tests/
 
 %post
+    # Set working directory and prepare for app
+    mkdir -p /app
+    cd /app
+    
+    # Debug: Check what was copied
+    echo "=== Debug: Checking copied files ==="
+    ls -la /app/
+    echo "=== Debug: Checking src directory ==="
+    ls -la /app/src/
+    echo "=== Debug: Checking brain_image directory ==="
+    ls -la /app/src/brain_image/ || echo "brain_image directory not found!"
+    
     # Install Python dependencies using uv
-
     cd /app
     uv pip install . --system
 

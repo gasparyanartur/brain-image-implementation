@@ -6,15 +6,15 @@ from omegaconf import DictConfig
 import torch
 import tqdm
 
-from src.brain_image.configs import BaseConfig, GlobalConfig, get_device
-from src.brain_image.data import (
+from brain_image.configs import BaseConfig, GlobalConfig, get_device
+from brain_image.data import (
     EEGDatasetConfig,
     batch_load_images,
     get_image_paths,
     preprocess_image,
 )
-from src.brain_image.model import load_image_encoder
-from src.brain_image.utils import DTYPE, get_dtype
+from brain_image.model import load_image_encoder
+from brain_image.utils import DTYPE, get_dtype
 
 
 class EmbeddingGenerationConfig(BaseConfig):
