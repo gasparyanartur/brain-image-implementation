@@ -28,6 +28,8 @@ def main(cfg: DictConfig):
     logging.info(
         f"Downloading models: {dreamsim_types} to {config.model_path.absolute()}"
     )
+    config.model_path.mkdir(parents=True, exist_ok=True)
+
     for dreamsim_type in dreamsim_types:
         try:
             logging.info(f"Downloading {dreamsim_type} model...")

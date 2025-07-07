@@ -43,9 +43,13 @@ package = true
 
 [tool.setuptools]
 packages = ["brain_image"]
+include-package-data = true
 
 [tool.setuptools.package-dir]
 brain_image = "src/brain_image"
+
+[tool.setuptools.package-data]
+brain_image = ["configs/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
