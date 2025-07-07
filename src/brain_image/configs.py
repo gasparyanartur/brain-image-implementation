@@ -20,7 +20,7 @@ class GlobalConfig:
     WORKSPACE_DIR: Path = Path(
         os.environ.get("PROJECT_WORKSPACE_DIR", Path(__file__).parent)
     )
-    CONFIGS_DIR: Path = WORKSPACE_DIR / "configs"
+    CONFIGS_DIR: Path = WORKSPACE_DIR / "src" / "brain_image" / "configs"
     DATA_DIR: Path = WORKSPACE_DIR / "data"
 
 
