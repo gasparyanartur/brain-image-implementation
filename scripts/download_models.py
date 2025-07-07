@@ -6,7 +6,7 @@ from omegaconf import DictConfig
 
 from brain_image.configs import BaseConfig
 from brain_image.model import load_image_encoder
-from src.brain_image.configs import GlobalConfig
+from brain_image.configs import GlobalConfig
 
 
 class DownloadModelsConfig(BaseConfig):

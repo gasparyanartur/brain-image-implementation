@@ -13,7 +13,7 @@ from brain_image.data import EEGDatasetConfig
 
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 
-from src.brain_image.configs import GlobalConfig
+from brain_image.configs import GlobalConfig
 
 
 def move_all_to_cpu(items: dict[str, Any]) -> dict[str, Any]:

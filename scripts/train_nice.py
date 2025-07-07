@@ -9,7 +9,7 @@ from brain_image.trainer import NICETrainerConfig
 import torch
 from pathlib import Path
 
-from src.brain_image.configs import GlobalConfig
+from brain_image.configs import GlobalConfig
 
 
 class TrainNICEConfig(BaseConfig):
