@@ -23,9 +23,14 @@ if [ -z "$image_path" ]; then
     image_path=$(ls -t images/brain_*.sif | head -n 1)
 fi
 
-# Run the training script
+# Get CLI arguments (all arguments passed to this script)
+CLI_ARGS="$@"
+
+echo "CLI_ARGS: $CLI_ARGS"
+
+# Run the training script with CLI arguments
 ./scripts/container/run_singularity.sh \
-    python /workspace/scripts/train_nice.py
+    python /workspace/scripts/train_nice.py $CLI_ARGS 
 
 # Check exit status
 if [ $? -eq 0 ]; then
