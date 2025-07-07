@@ -6,6 +6,7 @@ from omegaconf import DictConfig
 
 from brain_image.configs import BaseConfig
 from brain_image.model import load_image_encoder
+from src.brain_image.configs import GlobalConfig
 
 
 class DownloadModelsConfig(BaseConfig):
@@ -13,7 +14,11 @@ class DownloadModelsConfig(BaseConfig):
     model_path: Path = Path("models")
 
 
-@hydra.main(config_path="../configs", config_name="download_models", version_base=None)
+@hydra.main(
+    config_path=str(GlobalConfig.CONFIGS_DIR),
+    config_name="download_models",
+    version_base=None,
+)
 def main(cfg: DictConfig):
     config = DownloadModelsConfig.from_hydra_config(cfg)
     logging.basicConfig(level=logging.INFO)

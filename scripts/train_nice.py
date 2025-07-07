@@ -9,6 +9,8 @@ from brain_image.trainer import NICETrainerConfig
 import torch
 from pathlib import Path
 
+from src.brain_image.configs import GlobalConfig
+
 
 class TrainNICEConfig(BaseConfig):
     trainer_config: NICETrainerConfig = NICETrainerConfig()
@@ -47,7 +49,7 @@ def train_nice(
 
 
 @hydra.main(
-    config_path="../configs",
+    config_path=str(GlobalConfig.CONFIGS_DIR),
     config_name="train_nice",
     version_base=None,
 )

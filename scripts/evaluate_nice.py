@@ -13,6 +13,8 @@ from brain_image.data import EEGDatasetConfig
 
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 
+from src.brain_image.configs import GlobalConfig
+
 
 def move_all_to_cpu(items: dict[str, Any]) -> dict[str, Any]:
     """Detach all tensors in a dictionary."""
@@ -80,8 +82,8 @@ def evaluate_nice(
 
 
 @hydra.main(
-    config_path="../configs",
-    config_name="eval_nice",
+    config_path=str(GlobalConfig.CONFIGS_DIR),
+    config_name="evaluate_nice",
     version_base=None,
 )
 def main(cfg: EvaluateNiceConfig):
