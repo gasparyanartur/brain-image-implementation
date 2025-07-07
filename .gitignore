@@ -26,3 +26,8 @@ wheels/
 *.sif
 *.sif.lock
 /images
+
+# Bash
+/.bash_history
+/.python_history
+/.cache
