@@ -46,7 +46,9 @@ class NICETrainerConfig(TrainConfig):
     init_weights: bool = True
 
     # Model configuration
-    submodel_config: NICEConfig
+    submodel_config: NICEConfig = NICEConfig(
+        model_name="aligned_synclr",
+    )
     dataset_config: EEGDatasetConfig = EEGDatasetConfig()
 
     def create_trainer(self) -> NICETrainer:

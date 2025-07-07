@@ -1,0 +1,15 @@
+{
+  "include": [
+    "src",
+    "scripts",
+    "tests"
+  ],
+  "extraPaths": [
+    "src"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "useLibraryCodeForTypes": true,
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": false
+} 

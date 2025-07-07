@@ -1,4 +1,3 @@
-import json
 import logging
 from pathlib import Path
 from typing import Any, Literal
@@ -6,10 +5,8 @@ from typing import Any, Literal
 import hydra
 from lightning import Trainer
 import torch
-import tqdm
 from brain_image.configs import BaseConfig, get_device
 from brain_image.model import NICEModel
-from brain_image.data import EEGDatasetConfig
 
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 
