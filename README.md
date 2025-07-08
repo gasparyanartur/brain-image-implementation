@@ -122,3 +122,66 @@ uv run scripts/evaluate_nice.py checkpoint_path=PATH_TO_ALIGNED_SYNCLR_CHECKPOIN
 ```
 
 The evaluated results should be printed in the console.
+
+## Weights & Biases Integration
+
+This project includes integration with [Weights & Biases](https://wandb.ai/) for experiment tracking and visualization. To use wandb:
+
+### Setup
+
+1. **Install and authenticate wandb:**
+   ```bash
+   python scripts/setup_wandb.py
+   ```
+   This script will:
+   - Install wandb if not already installed
+   - Guide you through the login process
+   - Create a configuration file
+
+2. **Configure your wandb settings:**
+   Edit the generated `wandb_config.yaml` file with your preferences:
+   ```yaml
+   wandb_entity: your_username_or_team
+   wandb_project: brain-image-nice
+   wandb_log_model: false
+   wandb_tags: []
+   ```
+
+### Usage
+
+1. **Enable wandb in your training configuration:**
+   ```yaml
+   # In your trainer config (e.g., src/brain_image/configs/trainer/nice_trainer.yaml)
+   enable_wandb: true
+   wandb_project: brain-image-nice
+   wandb_entity: your_username_or_team
+   wandb_log_model: false
+   wandb_tags: ["experiment", "nice"]
+   ```
+
+2. **Run training with wandb logging:**
+   ```bash
+   uv run scripts/train_nice.py nice_config.model_name=aligned_synclr
+   ```
+
+3. **Test wandb integration:**
+   ```bash
+   python scripts/test_wandb.py
+   ```
+
+### What gets logged
+
+With wandb enabled, the following information will be automatically logged:
+- Training and validation metrics (loss, accuracy, etc.)
+- Model hyperparameters
+- Training configuration
+- System information (GPU usage, memory, etc.)
+- Model checkpoints (if `wandb_log_model: true`)
+
+### Viewing results
+
+After training, you can view your experiments in the wandb dashboard at [wandb.ai](https://wandb.ai). Navigate to your project to see:
+- Training curves and metrics
+- Model comparison tables
+- System resource usage
+- Experiment configurations

@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import DataLoader
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
-from lightning.pytorch.loggers import TensorBoardLogger, Logger
+from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
 from brain_image.model import Model, NICEModel, NICEConfig
@@ -31,6 +31,13 @@ class TrainConfig(BaseConfig):
     enable_model_summary: bool = True
     save_checkpoints: bool = True
     save_top_k: int = 1
+
+    # Wandb settings
+    enable_wandb: bool = True
+    wandb_project: str = "brain-image"
+    wandb_entity: Optional[str] = None
+    wandb_log_model: bool = False
+    wandb_tags: List[str] = []
 
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     accelerator: str = "auto" if torch.cuda.is_available() else "cpu"
@@ -77,6 +84,7 @@ class Trainer:
             )
             callbacks.append(checkpoint_callback)
 
+        # Add TensorBoard logger
         loggers.append(
             TensorBoardLogger(
                 save_dir=self.config.log_dir,
@@ -84,6 +92,17 @@ class Trainer:
                 default_hp_metric=False,
             )
         )
+
+        # Add Wandb logger if enabled
+        if self.config.enable_wandb:
+            wandb_logger = WandbLogger(
+                project=self.config.wandb_project,
+                entity=self.config.wandb_entity,
+                name=self.config.run_name,
+                log_model=self.config.wandb_log_model,
+                tags=self.config.wandb_tags,
+            )
+            loggers.append(wandb_logger)
 
         return pl.Trainer(
             max_epochs=self.config.num_epochs,
