@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Iterable, Literal, cast
@@ -7,7 +8,7 @@ from typing import Iterable, Literal, cast
 import numpy as np
 import torch
 from torch import Tensor, manual_seed
-from torch.utils.data import Dataset, random_split
+from torch.utils.data import Dataset, random_split, Subset
 import torchvision
 from torchvision.transforms import v2 as tv2
 from lightning.pytorch import LightningDataModule
@@ -81,27 +82,66 @@ class EEGDatasetConfig(DataConfig):
     subs: list[int] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
+def get_subset_dataset(
+    rng: np.random.Generator, dataset: Dataset, subset_frac: float
+) -> Dataset:
+    subset_size = int(len(dataset) * subset_frac)
+    indices = list(range(len(dataset)))
+    subset_indices = rng.choice(indices, subset_size, replace=False)
+    return Subset(dataset, subset_indices.tolist())
+
+
 class EEGDataModule(DataModule):
     def __init__(self, config: EEGDatasetConfig, model_name: str):
         super().__init__(config)
         self.config: EEGDatasetConfig = config
         self.model_name = model_name
+        self.rng = np.random.default_rng(42)
 
     def get_metadata(self) -> dict:
         return {}
 
-    def get_train_dataset(self) -> EEGDataset:
-        return EEGDataset(
+    def get_train_dataset(self) -> Dataset:
+        dataset = EEGDataset(
             self.config,
             split="train",
             model_name=self.model_name,
         )
 
-    def get_val_dataset(self) -> EEGDataset:
-        return EEGDataset(self.config, split="test", model_name=self.model_name)
+        # Apply train size limit if specified
+        if self.config.limit_train_size < 1.0:
+            dataset = get_subset_dataset(
+                self.rng, dataset, self.config.limit_train_size
+            )
+            logging.info(
+                f"Limited train dataset to {len(dataset)} samples ({self.config.limit_train_size * 100:.1f}%)"
+            )
 
-    def get_test_dataset(self) -> EEGDataset:
-        return EEGDataset(self.config, split="test", model_name=self.model_name)
+        return dataset
+
+    def get_val_dataset(self) -> Dataset:
+        dataset = EEGDataset(self.config, split="test", model_name=self.model_name)
+
+        # Apply validation size limit if specified
+        if self.config.limit_val_size < 1.0:
+            dataset = get_subset_dataset(self.rng, dataset, self.config.limit_val_size)
+            logging.info(
+                f"Limited validation dataset to {len(dataset)} samples ({self.config.limit_val_size * 100:.1f}%)"
+            )
+
+        return dataset
+
+    def get_test_dataset(self) -> Dataset:
+        dataset = EEGDataset(self.config, split="test", model_name=self.model_name)
+
+        # Apply test size limit if specified
+        if self.config.limit_test_size < 1.0:
+            dataset = get_subset_dataset(self.rng, dataset, self.config.limit_test_size)
+            logging.info(
+                f"Limited test dataset to {len(dataset)} samples ({self.config.limit_test_size * 100:.1f}%)"
+            )
+
+        return dataset
 
     def train_dataloader(self):
         return self._create_dataloader(
@@ -186,8 +226,8 @@ class EEGDataset(Dataset):
         return len(self.eeg_data)
 
     def __getitem__(self, idx: int):
-        img_idx = idx % (
-            len(self.img_paths)
+        img_idx = (
+            idx % (len(self.img_paths))
         )  # EEG has stacked over subs, so we need to find the right sample within the sub
 
         img_path = self.img_paths[img_idx]

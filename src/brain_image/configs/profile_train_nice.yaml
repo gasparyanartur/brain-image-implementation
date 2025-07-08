@@ -1,0 +1,55 @@
+# Profiling configuration for NICE training
+
+# Default components for NICE training (same as train_nice.yaml)
+defaults:
+  - dataset: eeg_dataset
+  - model: nice_model
+  - trainer: nice_trainer
+  - encoder: eeg_encoder
+  - _self_
+
+# Script-specific settings
+script_name: profile_train_nice
+description: "Profiling script for NICE model training with PyTorch profiler"
+
+# Script-level overrides (not training parameters)
+checkpoint_path: null
+resume_training: false
+run_test_after_training: true
+save_final_model: true
+
+# Profiling settings
+profile_output_dir: profiler_outputs
+profile_activities: ["cpu", "cuda"]
+profile_record_shapes: true
+profile_with_stack: true
+profile_with_flops: true
+profile_with_modules: true
+profile_schedule: "default"
+profile_wait: 1
+profile_warmup: 1
+profile_active: 3
+profile_repeat: 1
+profile_export_chrome_trace: true
+profile_export_stacks: true 
+
+trainer:
+  num_epochs: 1  # Fewer epochs for faster profiling
+  enable_barebones: false  # Minimal logging for cleaner profiling
+  num_workers: 4  # Fewer workers to reduce overhead
+  log_every_n_steps: 1  # Log every step for detailed profiling 
+  enable_wandb: false
+
+dataset:
+  batch_size: 32
+  num_workers: 4
+  limit_train_size: 0.0005
+  limit_val_size: 0.01
+  limit_test_size: 0.01
+
+model:
+  model_name: aligned_synclr
+  num_layers: 4
+  num_units: 128
+  num_heads: 4
+  dropout: 0.1

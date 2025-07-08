@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from pathlib import Path
 import logging
 from typing import Any, Optional, Dict, List, Literal
@@ -10,6 +11,8 @@ from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
 from brain_image.model import Model, NICEModel, NICEConfig
+
+import wandb
 
 
 class TrainConfig(BaseConfig):
@@ -43,6 +46,7 @@ class TrainConfig(BaseConfig):
     wandb_entity: Optional[str] = None
     wandb_log_model: bool = False
     wandb_tags: List[str] = []
+    wandb_mode: Literal["online", "offline"] = "online"
 
     # Device settings
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -94,12 +98,28 @@ class Trainer:
 
         # Add Wandb logger if enabled
         if self.config.enable_wandb:
+            if "WANDB_API_KEY" not in os.environ:
+                logging.warning(
+                    "WANDB_API_KEY not found in environment variables, attempting login..."
+                )
+                wandb.login()
+
+            wandb_tags = [
+                *self.config.wandb_tags,
+                "train",
+            ]
+            if "SLURM_JOB_ID" in os.environ:
+                wandb_tags.append("slurm")
+            else:
+                wandb_tags.append("local")
+
             wandb_logger = WandbLogger(
                 project=self.config.wandb_project,
                 entity=self.config.wandb_entity,
                 name=self.config.run_name,
                 log_model=self.config.wandb_log_model,
-                tags=self.config.wandb_tags,
+                tags=wandb_tags,
+                offline=self.config.wandb_mode == "offline",
             )
             loggers.append(wandb_logger)
 
