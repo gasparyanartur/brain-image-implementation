@@ -2,9 +2,11 @@ import logging
 from typing import Any
 
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from brain_image.configs import BaseConfig
 from brain_image.trainer import NICETrainer, NICETrainerConfig
+from brain_image.model import EEGEncoderConfig, NICEConfig
+from brain_image.data import EEGDatasetConfig
 
 import torch
 from pathlib import Path
@@ -13,24 +15,22 @@ from brain_image.configs import GlobalConfig
 
 
 class TrainNICEConfig(BaseConfig):
-    """Configuration for NICE training script."""
+    """Configuration for NICE training script - handles component composition."""
 
     script_name: str = "train_nice"
     description: str = "Training script for NICE model with EEG data"
 
-    # These will be populated by Hydra composition
-    dataset: Any = None
-    model: Any = None
-    trainer: Any = None
-    encoder: Any = None
+    # Component composition - these will be populated by Hydra
+    dataset: EEGDatasetConfig = EEGDatasetConfig()
+    model: NICEConfig = NICEConfig(model_name="aligned_synclr")
+    trainer: NICETrainerConfig = NICETrainerConfig()
+    encoder: EEGEncoderConfig = EEGEncoderConfig()
 
-    # Global settings
-    device: str = "cuda"
-    precision: int = 16
-    num_workers: int = 4
-    compile_model: bool = True
-    log_path: str = "logs"
+    # Script-specific settings (not training parameters)
     checkpoint_path: str | None = None
+    resume_training: bool = False
+    run_test_after_training: bool = True
+    save_final_model: bool = True
 
 
 def train_nice(trainer: NICETrainer, checkpoint_path: Path | None = None):
@@ -59,6 +59,8 @@ def train_nice(trainer: NICETrainer, checkpoint_path: Path | None = None):
 def main(cfg: DictConfig):
     """Main function for NICE training with modular configuration."""
 
+    config = TrainNICEConfig.from_hydra_config(cfg)
+
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
@@ -68,26 +70,18 @@ def main(cfg: DictConfig):
     # Set torch precision
     torch.set_float32_matmul_precision("high")
 
-    # Create trainer from the composed configuration
-    from brain_image.trainer import NICETrainerConfig
-
-    trainer_config = NICETrainerConfig(**cfg.trainer)
-    trainer = trainer_config.create_trainer()
-
-    logging.info(f"NICE Training Configuration:")
-    logging.info(f"  Script: {cfg.script_name}")
-    logging.info(f"  Description: {cfg.description}")
-    logging.info(f"  Dataset: {cfg.dataset.data_path}")
-    logging.info(f"  Model: {cfg.model.model_name}")
-    logging.info(f"  Trainer: {cfg.trainer.run_name}")
-    logging.info(f"  Epochs: {cfg.trainer.num_epochs}")
-    logging.info(f"  Device: {cfg.device}")
-    logging.info(f"  Precision: {cfg.precision}")
+    # Create trainer with composed components
+    trainer = NICETrainer(
+        config=config.trainer,
+        model_config=config.model,
+        dataset_config=config.dataset,
+        encoder=config.encoder,
+    )
 
     # Get checkpoint path if specified
     checkpoint_path = None
-    if cfg.checkpoint_path:
-        checkpoint_path = Path(cfg.checkpoint_path)
+    if config.checkpoint_path:
+        checkpoint_path = Path(config.checkpoint_path)
 
     model, test_metrics = train_nice(trainer, checkpoint_path)
     logging.info(f"Finished training with test metrics:")

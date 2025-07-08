@@ -12,10 +12,8 @@ defaults:
 script_name: train_nice
 description: "Training script for NICE model with EEG data"
 
-# Global overrides for this script
-device: cuda
-precision: 16
-num_workers: 4
-compile_model: true
-log_path: logs
+# Script-level overrides (not training parameters)
 checkpoint_path: null
+resume_training: false
+run_test_after_training: true
+save_final_model: true

@@ -13,20 +13,25 @@ from brain_image.model import Model, NICEModel, NICEConfig
 
 
 class TrainConfig(BaseConfig):
+    """Base training configuration - focused only on training parameters."""
+
+    # Training parameters
     run_name: str
     num_epochs: int
     num_workers: int
 
+    # Model compilation and initialization
+    compile_model: bool = True
+    init_weights: bool = True
+
+    # Logging and checkpointing
     log_dir: Path = Path("logs")
     checkpoint_dir: Path = Path("checkpoints")
-
     enable_barebones: bool = False
     overfit_batches: int = 0
     precision: Literal[16, 32, 64] = 32
-
     val_check_interval: float = 0.25
     log_every_n_steps: int = 50
-
     enable_progress_bar: bool = True
     enable_model_summary: bool = True
     save_checkpoints: bool = True
@@ -39,28 +44,22 @@ class TrainConfig(BaseConfig):
     wandb_log_model: bool = False
     wandb_tags: List[str] = []
 
+    # Device settings
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     accelerator: str = "auto" if torch.cuda.is_available() else "cpu"
 
 
 class NICETrainerConfig(TrainConfig):
+    """NICE-specific trainer configuration - training parameters only."""
+
     # Required fields from TrainConfig
     run_name: str = "nice"
     num_epochs: int = 100
     num_workers: int = 8
 
+    # NICE-specific training settings
     compile_model: bool = True
     init_weights: bool = True
-
-    # Model configuration - these will be populated by Hydra composition
-    model: NICEConfig = NICEConfig(
-        model_name="aligned_synclr",
-    )
-    dataset: EEGDatasetConfig = EEGDatasetConfig()
-    encoder: Any = None  # Will be populated by Hydra
-
-    def create_trainer(self) -> NICETrainer:
-        return NICETrainer(self)
 
 
 class Trainer:
@@ -195,10 +194,16 @@ class Trainer:
 
 
 class NICETrainer(Trainer):
-    def __init__(self, config: NICETrainerConfig):
+    def __init__(
+        self,
+        config: NICETrainerConfig,
+        model_config: NICEConfig,
+        dataset_config: EEGDatasetConfig,
+        encoder: Any = None,
+    ):
         model = NICEModel(
-            config=config.model,
-            dataset_config=config.dataset,
+            config=model_config,
+            dataset_config=dataset_config,
             compile=config.compile_model,
             init_weights=config.init_weights,
         )

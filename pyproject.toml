@@ -13,7 +13,7 @@ dependencies = [
     "torch_geometric",
     "lightning",
     "triton",
-    "wandb",
+    "wandb>=0.12.10",
 
     "numpy",
     "einops",

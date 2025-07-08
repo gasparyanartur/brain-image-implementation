@@ -31,3 +31,6 @@ wheels/
 /.bash_history
 /.python_history
 /.cache
+
+/.env
+/wandb
