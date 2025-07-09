@@ -1,4 +1,5 @@
 from __future__ import annotations
+import datetime
 import os
 from pathlib import Path
 import logging
@@ -63,6 +64,8 @@ class NICETrainerConfig(TrainConfig):
     compile_model: bool = True
     init_weights: bool = True
 
+    wandb_tags: list[str] = ["nice"]
+
 
 class Trainer:
     def __init__(self, config: TrainConfig, model: Model):
@@ -111,10 +114,20 @@ class Trainer:
             else:
                 wandb_tags.append("local")
 
+            title_components = [self.get_train_title()]
+
+            if "SLURM_JOB_ID" in os.environ:
+                title_components.append(os.environ["SLURM_JOB_ID"])
+            if "SLURM_ARRAY_TASK_ID" in os.environ:
+                title_components.append(os.environ["SLURM_ARRAY_TASK_ID"])
+            datetime_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            title_components.append(datetime_str)
+
+            name = "-".join(title_components)
             wandb_logger = WandbLogger(
                 project=self.config.wandb_project,
                 entity=self.config.wandb_entity,
-                name=self.config.run_name,
+                name=name,
                 log_model=self.config.wandb_log_model,
                 tags=wandb_tags,
                 offline=self.config.wandb_mode == "offline",
@@ -122,7 +135,6 @@ class Trainer:
             loggers.append(wandb_logger)
 
         precision = "bf16-mixed" if self.config.precision == 16 else "32-true"
-        logging.info("DSADAS")
 
         return pl.Trainer(
             max_epochs=self.config.num_epochs,
@@ -139,9 +151,12 @@ class Trainer:
             accelerator=self.config.accelerator,
         )
 
+    def get_train_title(self) -> str:
+        return f"{self.config.run_name}"
+
     def train(self, ckpt_path: Optional[Path] = None):
         """Train the model using Lightning."""
-        logging.info(f"Starting {self.config.run_name} training with Lightning...")
+        logging.info(f"Starting {self.get_train_title()} training with Lightning...")
 
         # Convert checkpoint path to string if provided
         ckpt_path_str = str(ckpt_path) if ckpt_path else None
@@ -228,4 +243,8 @@ class NICETrainer(Trainer):
             compile=config.compile_model,
             init_weights=config.init_weights,
         )
+        self.model_config: NICEConfig = model_config
         super().__init__(config, model)
+
+    def get_train_title(self) -> str:
+        return f"nice-{self.model_config.model_name}"
