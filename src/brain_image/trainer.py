@@ -11,8 +11,8 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
-from brain_image.model import Model, NICEModel, NICEConfig
-
+from brain_image.model import EEGEncoderConfig, Model, NICEModel, NICEConfig
+from pydantic import field_validator
 import wandb
 
 
@@ -247,6 +247,15 @@ class NICETrainer(Trainer):
         dataset_config: EEGDatasetConfig,
         encoder: Any = None,
     ):
+        if isinstance(config, dict):
+            config = NICETrainerConfig.model_validate(config)
+        if isinstance(model_config, dict):
+            model_config = NICEConfig.model_validate(model_config)
+        if isinstance(dataset_config, dict):
+            dataset_config = EEGDatasetConfig.model_validate(dataset_config)
+        if isinstance(encoder, dict):
+            encoder = EEGEncoderConfig.model_validate(encoder)
+
         model = NICEModel(
             config=model_config,
             dataset_config=dataset_config,

@@ -71,6 +71,10 @@ def main(cfg: DictConfig):
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
 
+    logging.info(f"Training with config:")
+    for key, value in config.model_dump(mode="json").items():
+        logging.info(f"  {key}: {value}")
+
     # Set torch precision
     torch.set_float32_matmul_precision("high")
 

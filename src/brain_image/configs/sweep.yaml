@@ -2,9 +2,9 @@
 
 # Default components for sweep training
 defaults:
-  - dataset: eeg_dataset
+  - dataset: eeg_dataset_fast
   - model: nice_model
-  - trainer: nice_trainer
+  - trainer: nice_trainer_sweep
   - encoder: eeg_encoder
   - _self_
 
@@ -15,10 +15,10 @@ description: "Parameter sweep for NICE model training"
 # Sweep configuration
 sweep:
   # Sweep type: random, grid, bayesian, lr, architecture
-  type: random
+  type: bayesian
   
   # Number of runs to execute
-  count: 10
+  count: 100
   
   # Wandb settings
   project: brain-image-nice
@@ -26,8 +26,8 @@ sweep:
   
   # Metric to optimize
   metric:
-    name: val_loss
-    goal: minimize
+    name: top1_acc
+    goal: maximize
   
   # Early termination
   early_terminate:
@@ -37,10 +37,6 @@ sweep:
   # Parameter configurations for different sweep types
   parameters:
     random:
-      trainer.num_epochs:
-        min: 50
-        max: 200
-        distribution: int_uniform
       model.encoder_lr:
         min: 1e-4
         max: 1e-2
@@ -49,32 +45,16 @@ sweep:
         min: 1e-4
         max: 1e-2
         distribution: log_uniform
-      model.temperature_init:
-        min: 1.5
-        max: 3.5
-        distribution: uniform
       model.project_dim:
         values: [128, 256, 512]
-      trainer.precision:
-        values: [16, 32]
     
     grid:
-      trainer.num_epochs:
-        values: [50, 100, 150]
       model.encoder_lr:
         values: [1e-3, 5e-3, 8e-3, 1e-2]
       model.projector_lr:
         values: [1e-3, 5e-3, 8e-3, 1e-2]
-      model.temperature_init:
-        values: [2.0, 2.659260, 3.0]
-      trainer.precision:
-        values: [16, 32]
     
     bayesian:
-      trainer.num_epochs:
-        min: 50
-        max: 200
-        distribution: int_uniform
       model.encoder_lr:
         min: 1e-4
         max: 1e-2
@@ -83,14 +63,18 @@ sweep:
         min: 1e-4
         max: 1e-2
         distribution: log_uniform
-      model.temperature_init:
-        min: 1.5
-        max: 3.5
-        distribution: uniform
       model.project_dim:
         values: [128, 256, 512]
-      trainer.precision:
-        values: [16, 32]
+      encoder.hidden_dim:
+        values: [10, 20, 40, 80]
+      encoder.temporal_kernel_size:
+        values: [10, 20, 40, 80]
+      encoder.spatial_kernel_size:
+        values: [10, 20, 40, 80]
+      encoder.final_temporal_size:
+        values: [2, 3, 4, 5]
+      encoder.final_spatial_size:
+        values: [2, 3, 4, 5]
     
     lr:
       model.encoder_lr:
@@ -107,7 +91,13 @@ sweep:
         values: [128, 256, 512, 1024]
       model.img_latent_dim:
         values: [512, 768, 1024]
-      model.temperature_init:
-        values: [2.0, 2.659260, 3.0, 3.5]
-      trainer.precision:
-        values: [16, 32] 
+      encoder.hidden_dim:
+        values: [10, 20, 40, 80, 160]
+      encoder.temporal_kernel_size:
+        values: [10, 20, 40, 80, 160]
+      encoder.spatial_kernel_size:
+        values: [10, 20, 40, 80, 160]
+      encoder.final_temporal_size:
+        values: [2, 3, 4, 5, 6]
+      encoder.final_spatial_size:
+        values: [2, 3, 4, 5, 6]

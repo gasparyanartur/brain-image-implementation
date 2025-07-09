@@ -34,3 +34,5 @@ wheels/
 
 /.env
 /wandb
+
+/test_outputs/

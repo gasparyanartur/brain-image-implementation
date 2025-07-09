@@ -54,8 +54,6 @@ class Model(LightningModule):
 
 class EEGEncoderConfig(ModelConfig):
     embed_dim: int = 40
-    encoded_dim: int = 1440  # Result of embed dim * final spatial * final temporal
-    proj_dim: int = 768
 
     temporal_kernel_size: int = 25
     spatial_kernel_size: int = 17
@@ -63,6 +61,12 @@ class EEGEncoderConfig(ModelConfig):
     temporal_stride: int = 1
     hidden_dim: int = 40
     dropout: float = 0.5
+    final_temporal_size: int = 4
+    final_spatial_size: int = 4
+
+    @property
+    def encoded_dim(self) -> int:
+        return self.embed_dim * self.final_spatial_size * self.final_temporal_size
 
     def create_model(self) -> EEGEncoder:
         return EEGEncoder(self)
@@ -87,6 +91,8 @@ class PatchEmbedding(nn.Module):
         temporal_pool_size: int,
         temporal_stride: int,
         hidden_dim: int,
+        final_temporal_size: int,
+        final_spatial_size: int,
         dropout: float = 0.5,
     ):
         # Adapted from https://github.com/eeyhsong/NICE-EEG
@@ -109,6 +115,7 @@ class PatchEmbedding(nn.Module):
             nn.BatchNorm2d(hidden_dim),
             nn.ELU(inplace=True),
             nn.Dropout(dropout),
+            nn.AdaptiveAvgPool2d((final_spatial_size, final_temporal_size)),
         )
 
         self.projection = nn.Conv2d(hidden_dim, embed_dim, kernel_size=(1, 1))
@@ -142,6 +149,8 @@ class EEGEncoder(Model):
             temporal_pool_size=config.temporal_pool_size,
             temporal_stride=config.temporal_stride,
             hidden_dim=config.hidden_dim,
+            final_temporal_size=config.final_temporal_size,
+            final_spatial_size=config.final_spatial_size,
             dropout=config.dropout,
         )
 

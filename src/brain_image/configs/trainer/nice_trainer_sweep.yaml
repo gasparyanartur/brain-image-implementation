@@ -12,22 +12,22 @@ init_weights: true
 # Logging and checkpointing
 log_dir: logs
 checkpoint_dir: null
-enable_barebones: true
+enable_barebones: false
 overfit_batches: 0
 precision: 32
 val_check_interval: 1.0
-log_every_n_steps: 0
-enable_progress_bar: false
-enable_model_summary: false
+log_every_n_steps: 100
+enable_progress_bar: true
+enable_model_summary: true
 save_checkpoints: false
-save_top_k: 1
+save_top_k: 0
 
 # Wandb settings
-enable_wandb: false
+enable_wandb: true
 wandb_project: brain-image-nice
 wandb_entity: null  # Set to your wandb username or team name
 wandb_log_model: false
-wandb_tags: []
+wandb_tags: [sweep]
 
 # Device settings
 device: cuda
