@@ -29,8 +29,6 @@ class TrainNICEConfig(BaseConfig):
     # Script-specific settings (not training parameters)
     checkpoint_path: str | None = None
     resume_training: bool = False
-    run_test_after_training: bool = True
-    save_final_model: bool = True
 
 
 def train_nice(trainer: NICETrainer, checkpoint_path: Path | None = None):

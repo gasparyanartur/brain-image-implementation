@@ -14,8 +14,8 @@ description: "Parameter sweep for NICE model training"
 
 # Sweep configuration
 sweep:
-  # Sweep type: random, grid, bayesian, lr, architecture
-  type: bayesian
+  # Sweep type: random, grid, bayes, lr, architecture
+  type: bayes
   
   # Number of runs to execute
   count: 100
@@ -32,7 +32,7 @@ sweep:
   # Early termination
   early_terminate:
     type: hyperband
-    min_iter: 10
+    min_iter: 5
   
   # Parameter configurations for different sweep types
   parameters:
@@ -50,11 +50,11 @@ sweep:
     
     grid:
       model.encoder_lr:
-        values: [1e-3, 5e-3, 8e-3, 1e-2]
+        values: [1e-3, 5e-3, 8e-3, 5e-4]
       model.projector_lr:
         values: [1e-3, 5e-3, 8e-3, 1e-2]
     
-    bayesian:
+    bayes:
       model.encoder_lr:
         min: 1e-4
         max: 1e-2
@@ -68,13 +68,13 @@ sweep:
       encoder.hidden_dim:
         values: [10, 20, 40, 80]
       encoder.temporal_kernel_size:
-        values: [10, 20, 40, 80]
+        values: [20, 40, 80]
       encoder.spatial_kernel_size:
-        values: [10, 20, 40, 80]
+        values: [20, 40, 80]
       encoder.final_temporal_size:
-        values: [2, 3, 4, 5]
+        values: [2, 4, 6]
       encoder.final_spatial_size:
-        values: [2, 3, 4, 5]
+        values: [2, 4, 6]
     
     lr:
       model.encoder_lr:

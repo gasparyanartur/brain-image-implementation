@@ -137,7 +137,8 @@ class Trainer:
             max_epochs=self.config.num_epochs,
             callbacks=callbacks if not self.config.enable_barebones else None,
             logger=loggers if not self.config.enable_barebones else [],
-            enable_checkpointing=not self.config.enable_barebones,
+            enable_checkpointing=(not self.config.enable_barebones)
+            and self.config.save_checkpoints,
             enable_model_summary=not self.config.enable_barebones,
             enable_progress_bar=not self.config.enable_barebones,
             overfit_batches=self.config.overfit_batches,
