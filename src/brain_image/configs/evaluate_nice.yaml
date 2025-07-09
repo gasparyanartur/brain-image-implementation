@@ -2,4 +2,4 @@ checkpoint_path: checkpoints/aligned_synclr/version_20/checkpoints/checkpoint/ep
 output_path: test_outputs
 dtype: float32
 device: cuda
-precision: 16
+precision: 32

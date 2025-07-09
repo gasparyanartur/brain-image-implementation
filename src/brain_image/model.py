@@ -3,8 +3,8 @@ from __future__ import annotations
 from functools import lru_cache
 import logging
 from pathlib import Path
-from typing import Literal
-from pydantic import BaseModel
+from typing import Any, Literal
+from pydantic import BaseModel, field_validator
 import torch
 import torch.nn as nn
 import einops
@@ -203,15 +203,31 @@ class NICEConfig(ModelConfig):
     temperature_init: float = math.log(1 / 0.07)
     data_seed: int = 42
 
+    @field_validator("eeg_config", mode="before")
+    @classmethod
+    def validate_eeg_config(cls, v):
+        """Convert dict to EEGEncoderConfig if needed."""
+        if isinstance(v, dict):
+            return EEGEncoderConfig.model_validate(v)
+        return v
+
 
 class NICEModel(Model):
     def __init__(
         self,
-        config: NICEConfig,
-        dataset_config: EEGDatasetConfig = EEGDatasetConfig(),
+        config: NICEConfig | dict[str, Any],
+        dataset_config: EEGDatasetConfig | dict[str, Any] = EEGDatasetConfig(),
         compile: bool = True,
         init_weights: bool = True,
     ):
+        # Convert dicts to Pydantic models if they aren't already
+        if isinstance(config, dict):
+            config = NICEConfig.model_validate(config)
+
+        if isinstance(dataset_config, dict):
+            dataset_config = EEGDatasetConfig.model_validate(dataset_config)
+
+        # Recursively convert all dicts to NICEConfig
         super(NICEModel, self).__init__(config)
 
         self.automatic_optimization = False

@@ -29,8 +29,10 @@ class TrainConfig(BaseConfig):
 
     # Logging and checkpointing
     log_dir: Path = Path("logs")
-    checkpoint_dir: Path = Path("checkpoints")
+    checkpoint_dir: Path | None = None
     enable_barebones: bool = False
+    checkpoint_monitor: str = "val/loss"
+    checkpoint_monitor_mode: Literal["min", "max"] = "min"
     overfit_batches: int = 0
     precision: Literal[16, 32, 64] = 16
     val_check_interval: float = 1.0
@@ -64,6 +66,9 @@ class NICETrainerConfig(TrainConfig):
     compile_model: bool = True
     init_weights: bool = True
 
+    checkpoint_monitor: str = "val/top1_acc"
+    checkpoint_monitor_mode: Literal["min", "max"] = "max"
+
     wandb_tags: list[str] = ["nice"]
 
 
@@ -79,12 +84,13 @@ class Trainer:
 
         if self.config.save_checkpoints:
             checkpoint_callback = ModelCheckpoint(
-                monitor="val/loss",
-                dirpath=self.config.checkpoint_dir,
-                filename=f"{self.config.run_name}-{{epoch:02d}}-{{val/loss:.4f}}",
+                monitor=self.config.checkpoint_monitor,
+                # dirpath=self.config.checkpoint_dir,
+                filename=f"{self.config.run_name}-{{epoch:02d}}-{{{self.config.checkpoint_monitor.replace('/', '_')}:.4f}}",
                 save_top_k=self.config.save_top_k,
-                mode="min",
+                mode=self.config.checkpoint_monitor_mode,
                 save_last=True,
+                verbose=True,
             )
             callbacks.append(checkpoint_callback)
 
@@ -114,16 +120,7 @@ class Trainer:
             else:
                 wandb_tags.append("local")
 
-            title_components = [self.get_train_title()]
-
-            if "SLURM_JOB_ID" in os.environ:
-                title_components.append(os.environ["SLURM_JOB_ID"])
-            if "SLURM_ARRAY_TASK_ID" in os.environ:
-                title_components.append(os.environ["SLURM_ARRAY_TASK_ID"])
-            datetime_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            title_components.append(datetime_str)
-
-            name = "-".join(title_components)
+            name = self.get_train_title()
             wandb_logger = WandbLogger(
                 project=self.config.wandb_project,
                 entity=self.config.wandb_entity,
@@ -151,12 +148,25 @@ class Trainer:
             accelerator=self.config.accelerator,
         )
 
+    def get_train_title_components(self) -> list[str]:
+        components = [
+            f"{self.config.run_name}",
+            datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+        ]
+        if "SLURM_JOB_ID" in os.environ:
+            components.append(os.environ["SLURM_JOB_ID"])
+        if "SLURM_ARRAY_TASK_ID" in os.environ:
+            components.append(os.environ["SLURM_ARRAY_TASK_ID"])
+        return components
+
     def get_train_title(self) -> str:
-        return f"{self.config.run_name}"
+        return "-".join(self.get_train_title_components())
 
     def train(self, ckpt_path: Optional[Path] = None):
         """Train the model using Lightning."""
-        logging.info(f"Starting {self.get_train_title()} training with Lightning...")
+        logging.info(
+            f"Starting {self.get_train_title_components()} training with Lightning..."
+        )
 
         # Convert checkpoint path to string if provided
         ckpt_path_str = str(ckpt_path) if ckpt_path else None
@@ -246,5 +256,5 @@ class NICETrainer(Trainer):
         self.model_config: NICEConfig = model_config
         super().__init__(config, model)
 
-    def get_train_title(self) -> str:
-        return f"nice-{self.model_config.model_name}"
+    def get_train_title_components(self) -> list[str]:
+        return super().get_train_title_components() + [self.model_config.model_name]

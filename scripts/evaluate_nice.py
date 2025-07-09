@@ -27,27 +27,22 @@ def move_all_to_cpu(items: dict[str, Any]) -> dict[str, Any]:
 class EvaluateNiceConfig(BaseConfig):
     checkpoint_path: Path = Path("models")
     output_path: Path = Path("test_outputs")
-    dtype: str = "float32"
     device: str | None = None
-    precision: Literal[16, 32, 64] = 16
+    precision: Literal[16, 32, 64] = 32
 
 
 def evaluate_nice(
     config: EvaluateNiceConfig,
 ):
     device = torch.device(config.device or get_device())
-    dtype = torch.float32 if config.dtype == "float32" else torch.float16
-
     # Load the NICE model
     logging.info(f"Loading model from {config.checkpoint_path}")
     model = NICEModel.load_from_checkpoint(
         config.checkpoint_path,
         map_location=device,
-        dtype=dtype,
     )
     logging.info(f"Model config: {model.config}")
 
-    model.to(device=device, dtype=dtype)
     model.requires_grad_(False)
     model.eval()
 
@@ -64,11 +59,9 @@ def evaluate_nice(
         name=model.config.model_name,
     )
 
-    precision = "bf16-mixed" if config.precision == 16 else "32-true"
-
     trainer = Trainer(
         accelerator="auto",
-        precision=precision,
+        precision=config.precision,
         enable_progress_bar=True,
         logger=[logger, csv_logger],
     )
@@ -95,16 +88,11 @@ def main(cfg: DictConfig):
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
 
-    # Create config from the composed configuration
-    config = EvaluateNiceConfig(
-        checkpoint_path=Path(cfg.checkpoint_path),
-        output_path=Path(cfg.output_path),
-        dtype=cfg.dtype,
-        device=cfg.device,
-        precision=cfg.precision,
-    )
+    config = EvaluateNiceConfig.from_hydra_config(cfg)
+    logging.info(f"Evaluating NICE model with config:")
+    for key, value in config.model_dump(mode="json").items():
+        logging.info(f"  {key}: {value}")
 
-    logging.info(f"Evaluating NICE model with config: {config}")
     evaluate_nice(config)
 
 
