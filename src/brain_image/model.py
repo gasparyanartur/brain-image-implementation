@@ -235,16 +235,16 @@ class NICEModel(Model):
         self.data_module = EEGDataModule(dataset_config, model_name=config.model_name)
 
         if compile:
-            self.eeg_encoder = self.eeg_encoder.jit_compile()  # type: ignore
-            self.eeg_projector = torch.jit.script(self.eeg_projector)
-            self.img_projector = torch.jit.script(self.img_projector)
-            # self.eeg_encoder = torch.compile(self.eeg_encoder)
-            # self.eeg_projector = torch.compile(self.eeg_projector)
-            # self.img_projector = torch.compile(self.img_projector)
+            logging.info("Compiling model...")
+            self.eeg_encoder = torch.compile(self.eeg_encoder)
+            self.eeg_projector = torch.compile(self.eeg_projector)
+            self.img_projector = torch.compile(self.img_projector)
 
         self.save_hyperparameters(
-            "config",
-            "dataset_config",
+            {
+                "config": config.model_dump(mode="json"),
+                "dataset_config": dataset_config.model_dump(mode="json"),
+            },
         )
 
     def _init_normal_weights(self):

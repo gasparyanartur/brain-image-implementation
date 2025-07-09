@@ -21,7 +21,6 @@ class TrainConfig(BaseConfig):
     # Training parameters
     run_name: str
     num_epochs: int
-    num_workers: int
 
     # Model compilation and initialization
     compile_model: bool = True
@@ -59,7 +58,6 @@ class NICETrainerConfig(TrainConfig):
     # Required fields from TrainConfig
     run_name: str = "nice"
     num_epochs: int = 100
-    num_workers: int = 8
 
     # NICE-specific training settings
     compile_model: bool = True
@@ -123,6 +121,9 @@ class Trainer:
             )
             loggers.append(wandb_logger)
 
+        precision = "bf16-mixed" if self.config.precision == 16 else "32-true"
+        logging.info("DSADAS")
+
         return pl.Trainer(
             max_epochs=self.config.num_epochs,
             callbacks=callbacks if not self.config.enable_barebones else None,
@@ -131,8 +132,8 @@ class Trainer:
             enable_model_summary=not self.config.enable_barebones,
             enable_progress_bar=not self.config.enable_barebones,
             overfit_batches=self.config.overfit_batches,
-            precision=self.config.precision,
-            devices="auto" if self.config.device == "cuda" else 1,
+            precision=precision,
+            devices="auto",
             log_every_n_steps=self.config.log_every_n_steps,
             val_check_interval=self.config.val_check_interval,
             accelerator=self.config.accelerator,

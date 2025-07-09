@@ -36,6 +36,10 @@ class TrainNICEConfig(BaseConfig):
 def train_nice(trainer: NICETrainer, checkpoint_path: Path | None = None):
     """Clean training function that takes a configured trainer."""
 
+    logging.info(f"Training with configs")
+    for key, value in trainer.config.model_dump(mode="json").items():
+        logging.info(f"  {key}: {value}")
+
     # Load checkpoint if provided
     if checkpoint_path and checkpoint_path.exists():
         logging.info(f"Loading checkpoint from {checkpoint_path}")

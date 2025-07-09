@@ -64,9 +64,11 @@ def evaluate_nice(
         name=model.config.model_name,
     )
 
+    precision = "bf16-mixed" if config.precision == 16 else "32-true"
+
     trainer = Trainer(
-        accelerator=config.device or "auto",
-        precision=config.precision,
+        accelerator="auto",
+        precision=precision,
         enable_progress_bar=True,
         logger=[logger, csv_logger],
     )
