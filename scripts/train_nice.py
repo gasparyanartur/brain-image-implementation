@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any
 
 import hydra
@@ -12,6 +13,21 @@ import torch
 from pathlib import Path
 
 from brain_image.configs import GlobalConfig
+
+# Initialize wandb login at script startup
+try:
+    import wandb
+
+    if "WANDB_API_KEY" in os.environ:
+        logging.info("WANDB_API_KEY found, attempting to login to wandb...")
+        wandb.login(key=os.environ["WANDB_API_KEY"])
+        logging.info("Successfully logged in to wandb")
+    else:
+        logging.warning("WANDB_API_KEY not found in environment")
+except ImportError:
+    logging.warning("wandb not available")
+except Exception as e:
+    logging.warning(f"Failed to login to wandb: {e}")
 
 
 class TrainNICEConfig(BaseConfig):

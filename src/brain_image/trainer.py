@@ -105,25 +105,6 @@ class Trainer:
 
         # Add Wandb logger if enabled
         if self.config.enable_wandb:
-            # Ensure wandb is properly authenticated
-            if "WANDB_API_KEY" in os.environ:
-                logging.info(
-                    "WANDB_API_KEY found in environment, attempting explicit login..."
-                )
-                try:
-                    # Try to login explicitly with the API key
-                    wandb.login(key=os.environ["WANDB_API_KEY"])
-                    logging.info("Successfully logged in to wandb")
-                except Exception as e:
-                    logging.warning(f"Failed to login with API key: {e}")
-                    # Fall back to regular login
-                    wandb.login()
-            else:
-                logging.warning(
-                    "WANDB_API_KEY not found in environment variables, attempting login..."
-                )
-                wandb.login()
-
             wandb_tags = [
                 *self.config.wandb_tags,
                 "train",
