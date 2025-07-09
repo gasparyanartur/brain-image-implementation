@@ -319,7 +319,7 @@ requires-dist = [
     { name = "torchvision" },
     { name = "tqdm" },
     { name = "triton" },
-    { name = "wandb", specifier = ">=0.12.10" },
+    { name = "wandb" },
 ]
 provides-extras = ["test"]
 
