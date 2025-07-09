@@ -24,7 +24,7 @@ hydra:
 
 # Common settings
 device: cuda
-precision: 16
+precision: 32
 num_workers: 4
 compile_model: true
 log_path: logs
