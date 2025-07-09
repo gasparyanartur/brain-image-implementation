@@ -1,8 +1,8 @@
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 import torch
 import wandb
 from pathlib import Path
@@ -27,7 +27,8 @@ def create_sweep_config(cfg: DictConfig) -> Dict[str, Any]:
             "min_iter": sweep_cfg["early_terminate"]["min_iter"],
         },
     }
-    return sweep_config
+    # Convert to regular Python dict to make it JSON serializable
+    return cast(Dict[str, Any], OmegaConf.to_container(sweep_config, resolve=True))
 
 
 def train_with_sweep_config():
