@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import logging
 from pathlib import Path
 from typing import Literal
@@ -212,6 +213,7 @@ class NICEModel(Model):
         init_weights: bool = True,
     ):
         super(NICEModel, self).__init__(config)
+
         self.automatic_optimization = False
         self.config = config
         self.eeg_encoder = EEGEncoder(config.eeg_config)
@@ -379,6 +381,11 @@ class NICEModel(Model):
         """Return the test dataloader."""
         return self.data_module.test_dataloader()
 
+    @lru_cache(maxsize=1)
+    def get_len_train_dataloader(self) -> int:
+        """Return the length of the training dataloader."""
+        return len(self.data_module.train_dataloader())
+
     def forward(self, img_latent: torch.Tensor, eeg_data: torch.Tensor) -> torch.Tensor:
         """Forward pass through the model."""
         eeg_latent = self.eeg_encoder(eeg_data)
@@ -435,9 +442,9 @@ class NICEModel(Model):
             opt.step()
 
         # Step the schedulers on epoch end
-        if batch_idx == len(self.train_dataloader()) - 1:
+        if batch_idx == self.get_len_train_dataloader() - 1:
             for scheduler in schedulers:
-                scheduler.step()
+                scheduler.step(metrics=None)
 
         return loss
 

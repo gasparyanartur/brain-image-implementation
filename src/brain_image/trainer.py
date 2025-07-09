@@ -31,7 +31,7 @@ class TrainConfig(BaseConfig):
     checkpoint_dir: Path = Path("checkpoints")
     enable_barebones: bool = False
     overfit_batches: int = 0
-    precision: Literal[16, 32, 64] = 32
+    precision: Literal[16, 32, 64] = 16
     val_check_interval: float = 0.25
     log_every_n_steps: int = 50
     enable_progress_bar: bool = True

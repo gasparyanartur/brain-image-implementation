@@ -25,7 +25,7 @@ class DataConfig(BaseConfig, ABC):
     limit_train_size: float = 1.0
     limit_val_size: float = 1.0
     limit_test_size: float = 1.0
-    num_workers: int = 8
+    num_workers: int = 32
 
     def create_datamodule(self) -> DataModule:
         raise NotImplementedError
@@ -165,14 +165,14 @@ class EEGDataModule(DataModule):
     def _create_dataloader(self, dataset, shuffle=True, batch_size=None):
         if batch_size is None:
             batch_size = self.config.batch_size
-        num_workers = getattr(self.config, "num_workers", 8)
+
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=num_workers,
+            num_workers=self.config.num_workers,
             pin_memory=True,
-            persistent_workers=num_workers > 0,
+            persistent_workers=self.config.num_workers > 0,
         )
 
 
