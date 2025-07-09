@@ -381,8 +381,9 @@ class NICEModel(Model):
         """Return the test dataloader."""
         return self.data_module.test_dataloader()
 
+    @property
     @lru_cache(maxsize=1)
-    def get_len_train_dataloader(self) -> int:
+    def num_train_batches(self) -> int:
         """Return the length of the training dataloader."""
         return len(self.data_module.train_dataloader())
 
@@ -442,9 +443,12 @@ class NICEModel(Model):
             opt.step()
 
         # Step the schedulers on epoch end
-        if batch_idx == self.get_len_train_dataloader() - 1:
+        if batch_idx == self.num_train_batches - 1:
             for scheduler in schedulers:
-                scheduler.step(metrics=None)
+                if scheduler is None:
+                    continue
+
+                scheduler.step()  # type: ignore
 
         return loss
 

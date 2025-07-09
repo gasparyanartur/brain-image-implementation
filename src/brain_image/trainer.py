@@ -32,8 +32,8 @@ class TrainConfig(BaseConfig):
     enable_barebones: bool = False
     overfit_batches: int = 0
     precision: Literal[16, 32, 64] = 16
-    val_check_interval: float = 0.25
-    log_every_n_steps: int = 50
+    val_check_interval: float = 1.0
+    log_every_n_steps: int = 100
     enable_progress_bar: bool = True
     enable_model_summary: bool = True
     save_checkpoints: bool = True
