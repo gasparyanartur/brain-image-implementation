@@ -29,15 +29,7 @@ export_env_args=""
 if [ -n "$WANDB_API_KEY" ]; then
     export_env_args="$export_env_args --env WANDB_API_KEY=$WANDB_API_KEY"
 fi
-if [ -n "$WANDB_MODE" ]; then
-    export_env_args="$export_env_args --env WANDB_MODE=$WANDB_MODE"
-fi
-if [ -n "$WANDB_PROJECT" ]; then
-    export_env_args="$export_env_args --env WANDB_PROJECT=$WANDB_PROJECT"
-fi
-if [ -n "$WANDB_ENTITY" ]; then
-    export_env_args="$export_env_args --env WANDB_ENTITY=$WANDB_ENTITY"
-fi
+
 
 apptainer run \
 --nv \
