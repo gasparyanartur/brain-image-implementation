@@ -36,3 +36,8 @@ wheels/
 /wandb
 
 /test_outputs/
+test_checkpoint.ckpt
+
+/.triton
+/.config
+/.netrc
