@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=32G
 #SBATCH --gpus=1
-#SBATCH --time=7-00:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --output=logs/sweep_nice/slurm/%j.out
 #SBATCH --account=berzelius-2025-35
 
