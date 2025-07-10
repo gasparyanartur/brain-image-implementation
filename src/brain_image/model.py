@@ -61,12 +61,11 @@ class EEGEncoderConfig(ModelConfig):
     temporal_stride: int = 1
     hidden_dim: int = 40
     dropout: float = 0.5
-    final_temporal_size: int = 4
-    final_spatial_size: int = 4
+    final_spatiotemporal_size: int = 36
 
     @property
     def encoded_dim(self) -> int:
-        return self.embed_dim * self.final_spatial_size * self.final_temporal_size
+        return self.embed_dim * self.final_spatiotemporal_size
 
     def create_model(self) -> EEGEncoder:
         return EEGEncoder(self)
@@ -91,8 +90,7 @@ class PatchEmbedding(nn.Module):
         temporal_pool_size: int,
         temporal_stride: int,
         hidden_dim: int,
-        final_temporal_size: int,
-        final_spatial_size: int,
+        final_spatiotemporal_size: int,
         dropout: float = 0.5,
     ):
         # Adapted from https://github.com/eeyhsong/NICE-EEG
@@ -115,16 +113,18 @@ class PatchEmbedding(nn.Module):
             nn.BatchNorm2d(hidden_dim),
             nn.ELU(inplace=True),
             nn.Dropout(dropout),
-            nn.AdaptiveAvgPool2d((final_spatial_size, final_temporal_size)),
         )
 
         self.projection = nn.Conv2d(hidden_dim, embed_dim, kernel_size=(1, 1))
+        self.final_proj = nn.AdaptiveAvgPool1d((final_spatiotemporal_size))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = einops.rearrange(x, "b s t -> b 1 s t")
         x = self.spatiotemporal_conv(x)
         x = self.projection(x)
-        x = einops.rearrange(x, "b e (s) (t) -> b (s t) e")
+        x = einops.rearrange(x, "b e (s) (t) -> b e (s t)")
+        x = self.final_proj(x)
+        x = einops.rearrange(x, "b e st -> b st e")
         return x
 
     def jit_compile(self):
@@ -149,8 +149,7 @@ class EEGEncoder(Model):
             temporal_pool_size=config.temporal_pool_size,
             temporal_stride=config.temporal_stride,
             hidden_dim=config.hidden_dim,
-            final_temporal_size=config.final_temporal_size,
-            final_spatial_size=config.final_spatial_size,
+            final_spatiotemporal_size=config.final_spatiotemporal_size,
             dropout=config.dropout,
         )
 

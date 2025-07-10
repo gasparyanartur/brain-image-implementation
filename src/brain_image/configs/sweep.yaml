@@ -47,13 +47,11 @@ sweep:
         distribution: log_uniform
       model.project_dim:
         values: [128, 256, 512]
-    
-    grid:
-      model.encoder_lr:
-        values: [1e-3, 5e-3, 8e-3, 5e-4]
-      model.projector_lr:
-        values: [1e-3, 5e-3, 8e-3, 1e-2]
-    
+      encoder.hidden_dim:
+        values: [40, 80, 160]
+      encoder.embed_dim:
+        values: [40, 80, 160]
+
     bayes:
       model.encoder_lr:
         min: 1e-4
@@ -66,16 +64,10 @@ sweep:
       model.project_dim:
         values: [128, 256, 512]
       encoder.hidden_dim:
-        values: [10, 20, 40, 80]
-      encoder.temporal_kernel_size:
-        values: [20, 40, 80]
-      encoder.spatial_kernel_size:
-        values: [20, 40, 80]
-      encoder.final_temporal_size:
-        values: [2, 4, 6]
-      encoder.final_spatial_size:
-        values: [2, 4, 6]
-    
+        values: [40, 80, 160]
+      encoder.embed_dim:
+        values: [40, 80, 160]
+      
     lr:
       model.encoder_lr:
         values: [1e-4, 5e-4, 1e-3, 5e-3, 8e-3, 1e-2, 2e-2]
