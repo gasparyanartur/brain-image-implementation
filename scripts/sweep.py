@@ -7,14 +7,14 @@ import wandb
 from pathlib import Path
 import sys
 from brain_image.configs import GlobalConfig
+from brain_image.utils import update_config_with_nested_key
+from brain_image.trainer import NICETrainer
 
 # Add project root to sys.path for direct imports
-project_root = Path(__file__).parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+if str(GlobalConfig.WORKSPACE_DIR) not in sys.path:
+    sys.path.insert(0, str(GlobalConfig.WORKSPACE_DIR))
 
-from scripts.train_nice import train_nice, TrainNICEConfig
-from brain_image.trainer import NICETrainer
+from scripts.train_nice import train_nice
 
 
 train_configs = {
@@ -65,6 +65,22 @@ def train_with_sweep_config():
 
     sweep_config = wandb.config
     logging.info(f"Starting training run with sweep config: {dict(sweep_config)}")
+
+    new_train_configs = {
+        "trainer": train_configs["trainer"],
+        "model": train_configs["model"],
+        "dataset": train_configs["dataset"],
+        "encoder": train_configs["encoder"],
+    }
+
+    # Update training configs with sweep config
+    # Sweep config is a flat dictionary, so we need to update the training configs with the sweep config
+    # We need to handle nested dot notation in the keys
+    for key, value in sweep_config.items():
+        if "." in key:
+            nested_key, sub_key = key.split(".", 1)
+            if nested_key in new_train_configs:
+                new_train_configs[nested_key][sub_key] = value
     try:
         # Create trainer with the properly configured components
         trainer = NICETrainer(
@@ -106,6 +122,14 @@ def run_sweep(cfg: DictConfig):
 
     sweep_config = create_sweep_config(cfg)
     logging.info(f"Sweep configuration: {sweep_config}")
+
+    new_train_configs = {**train_configs}
+    for key, value in sweep_config.items():
+        new_train_configs = update_config_with_nested_key(key, value, new_train_configs)
+
+    logging.info("New train configs:")
+    for key, value in new_train_configs.items():
+        logging.info(f"  {key}: {value}")
 
     sweep_id = wandb.sweep(sweep_config, project=sweep_project, entity=sweep_entity)
     logging.info(f"✅ Created sweep with ID: {sweep_id}")

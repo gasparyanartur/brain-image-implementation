@@ -1,3 +1,4 @@
+from typing import Any
 import torch
 import os
 
@@ -34,3 +35,21 @@ if "DTYPE" in os.environ:
     DTYPE = get_dtype(os.environ["DTYPE"])
 else:
     DTYPE = torch.float16
+
+
+def update_config_with_nested_key(
+    key: str, value: Any, config: dict[str, Any]
+) -> dict[str, Any]:
+    """Update a config with a nested key."""
+    config = {**config}
+    if "." in key:
+        nested_key, sub_key = key.split(".", 1)
+        if nested_key in config:
+            new_config = update_config_with_nested_key(
+                sub_key, value, config[nested_key]
+            )
+            config[nested_key] = new_config
+    else:
+        config[key] = value
+
+    return config
