@@ -26,12 +26,34 @@ def test_update_new_nested_key():
     assert updated["a"]["b"]["c"] == 123
 
 
+def test_create_intermediate_nested_keys():
+    config = {"a": {}}
+    updated = update_config_with_nested_key("a.b.c", 5, config)
+    assert updated["a"]["b"]["c"] == 5
+    # Original config should not be mutated
+    assert "b" not in config["a"]
+
+
+def test_create_full_nested_path_from_empty():
+    config = {}
+    updated = update_config_with_nested_key("a.b.c", 42, config)
+    assert updated["a"]["b"]["c"] == 42
+    assert config == {}
+
+
+def test_create_deep_nested_keys():
+    config = {"a": {}}
+    updated = update_config_with_nested_key("a.b.c.d", 99, config)
+    assert updated["a"]["b"]["c"]["d"] == 99
+    assert config == {"a": {}}
+
+
 def test_update_nonexistent_path():
     config = {"a": {}}
-    # Should not create intermediate keys if not present
+    # Should create intermediate keys if not present
     updated = update_config_with_nested_key("a.b.c", 5, config)
-    # Only 'a' exists, so 'b' is not created
-    assert "b" not in updated["a"]
+    assert updated["a"]["b"]["c"] == 5
+    assert config == {"a": {}}
 
 
 def test_update_top_level_new_key():

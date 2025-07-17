@@ -240,7 +240,6 @@ class NICETrainer(Trainer):
         config: NICETrainerConfig,
         model_config: NICEConfig,
         dataset_config: EEGDatasetConfig,
-        encoder: Any = None,
     ):
         if isinstance(config, dict):
             config = NICETrainerConfig.model_validate(config)
@@ -248,8 +247,6 @@ class NICETrainer(Trainer):
             model_config = NICEConfig.model_validate(model_config)
         if isinstance(dataset_config, dict):
             dataset_config = EEGDatasetConfig.model_validate(dataset_config)
-        if isinstance(encoder, dict):
-            encoder = EEGEncoderConfig.model_validate(encoder)
 
         model = NICEModel(
             config=model_config,

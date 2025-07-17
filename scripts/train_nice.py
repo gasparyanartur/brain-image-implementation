@@ -54,6 +54,10 @@ def train_nice(trainer: NICETrainer, checkpoint_path: Path | None = None):
     for key, value in trainer.config.model_dump(mode="json").items():
         logging.info(f"  {key}: {value}")
 
+    logging.info(f"Model Config:")
+    for key, value in trainer.model.config.model_dump(mode="json").items():
+        logging.info(f"  {key}: {value}")
+
     # Load checkpoint if provided
     if checkpoint_path and checkpoint_path.exists():
         logging.info(f"Loading checkpoint from {checkpoint_path}")
@@ -97,7 +101,6 @@ def main(cfg: DictConfig):
         config=config.trainer,
         model_config=config.model,
         dataset_config=config.dataset,
-        encoder=config.encoder,
     )
 
     # Get checkpoint path if specified

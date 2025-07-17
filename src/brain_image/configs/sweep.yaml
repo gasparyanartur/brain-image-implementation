@@ -40,33 +40,39 @@ sweep:
       model.encoder_lr:
         min: 1e-4
         max: 1e-2
-        distribution: log_uniform
+        distribution: uniform
       model.projector_lr:
         min: 1e-4
         max: 1e-2
-        distribution: log_uniform
+        distribution: uniform
       model.project_dim:
-        values: [128, 256, 512]
-      encoder.hidden_dim:
+        values: [128, 256, 512, 1024]
+      model.eeg_config.hidden_dim:
         values: [40, 80, 160]
-      encoder.embed_dim:
+      model.eeg_config.embed_dim:
         values: [40, 80, 160]
 
     bayes:
       model.encoder_lr:
         min: 1e-4
         max: 1e-2
-        distribution: log_uniform
+        distribution: uniform
       model.projector_lr:
         min: 1e-4
         max: 1e-2
-        distribution: log_uniform
+        distribution: uniform
       model.project_dim:
-        values: [128, 256, 512]
-      encoder.hidden_dim:
+        values: [128, 256, 512, 1024]
+      model.eeg_config.hidden_dim:
         values: [40, 80, 160]
-      encoder.embed_dim:
+      model.eeg_config.embed_dim:
         values: [40, 80, 160]
+      model.eeg_config.final_spatiotemporal_size:
+        values: [36, 72, 144]
+      model.eeg_config.temporal_kernel_size:
+        values: [15, 25, 35]
+      model.eeg_config.spatial_kernel_size:
+        values: [9, 17, 25]
       
     lr:
       model.encoder_lr:
@@ -83,13 +89,13 @@ sweep:
         values: [128, 256, 512, 1024]
       model.img_latent_dim:
         values: [512, 768, 1024]
-      encoder.hidden_dim:
+      model.eeg_config.hidden_dim:
         values: [10, 20, 40, 80, 160]
-      encoder.temporal_kernel_size:
+      model.eeg_config.temporal_kernel_size:
         values: [10, 20, 40, 80, 160]
-      encoder.spatial_kernel_size:
+      model.eeg_config.spatial_kernel_size:
         values: [10, 20, 40, 80, 160]
-      encoder.final_temporal_size:
+      model.eeg_config.final_temporal_size:
         values: [2, 3, 4, 5, 6]
-      encoder.final_spatial_size:
+      model.eeg_config.final_spatial_size:
         values: [2, 3, 4, 5, 6]

@@ -243,7 +243,6 @@ def main(cfg: DictConfig):
         config=config.trainer,
         model_config=config.model,
         dataset_config=config.dataset,
-        encoder=config.encoder,
     )
 
     # Get checkpoint path if specified

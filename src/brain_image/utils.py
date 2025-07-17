@@ -40,16 +40,15 @@ else:
 def update_config_with_nested_key(
     key: str, value: Any, config: dict[str, Any]
 ) -> dict[str, Any]:
-    """Update a config with a nested key."""
+    """Update a config with a nested key, creating intermediate dicts as needed."""
     config = {**config}
     if "." in key:
         nested_key, sub_key = key.split(".", 1)
-        if nested_key in config:
-            new_config = update_config_with_nested_key(
-                sub_key, value, config[nested_key]
-            )
-            config[nested_key] = new_config
+        # If the nested_key does not exist or is not a dict, create it as a dict
+        if nested_key not in config or not isinstance(config[nested_key], dict):
+            config[nested_key] = {}
+        new_config = update_config_with_nested_key(sub_key, value, config[nested_key])
+        config[nested_key] = new_config
     else:
         config[key] = value
-
     return config

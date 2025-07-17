@@ -21,7 +21,6 @@ train_configs = {
     "trainer": None,
     "model": None,
     "dataset": None,
-    "encoder": None,
 }
 
 
@@ -49,15 +48,6 @@ def train_with_sweep_config():
     import time
     import random
 
-    if train_configs["trainer"] is None:
-        raise ValueError("trainer_config is not set")
-    if train_configs["model"] is None:
-        raise ValueError("model_config is not set")
-    if train_configs["dataset"] is None:
-        raise ValueError("dataset_config is not set")
-    if train_configs["encoder"] is None:
-        raise ValueError("encoder is not set")
-
     delay = random.uniform(0.5, 1.5)
     logging.info(f"Waiting {delay:.2f}s before starting...")
     time.sleep(delay)
@@ -66,28 +56,31 @@ def train_with_sweep_config():
     sweep_config = wandb.config
     logging.info(f"Starting training run with sweep config: {dict(sweep_config)}")
 
-    new_train_configs = {
-        "trainer": train_configs["trainer"],
-        "model": train_configs["model"],
-        "dataset": train_configs["dataset"],
-        "encoder": train_configs["encoder"],
-    }
+    new_train_configs = {**train_configs}
 
     # Update training configs with sweep config
     # Sweep config is a flat dictionary, so we need to update the training configs with the sweep config
     # We need to handle nested dot notation in the keys
     for key, value in sweep_config.items():
-        if "." in key:
-            nested_key, sub_key = key.split(".", 1)
-            if nested_key in new_train_configs:
-                new_train_configs[nested_key][sub_key] = value
+        new_train_configs = update_config_with_nested_key(key, value, new_train_configs)
+
+    if new_train_configs["trainer"] is None:
+        raise ValueError("trainer_config is not set")
+    if new_train_configs["model"] is None:
+        raise ValueError("model_config is not set")
+    if new_train_configs["dataset"] is None:
+        raise ValueError("dataset_config is not set")
+
+    logging.info(f"New train configs:")
+    for key, value in new_train_configs.items():
+        logging.info(f"  {key}: {value}")
+
     try:
         # Create trainer with the properly configured components
         trainer = NICETrainer(
-            config=train_configs["trainer"],
-            model_config=train_configs["model"],
-            dataset_config=train_configs["dataset"],
-            encoder=train_configs["encoder"],
+            config=new_train_configs["trainer"],
+            model_config=new_train_configs["model"],
+            dataset_config=new_train_configs["dataset"],
         )
 
         model, test_metrics = train_nice(trainer)
@@ -96,6 +89,8 @@ def train_with_sweep_config():
     except Exception as e:
         logging.error(f"❌ Training failed: {e}")
         raise
+    finally:
+        run.finish()
 
 
 def run_sweep(cfg: DictConfig):
@@ -107,7 +102,6 @@ def run_sweep(cfg: DictConfig):
     train_configs["trainer"] = cfg_dict["trainer"]
     train_configs["model"] = cfg_dict["model"]
     train_configs["dataset"] = cfg_dict["dataset"]
-    train_configs["encoder"] = cfg_dict["encoder"]
 
     sweep_cfg = cfg["sweep"]
     sweep_type = sweep_cfg["type"]
@@ -122,14 +116,6 @@ def run_sweep(cfg: DictConfig):
 
     sweep_config = create_sweep_config(cfg)
     logging.info(f"Sweep configuration: {sweep_config}")
-
-    new_train_configs = {**train_configs}
-    for key, value in sweep_config.items():
-        new_train_configs = update_config_with_nested_key(key, value, new_train_configs)
-
-    logging.info("New train configs:")
-    for key, value in new_train_configs.items():
-        logging.info(f"  {key}: {value}")
 
     sweep_id = wandb.sweep(sweep_config, project=sweep_project, entity=sweep_entity)
     logging.info(f"✅ Created sweep with ID: {sweep_id}")
