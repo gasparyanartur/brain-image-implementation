@@ -152,6 +152,7 @@ def main(cfg: DictConfig):
     logging.info(
         f"📊 View results at: https://wandb.ai/{sweep_cfg['entity'] or 'your-username'}/{sweep_cfg['project']}/sweeps/{sweep_id}"
     )
+    wandb.finish()
 
 
 if __name__ == "__main__":
