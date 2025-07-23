@@ -15,30 +15,80 @@ from lightning import LightningModule
 from brain_image.configs import BaseConfig
 from brain_image.data import EEGDataModule, EEGDatasetConfig
 import dreamsim
-from dreamsim.feature_extraction.load_synclr_as_dino import load_synclr_as_dino
-from dreamsim.feature_extraction.vision_transformer import VisionTransformer
+from dreamsim.model import PerceptualModel
 
 
-def load_image_encoder(model_name: str, models_path: Path) -> VisionTransformer:
+model_name_options = ["synclr", "clip"]
+patch_size_options = ["16", "32"]
+aligned_options = ["aligned", "unaligned"]
+
+default_aligned_option = "aligned"
+default_patch_size = "16"
+
+
+def extract_model_config(model_config_str: str) -> tuple[str, str, str]:
+    # Extracts whether aligned/unaligned, model_name, and patch_size (16 or 32)
+    name_parts = model_config_str.split("_")
+    if len(name_parts) == 1:
+        aligned_option, model_name, patch_size = (
+            default_aligned_option,
+            name_parts[0],
+            default_patch_size,
+        )
+    elif len(name_parts) == 2:
+        aligned_option, model_name, patch_size = (
+            default_aligned_option,
+            name_parts[0],
+            name_parts[1],
+        )
+    elif len(name_parts) == 3:
+        aligned_option, model_name, patch_size = (
+            name_parts[0],
+            name_parts[1],
+            name_parts[2],
+        )
+    else:
+        raise ValueError(f"Invalid model name: {model_config_str}")
+
+    if aligned_option not in aligned_options:
+        raise ValueError(f"Invalid aligned option: {aligned_option}")
+    if model_name not in model_name_options:
+        raise ValueError(f"Invalid model name: {model_name}")
+    if patch_size not in patch_size_options:
+        raise ValueError(f"Invalid patch size: {patch_size}")
+
+    return aligned_option, model_name, patch_size
+
+
+def load_image_encoder(model_config_str: str, models_path: Path) -> PerceptualModel:
     try:
-        logging.info(f"Loading {model_name} model...")
-        match model_name:
-            case "synclr":
-                model = load_synclr_as_dino(16, load_dir=str(models_path))
-            case "aligned_synclr":
-                dreamsim_model, _ = dreamsim.dreamsim(
-                    dreamsim_type="synclr_vitb16", cache_dir=str(models_path)
-                )
-                model = dreamsim_model.base_model.model.extractor_list[0].model  # type: ignore
-            case _:
-                raise ValueError(f"Unknown model: {model_name}")
+        aligned_option, model_name, patch_size = extract_model_config(model_config_str)
+        logging.info(
+            f"Loading {model_name} model with {patch_size} patch size and {aligned_option} alignment..."
+        )
+
+        if aligned_option == "unaligned":
+            model = PerceptualModel(
+                model_type=f"{model_name}_vitb{patch_size}",
+                normalize_embeds=False,
+                stride=patch_size,
+                load_dir=str(models_path),
+                baseline=True,
+            )
+
+        else:
+            model, _ = dreamsim.dreamsim(
+                dreamsim_type=f"{model_name}_vitb{patch_size}",
+                cache_dir=str(models_path),
+            )
+
     except Exception as e:
         logging.error(f"Error loading {model_name} model: {e}")
         raise e
     else:
         logging.info(f"Model {model_name} loaded successfully.")
 
-    return model
+    return model  # type: ignore
 
 
 class ModelConfig(BaseConfig):

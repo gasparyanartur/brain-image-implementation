@@ -8,8 +8,10 @@ defaults:
 # Generation settings
 batch_size: 256
 models:
-  - synclr
-  - aligned_synclr
+  - unaligned_synclr_16
+  - aligned_synclr_16
+  - unaligned_clip_32
+  - aligned_clip_32
 splits:
   - train
   - test

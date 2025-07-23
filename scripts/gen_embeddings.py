@@ -15,11 +15,17 @@ from brain_image.data import (
 )
 from brain_image.model import load_image_encoder
 from brain_image.utils import DTYPE, get_dtype
+from dreamsim.model import PerceptualModel
 
 
 class EmbeddingGenerationConfig(BaseConfig):
     batch_size: int = 32
-    models: list[str] = ["synclr", "aligned_synclr"]
+    models: list[str] = [
+        "unaligned_synclr_16",
+        "aligned_synclr_16",
+        "unaligned_clip_32",
+        "aligned_clip_32",
+    ]
     splits: list[Literal["train", "test"]] = ["train", "test"]
     img_size: tuple[int, int] = (224, 224)
     models_path: Path = Path("models")
@@ -33,7 +39,7 @@ class EmbeddingGenerationConfig(BaseConfig):
 
 
 def generate_latents(
-    embed_model: torch.nn.Module,
+    embed_model: PerceptualModel,
     img_paths: list[Path],
     batch_size: int = 32,
     img_size: tuple[int, int] = (224, 224),
@@ -52,7 +58,7 @@ def generate_latents(
             imgs = batch_load_images(paths).to(device, dtype=dtype)
             imgs = preprocess_image(imgs, img_size=img_size)
 
-            latent = embed_model(imgs).detach().cpu()
+            latent = embed_model.embed(imgs).detach().cpu()
             latents.append(latent)
 
     return torch.concat(latents, dim=0)
