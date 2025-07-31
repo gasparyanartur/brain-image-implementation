@@ -3,6 +3,8 @@ from __future__ import annotations
 from functools import cached_property, lru_cache
 import logging
 from pathlib import Path
+import re
+import tempfile
 from typing import Any, Literal
 from pydantic import BaseModel, field_validator
 import torch
@@ -374,6 +376,24 @@ class NICEModel(Model):
                 "dataset_config": dataset_config.model_dump(mode="json"),
             },
         )
+
+    @classmethod
+    def load_checkpoint(cls, checkpoint_path: str, **kwargs):
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        state_dict = checkpoint.pop("state_dict")
+
+        # Remove the "eeg_encoder._orig_mod.X" and replace with "eeg_encoder.X"
+        for key in list(state_dict.keys()):
+            if re.search(r"_orig_mod\.", key):
+                new_key = re.sub(r"_orig_mod\.", "", key)
+                state_dict[new_key] = state_dict.pop(key)
+
+        checkpoint["state_dict"] = state_dict
+
+        # Save to temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as temp_file:
+            torch.save(checkpoint, temp_file.name)
+            return cls.load_from_checkpoint(temp_file.name, **kwargs)
 
     def _init_normal_weights(self):
         """Initialize weights for the model."""
