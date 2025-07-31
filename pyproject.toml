@@ -30,6 +30,8 @@ dependencies = [
     "pydantic",
     "hydra-core",
     "omegaconf",
+
+    "dalle2-pytorch",
 ]
 
 [project.optional-dependencies]
