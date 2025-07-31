@@ -30,5 +30,4 @@ wandb_log_model: false
 wandb_tags: []
 
 # Device settings
-device: cuda
 accelerator: auto 

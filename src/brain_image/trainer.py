@@ -11,9 +11,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
-from brain_image.model import EEGEncoderConfig, Model, NICEModel, NICEConfig
-from pydantic import field_validator
-import wandb
+from brain_image.model import Model, NICEModel, NICEConfig
 
 
 class TrainConfig(BaseConfig):
@@ -51,8 +49,7 @@ class TrainConfig(BaseConfig):
     wandb_mode: Literal["online", "offline"] = "online"
 
     # Device settings
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    accelerator: str = "auto" if torch.cuda.is_available() else "cpu"
+    accelerator: str | None = None
 
 
 class NICETrainerConfig(TrainConfig):
@@ -126,6 +123,7 @@ class Trainer:
             loggers.append(wandb_logger)
 
         precision = "bf16-mixed" if self.config.precision == 16 else "32-true"
+        accelerator = self.config.accelerator or "auto"
 
         return pl.Trainer(
             max_epochs=self.config.num_epochs,
@@ -137,10 +135,9 @@ class Trainer:
             enable_progress_bar=not self.config.enable_barebones,
             overfit_batches=self.config.overfit_batches,
             precision=precision,
-            devices="auto",
             log_every_n_steps=self.config.log_every_n_steps,
             val_check_interval=self.config.val_check_interval,
-            accelerator=self.config.accelerator,
+            accelerator=accelerator,
         )
 
     def get_train_title_components(self) -> list[str]:
