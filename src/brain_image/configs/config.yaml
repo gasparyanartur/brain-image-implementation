@@ -23,7 +23,7 @@ hydra:
     subdir: ${hydra.job.num}
 
 # Common settings
-device: cuda
+device: null
 precision: 32
 num_workers: 4
 compile_model: true

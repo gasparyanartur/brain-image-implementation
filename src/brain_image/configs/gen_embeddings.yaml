@@ -18,5 +18,5 @@ splits:
 img_size: [224, 224]
 models_path: models
 dtype: float32
-device: cuda
+device: null
 output_dir: null

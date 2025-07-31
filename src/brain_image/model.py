@@ -12,7 +12,7 @@ import math
 import itertools as it
 from lightning import LightningModule
 
-from brain_image.configs import BaseConfig
+from brain_image.configs import BaseConfig, get_device, get_device_str
 from brain_image.data import EEGDataModule, EEGDatasetConfig
 import dreamsim
 from dreamsim.model import PerceptualModel
@@ -60,26 +60,41 @@ def extract_model_config(model_config_str: str) -> tuple[str, str, str]:
     return aligned_option, model_name, patch_size
 
 
-def load_image_encoder(model_config_str: str, models_path: Path) -> PerceptualModel:
+def load_image_encoder(
+    model_config_str: str,
+    models_path: Path,
+    download_weights: bool = True,
+    device: str | None = None,
+) -> PerceptualModel:
     try:
         aligned_option, model_name, patch_size = extract_model_config(model_config_str)
         logging.info(
             f"Loading {model_name} model with {patch_size} patch size and {aligned_option} alignment..."
         )
 
+        model_type = f"{model_name}_vitb{patch_size}"
+        if download_weights:
+            dreamsim.model.download_weights(
+                dreamsim_type=model_type,
+                cache_dir=str(models_path),
+            )
+
         if aligned_option == "unaligned":
             model = PerceptualModel(
-                model_type=f"{model_name}_vitb{patch_size}",
+                model_type=model_type,
                 normalize_embeds=False,
                 stride=patch_size,
                 load_dir=str(models_path),
                 baseline=True,
+                device=device or get_device_str(),
             )
 
         else:
             model, _ = dreamsim.dreamsim(
-                dreamsim_type=f"{model_name}_vitb{patch_size}",
+                dreamsim_type=model_type,
                 cache_dir=str(models_path),
+                normalize_embeds=False,
+                device=device or get_device_str(),
             )
 
     except Exception as e:
@@ -241,10 +256,7 @@ class LatentProjector(nn.Module):
 
 class NICEConfig(ModelConfig):
     eeg_config: EEGEncoderConfig = EEGEncoderConfig()
-    model_name: Literal[
-        "synclr",
-        "aligned_synclr",
-    ]
+    model_name: str = "aligned_synclr_16"
     project_dim: int = 256
     img_latent_dim: int = 768
     encoder_lr: float = 8e-3

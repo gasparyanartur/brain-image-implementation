@@ -1,4 +1,5 @@
 from abc import ABC
+from functools import lru_cache
 import logging
 import os
 from pathlib import Path
@@ -51,14 +52,15 @@ class GlobalConfig:
 _device: torch.device | None = None
 
 
+@lru_cache(maxsize=1)
+def get_device_str() -> str:
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+@lru_cache(maxsize=1)
 def get_device() -> torch.device:
     global _device
     if _device is None:
-        if torch.cuda.is_available():
-            logging.info("Found CUDA device, using cuda")
-            _device = torch.device("cuda")
-        else:
-            logging.info("No CUDA device found, using cpu")
-            _device = torch.device("cpu")
+        _device = torch.device(get_device_str())
 
     return _device

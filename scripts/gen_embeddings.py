@@ -6,7 +6,7 @@ from omegaconf import DictConfig
 import torch
 import tqdm
 
-from brain_image.configs import BaseConfig, GlobalConfig, get_device
+from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
 from brain_image.data import (
     EEGDatasetConfig,
     batch_load_images,
@@ -29,9 +29,10 @@ class EmbeddingGenerationConfig(BaseConfig):
     splits: list[Literal["train", "test"]] = ["train", "test"]
     img_size: tuple[int, int] = (224, 224)
     models_path: Path = Path("models")
-    dtype: str = "float16"
+    dtype: str = "float32"
     device: str | None = None
     data_config: EEGDatasetConfig = EEGDatasetConfig()
+    download_weights: bool = True
 
     output_dir: Path | None = (
         None  # If None, will be the same as the data_config.data_path / data_config.latents_dir
@@ -43,10 +44,11 @@ def generate_latents(
     img_paths: list[Path],
     batch_size: int = 32,
     img_size: tuple[int, int] = (224, 224),
-    device: torch.device = get_device(),
+    device: str | None = None,
     dtype: torch.dtype = DTYPE,
 ) -> torch.Tensor:
     """Generate embeddings for a given split of images."""
+    device = device or get_device_str()
     embed_model.eval()
     embed_model.to(device=device, dtype=dtype)
     embed_model.requires_grad_(False)
@@ -55,7 +57,7 @@ def generate_latents(
     with torch.no_grad():
         for i in tqdm.tqdm(range(0, len(img_paths), batch_size)):
             paths = img_paths[i : i + batch_size]
-            imgs = batch_load_images(paths).to(device, dtype=dtype)
+            imgs = batch_load_images(paths).to(device=device, dtype=dtype)
             imgs = preprocess_image(imgs, img_size=img_size)
 
             latent = embed_model.embed(imgs).detach().cpu()
@@ -72,12 +74,19 @@ def run_generation(
     models_path: Path = Path("models"),
     batch_size: int = 512,
     img_size: tuple[int, int] = (224, 224),
-    device: torch.device = get_device(),
+    device: str | None = None,
     dtype: torch.dtype = DTYPE,
+    download_weights: bool = True,
 ) -> None:
     """Run the embedding generation process."""
 
-    image_encoder = load_image_encoder(model_name, models_path=models_path)
+    logging.info(f"Loading image encoder for model {model_name} on device {device}")
+    image_encoder = load_image_encoder(
+        model_name,
+        models_path=models_path,
+        download_weights=download_weights,
+        device=device,
+    )
     logging.info(f"Generating {split} embeddings for model {model_name}")
 
     img_paths = get_image_paths(
@@ -114,6 +123,9 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
     if not embed_dir.exists():
         embed_dir.mkdir(parents=True, exist_ok=True)
 
+    device = config.device or get_device_str()
+    logging.info(f"Generating all embeddings using device: {device}")
+
     for split in config.splits:
         for model_name in config.models:
             run_generation(
@@ -124,8 +136,9 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
                 split=split,
                 models_path=config.models_path,
                 img_size=config.img_size,
-                device=torch.device(config.device) if config.device else get_device(),
+                device=device,
                 dtype=get_dtype(config.dtype),
+                download_weights=config.download_weights,
             )
 
 
@@ -143,9 +156,9 @@ def main(cfg: DictConfig):
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
 
-    # Create config from the composed configuration
-    from brain_image.data import EEGDatasetConfig
+    logging.info(f"Using device: {get_device_str()}")
 
+    # Create config from the composed configuration
     dataset_config = EEGDatasetConfig(**cfg.dataset)
 
     # Create the embedding generation config

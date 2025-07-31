@@ -1,4 +1,0 @@
-models:
-  - synclr
-  - aligned_synclr
-model_path: models
