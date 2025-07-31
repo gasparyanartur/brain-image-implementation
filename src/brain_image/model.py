@@ -562,7 +562,7 @@ class NICEModel(Model):
         sim = self(img_latent, eeg_data)
         loss = self.get_loss(sim)
 
-        self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=False)
+        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=False)
 
         for opt in optimizers:
             opt.zero_grad()
@@ -594,10 +594,10 @@ class NICEModel(Model):
             top3_acc = self.get_top_n_accuracy(sim, n=3)
             top5_acc = self.get_top_n_accuracy(sim, n=5)
 
-        self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("val/top1_acc", top1_acc, prog_bar=False, on_step=False, on_epoch=True)
-        self.log("val/top3_acc", top3_acc, prog_bar=False, on_step=False, on_epoch=True)
-        self.log("val/top5_acc", top5_acc, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("val_top1_acc", top1_acc, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("val_top3_acc", top3_acc, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("val_top5_acc", top5_acc, prog_bar=False, on_step=False, on_epoch=True)
 
         return {
             "loss": loss,
@@ -617,13 +617,13 @@ class NICEModel(Model):
             top3_acc = self.get_top_n_accuracy(sim, n=3)
             top5_acc = self.get_top_n_accuracy(sim, n=5)
 
-        self.log("test/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("test/top1_acc", top1_acc, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("test_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("test_top1_acc", top1_acc, prog_bar=True, on_step=False, on_epoch=True)
         self.log(
-            "test/top3_acc", top3_acc, prog_bar=False, on_step=False, on_epoch=True
+            "test_top3_acc", top3_acc, prog_bar=False, on_step=False, on_epoch=True
         )
         self.log(
-            "test/top5_acc", top5_acc, prog_bar=False, on_step=False, on_epoch=True
+            "test_top5_acc", top5_acc, prog_bar=False, on_step=False, on_epoch=True
         )
         return {
             "loss": loss,
