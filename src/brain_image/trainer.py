@@ -7,7 +7,7 @@ from typing import Any, Optional, Dict, List, Literal
 import torch
 from torch.utils.data import DataLoader
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
@@ -29,8 +29,10 @@ class TrainConfig(BaseConfig):
     log_dir: Path = Path("logs")
     checkpoint_dir: Path | None = None
     enable_barebones: bool = False
-    checkpoint_monitor: str = "val/loss"
-    checkpoint_monitor_mode: Literal["min", "max"] = "min"
+    checkpoint_monitor: str = "val_top1_acc"
+    checkpoint_monitor_mode: Literal["min", "max"] = "max"
+    checkpoint_monitor_early_stop: int = 10
+
     overfit_batches: int = 0
     precision: Literal[16, 32, 64] = 16
     val_check_interval: float = 1.0
@@ -63,7 +65,7 @@ class NICETrainerConfig(TrainConfig):
     compile_model: bool = True
     init_weights: bool = True
 
-    checkpoint_monitor: str = "val/top1_acc"
+    checkpoint_monitor: str = "val_top1_acc"
     checkpoint_monitor_mode: Literal["min", "max"] = "max"
 
     wandb_tags: list[str] = ["nice"]
@@ -90,6 +92,15 @@ class Trainer:
                 verbose=True,
             )
             callbacks.append(checkpoint_callback)
+
+        if self.config.checkpoint_monitor_early_stop > 0:
+            early_stopping_callback = EarlyStopping(
+                monitor=self.config.checkpoint_monitor,
+                patience=self.config.checkpoint_monitor_early_stop,
+                mode=self.config.checkpoint_monitor_mode,
+                verbose=True,
+            )
+            callbacks.append(early_stopping_callback)
 
         # Add TensorBoard logger
         loggers.append(
@@ -223,7 +234,7 @@ class Trainer:
     def load_checkpoint(self, filepath: Path):
         """Load model from checkpoint."""
         # Load the checkpoint
-        checkpoint = torch.load(filepath, map_location=self.config.device)
+        checkpoint = torch.load(filepath, map_location=self.config.accelerator)
 
         # Load model state
         self.model.load_state_dict(checkpoint["state_dict"])

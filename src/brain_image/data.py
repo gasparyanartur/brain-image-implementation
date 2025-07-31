@@ -226,8 +226,8 @@ class EEGDataset(Dataset):
         return len(self.eeg_data)
 
     def __getitem__(self, idx: int):
-        img_idx = (
-            idx % (len(self.img_paths))
+        img_idx = idx % (
+            len(self.img_paths)
         )  # EEG has stacked over subs, so we need to find the right sample within the sub
 
         img_path = self.img_paths[img_idx]

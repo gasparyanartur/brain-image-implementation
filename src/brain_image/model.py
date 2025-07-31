@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cached_property, lru_cache
 import logging
 from pathlib import Path
 from typing import Any, Literal
@@ -21,31 +21,43 @@ from dreamsim.model import PerceptualModel
 model_name_options = ["synclr", "clip"]
 patch_size_options = ["16", "32"]
 aligned_options = ["aligned", "unaligned"]
+normalize_options = ["norm", "unnorm"]
 
 default_aligned_option = "aligned"
 default_patch_size = "16"
+default_normalize_option = "unnorm"
 
 
-def extract_model_config(model_config_str: str) -> tuple[str, str, str]:
+def extract_model_config(model_config_str: str) -> tuple[str, str, str, str]:
     # Extracts whether aligned/unaligned, model_name, and patch_size (16 or 32)
     name_parts = model_config_str.split("_")
     if len(name_parts) == 1:
-        aligned_option, model_name, patch_size = (
+        aligned_option, model_name, patch_size, normalize_option = (
             default_aligned_option,
             name_parts[0],
             default_patch_size,
+            default_normalize_option,
         )
     elif len(name_parts) == 2:
-        aligned_option, model_name, patch_size = (
+        aligned_option, model_name, patch_size, normalize_option = (
             default_aligned_option,
             name_parts[0],
             name_parts[1],
+            default_normalize_option,
         )
     elif len(name_parts) == 3:
-        aligned_option, model_name, patch_size = (
+        aligned_option, model_name, patch_size, normalize_option = (
             name_parts[0],
             name_parts[1],
             name_parts[2],
+            default_normalize_option,
+        )
+    elif len(name_parts) == 4:
+        aligned_option, model_name, patch_size, normalize_option = (
+            name_parts[0],
+            name_parts[1],
+            name_parts[2],
+            name_parts[3],
         )
     else:
         raise ValueError(f"Invalid model name: {model_config_str}")
@@ -56,8 +68,10 @@ def extract_model_config(model_config_str: str) -> tuple[str, str, str]:
         raise ValueError(f"Invalid model name: {model_name}")
     if patch_size not in patch_size_options:
         raise ValueError(f"Invalid patch size: {patch_size}")
+    if normalize_option not in normalize_options:
+        raise ValueError(f"Invalid normalize option: {normalize_option}")
 
-    return aligned_option, model_name, patch_size
+    return aligned_option, model_name, patch_size, normalize_option
 
 
 def load_image_encoder(
@@ -67,9 +81,11 @@ def load_image_encoder(
     device: str | None = None,
 ) -> PerceptualModel:
     try:
-        aligned_option, model_name, patch_size = extract_model_config(model_config_str)
+        aligned_option, model_name, patch_size, normalize_option = extract_model_config(
+            model_config_str
+        )
         logging.info(
-            f"Loading {model_name} model with {patch_size} patch size and {aligned_option} alignment..."
+            f"Loading {model_name} model with {patch_size} patch size and {aligned_option} alignment and {normalize_option} normalization..."
         )
 
         model_type = f"{model_name}_vitb{patch_size}"
@@ -82,7 +98,7 @@ def load_image_encoder(
         if aligned_option == "unaligned":
             model = PerceptualModel(
                 model_type=model_type,
-                normalize_embeds=False,
+                normalize_embeds=normalize_option == "norm",
                 stride=patch_size,
                 load_dir=str(models_path),
                 baseline=True,
@@ -93,7 +109,7 @@ def load_image_encoder(
             model, _ = dreamsim.dreamsim(
                 dreamsim_type=model_type,
                 cache_dir=str(models_path),
-                normalize_embeds=False,
+                normalize_embeds=normalize_option == "norm",
                 device=device or get_device_str(),
             )
 
@@ -272,6 +288,30 @@ class NICEConfig(ModelConfig):
     num_workers: int = 8
     temperature_init: float = math.log(1 / 0.07)
     data_seed: int = 42
+
+    @cached_property
+    def latent_config(self) -> tuple[str, str, str, str]:
+        return extract_model_config(self.model_name)
+
+    @cached_property
+    def embed_name(self) -> str:
+        _, model_name, _, _ = self.latent_config
+        return model_name
+
+    @cached_property
+    def embed_aligned_option(self) -> str:
+        aligned_option, _, _, _ = self.latent_config
+        return aligned_option
+
+    @cached_property
+    def embed_patch_size(self) -> str:
+        _, _, patch_size, _ = self.latent_config
+        return patch_size
+
+    @cached_property
+    def embed_normalized(self) -> bool:
+        _, _, _, normalize_option = self.latent_config
+        return normalize_option == "norm"
 
     @field_validator("eeg_config", mode="before")
     @classmethod
@@ -467,8 +507,7 @@ class NICEModel(Model):
         """Return the test dataloader."""
         return self.data_module.test_dataloader()
 
-    @property
-    @lru_cache(maxsize=1)
+    @cached_property
     def num_train_batches(self) -> int:
         """Return the length of the training dataloader."""
         return len(self.data_module.train_dataloader())
@@ -477,6 +516,11 @@ class NICEModel(Model):
         """Forward pass through the model."""
         eeg_latent = self.eeg_encoder(eeg_data)
         eeg_latent = self.eeg_projector(eeg_latent)
+
+        # Normalize the image latents if they are not already normalized
+        if not self.config.embed_normalized:
+            img_latent = nn.functional.normalize(img_latent, dim=-1)
+
         img_latent = self.img_projector(img_latent)
 
         sim = compute_similarity(
