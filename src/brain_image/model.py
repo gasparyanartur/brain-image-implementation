@@ -244,22 +244,27 @@ class LatentProjector(nn.Module):
         self,
         embed_dim: int = 1440,
         proj_dim: int = 768,
+        hidden_dim: int = 768,
         dropout: float = 0.5,
     ):
         super().__init__()
 
-        self.l_proj = nn.Linear(embed_dim, proj_dim)
+        self.l_proj = nn.Linear(embed_dim, hidden_dim)
         self.l_inner = nn.Sequential(
             nn.GELU(),
-            nn.Linear(proj_dim, proj_dim),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.Dropout(dropout),
         )
-        self.norm = nn.LayerNorm(proj_dim)
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.l_out = nn.Linear(hidden_dim, proj_dim)
+        # self.norm2 = nn.LayerNorm(proj_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_res = x = self.l_proj(x)
         x = self.l_inner(x) + x_res
-        x = self.norm(x)
+        x = self.norm1(x)
+        x = self.l_out(x)
+        # x = self.norm2(x)
 
         return x
 

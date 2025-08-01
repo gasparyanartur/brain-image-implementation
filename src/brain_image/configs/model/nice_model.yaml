@@ -6,8 +6,8 @@ project_dim: 768
 img_latent_dim: 768
 
 # Learning rate settings
-encoder_lr: 8e-3
-projector_lr: 8e-3
+encoder_lr: 1e-3
+projector_lr: 1e-3
 lr_scheduler: cosine_anneal
 betas: [0.9, 0.999]
 encoder_min_lr: 1e-4
