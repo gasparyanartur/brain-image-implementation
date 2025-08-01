@@ -1,11 +1,10 @@
-f1: 40
-f2: 40
-pool1: 51
-stride1: 5
+f1: 64
+f2: 64
+pool1: 2
+stride1: 2
 pool2: 1
 stride2: 1
-n_channels: 128
-kernel1: 64
-kernel2: 16
+kernel1: 29
+kernel2: 17
 dropout: 0.5
 embed_dim: 40

@@ -313,7 +313,10 @@ def preprocess_image(
     return image
 
 
-def preprocess_eeg_data(eeg_data: Tensor) -> Tensor:
+def preprocess_eeg_data(
+    eeg_data: Tensor,
+    interpolate_size: tuple[int, int] | None = None,
+) -> Tensor:
     """Preprocess the EEG data by averaging over the number of repetitions.
 
     Args:
@@ -323,7 +326,15 @@ def preprocess_eeg_data(eeg_data: Tensor) -> Tensor:
         numpy.ndarray: The preprocessed EEG data. <concepts, channels, timesteps>
     """
     # Average over the number of repetitions
-    preprocessed_data = torch.mean(eeg_data, dim=1)
+    if interpolate_size is not None:
+        preprocessed_data = torch.nn.functional.interpolate(
+            eeg_data, size=interpolate_size, mode="nearest"
+        )
+    else:
+        preprocessed_data = eeg_data
+
+    preprocessed_data = torch.mean(preprocessed_data, dim=1)
+
     return preprocessed_data
 
 

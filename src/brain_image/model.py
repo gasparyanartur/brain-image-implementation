@@ -137,15 +137,14 @@ class Model(LightningModule):
 
 
 class EEGEncoderConfig(ModelConfig):
-    f1: int = 40
-    f2: int = 40
-    pool1: int = 51
-    stride1: int = 5
+    f1: int = 64
+    f2: int = 64
+    pool1: int = 2
+    stride1: int = 2
     pool2: int = 1
     stride2: int = 1
-    n_channels: int = 63
-    kernel1: int = 64
-    kernel2: int = 16
+    kernel1: int = 29
+    kernel2: int = 17
     dropout: float = 0.5
     embed_dim: int = 40
 
@@ -201,7 +200,7 @@ class EEGEncoder(Model):
                         ),
                     ),
                     ("bn1", nn.BatchNorm2d(config.f1)),
-                    ("elu1", nn.ELU(inplace=True)),
+                    ("elu1", nn.ELU()),
                     ("dropout1", nn.Dropout(config.dropout, inplace=True)),
                     (
                         "pool1",
@@ -212,13 +211,13 @@ class EEGEncoder(Model):
                         nn.Conv2d(
                             config.f1,
                             config.f2,
-                            kernel_size=(config.n_channels, 1),
+                            kernel_size=(config.kernel2, 1),
                             stride=(1, 1),
                             bias=False,
                         ),
                     ),
                     ("bn2", nn.BatchNorm2d(config.f2)),
-                    ("elu2", nn.ELU(inplace=True)),
+                    ("elu2", nn.ELU()),
                     ("dropout2", nn.Dropout(config.dropout, inplace=True)),
                     (
                         "pool2",
@@ -231,22 +230,13 @@ class EEGEncoder(Model):
                 ]
             ),
         )
+        # self.patch_embedding = WrapDebugSequential(self.patch_embedding)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = einops.rearrange(x, "b s t -> b 1 s t")
-        print(f"(debug): {x.shape}")
-        x = WrapDebugSequential(self.patch_embedding)(x)
-        x = einops.rearrange(x, "b e (s) (t) -> b (s t) e")
+        x = self.patch_embedding(x)
+        x = einops.rearrange(x, "b e (s) (t) -> b (s t e)")
         return x
-
-    @property
-    def output_dim(self) -> int:
-        # The output is flattened, so we need to consider the spatial dimensions
-        # After AdaptiveAvgPool2d((1, pool1)), the output shape is (batch, f2, 1, pool1)
-        # When flattened, this becomes (batch, f2 * pool1)
-        if not isinstance(self.config, EEGEncoderConfig):
-            raise TypeError(f"Expected EEGEncoderConfig, got {type(self.config)}")
-        return self.config.f2 * self.config.pool1
 
 
 class LatentProjector(nn.Module):
@@ -259,17 +249,17 @@ class LatentProjector(nn.Module):
         super().__init__()
 
         self.l_proj = nn.Linear(embed_dim, proj_dim)
-        # self.l_inner = nn.Sequential(
-        #    nn.GELU(),
-        #    nn.Linear(proj_dim, proj_dim),
-        #    nn.Dropout(dropout),
-        # )
-        # self.norm = nn.LayerNorm(proj_dim)
+        self.l_inner = nn.Sequential(
+            nn.GELU(),
+            nn.Linear(proj_dim, proj_dim),
+            nn.Dropout(dropout),
+        )
+        self.norm = nn.LayerNorm(proj_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_res = x = self.l_proj(x)
-        # x = self.l_inner(x) + x_res
-        # x = self.norm(x)
+        x = self.l_inner(x) + x_res
+        x = self.norm(x)
 
         return x
 
@@ -278,6 +268,7 @@ class NICEConfig(ModelConfig):
     eeg_config: EEGEncoderConfig = EEGEncoderConfig()
     model_name: str = "aligned_synclr_16"
     project_dim: int = 256
+    eeg_latent_dim: int = 1440
     img_latent_dim: int = 768
     encoder_lr: float = 8e-3
     projector_lr: float = 8e-3
@@ -349,7 +340,7 @@ class NICEModel(Model):
         self.config = config
         self.eeg_encoder = EEGEncoder(config.eeg_config)
         self.eeg_projector = LatentProjector(
-            embed_dim=self.eeg_encoder.output_dim,
+            embed_dim=config.eeg_latent_dim,
             proj_dim=config.project_dim,
         )
         self.img_projector = (
