@@ -14,6 +14,8 @@ dependencies = [
     "lightning",
     "triton",
     "wandb",
+    "diffusers",
+    "transformers",
 
     "numpy",
     "einops",
