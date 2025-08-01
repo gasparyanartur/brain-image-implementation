@@ -2,7 +2,7 @@
 
 # Model architecture
 model_name: aligned_synclr
-project_dim: 256
+project_dim: 768
 img_latent_dim: 768
 
 # Learning rate settings

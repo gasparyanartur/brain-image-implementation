@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from functools import cached_property, lru_cache
 import logging
 from pathlib import Path
@@ -136,19 +137,17 @@ class Model(LightningModule):
 
 
 class EEGEncoderConfig(ModelConfig):
-    embed_dim: int = 40
-
-    temporal_kernel_size: int = 25
-    spatial_kernel_size: int = 17
-    temporal_pool_size: int = 41
-    temporal_stride: int = 1
-    hidden_dim: int = 40
+    f1: int = 40
+    f2: int = 40
+    pool1: int = 51
+    stride1: int = 5
+    pool2: int = 1
+    stride2: int = 1
+    n_channels: int = 63
+    kernel1: int = 64
+    kernel2: int = 16
     dropout: float = 0.5
-    final_spatiotemporal_size: int = 36
-
-    @property
-    def encoded_dim(self) -> int:
-        return self.embed_dim * self.final_spatiotemporal_size
+    embed_dim: int = 40
 
     def create_model(self) -> EEGEncoder:
         return EEGEncoder(self)
@@ -164,57 +163,20 @@ class DebugLayer(nn.Module):
         return x
 
 
-class PatchEmbedding(nn.Module):
-    def __init__(
-        self,
-        embed_dim: int,
-        temporal_kernel_size: int,
-        spatial_kernel_size: int,
-        temporal_pool_size: int,
-        temporal_stride: int,
-        hidden_dim: int,
-        final_spatiotemporal_size: int,
-        dropout: float = 0.5,
-    ):
-        # Adapted from https://github.com/eeyhsong/NICE-EEG
-        super().__init__()
+class WrapDebugSequential(nn.Module):
+    def __init__(self, seq: nn.Sequential, note: str = ""):
+        super(WrapDebugSequential, self).__init__()
+        self.seq = seq
 
-        self.spatiotemporal_conv = nn.Sequential(
-            nn.Conv2d(1, hidden_dim, kernel_size=(1, temporal_kernel_size)),
-            nn.Conv2d(
-                hidden_dim,
-                hidden_dim,
-                kernel_size=(1, temporal_pool_size),
-                stride=(1, temporal_stride),
-                bias=False,
-            ),
-            nn.BatchNorm2d(hidden_dim),
-            nn.ELU(inplace=True),
-            nn.Conv2d(
-                hidden_dim, hidden_dim, kernel_size=(spatial_kernel_size, 1), bias=False
-            ),
-            nn.BatchNorm2d(hidden_dim),
-            nn.ELU(inplace=True),
-            nn.Dropout(dropout),
+        self.debug_layers = nn.ModuleList(
+            [DebugLayer(f"layer_{i}") for i in range(len(seq))]
         )
 
-        self.projection = nn.Conv2d(hidden_dim, embed_dim, kernel_size=(1, 1))
-        self.final_proj = nn.AdaptiveAvgPool1d((final_spatiotemporal_size))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = einops.rearrange(x, "b s t -> b 1 s t")
-        x = self.spatiotemporal_conv(x)
-        x = self.projection(x)
-        x = einops.rearrange(x, "b e (s) (t) -> b e (s t)")
-        x = self.final_proj(x)
-        x = einops.rearrange(x, "b e st -> b st e")
+    def forward(self, x):
+        for i, layer in enumerate(self.seq):
+            x = layer(x)
+            print(f"(debug): {i} - {x.shape} - {self.debug_layers[i].note}")
         return x
-
-    def jit_compile(self):
-        # Compile the model for faster inference
-        self.spatiotemporal_conv = torch.jit.script(self.spatiotemporal_conv)
-        self.projection = torch.jit.script(self.projection)
-        return self
 
 
 class EEGEncoder(Model):
@@ -225,26 +187,66 @@ class EEGEncoder(Model):
         # Adapted from https://github.com/eeyhsong/NICE-EEG
         super(EEGEncoder, self).__init__(config)
 
-        self.patch_embedding = PatchEmbedding(
-            embed_dim=config.embed_dim,
-            temporal_kernel_size=config.temporal_kernel_size,
-            spatial_kernel_size=config.spatial_kernel_size,
-            temporal_pool_size=config.temporal_pool_size,
-            temporal_stride=config.temporal_stride,
-            hidden_dim=config.hidden_dim,
-            final_spatiotemporal_size=config.final_spatiotemporal_size,
-            dropout=config.dropout,
+        self.patch_embedding = nn.Sequential(
+            OrderedDict(
+                [
+                    (
+                        "conv1",
+                        nn.Conv2d(
+                            1,
+                            config.f1,
+                            kernel_size=(1, config.kernel1),
+                            stride=(1, 1),
+                            bias=False,
+                        ),
+                    ),
+                    ("bn1", nn.BatchNorm2d(config.f1)),
+                    ("elu1", nn.ELU(inplace=True)),
+                    ("dropout1", nn.Dropout(config.dropout, inplace=True)),
+                    (
+                        "pool1",
+                        nn.AvgPool2d((1, config.pool1), stride=(1, config.stride1)),
+                    ),
+                    (
+                        "conv2",
+                        nn.Conv2d(
+                            config.f1,
+                            config.f2,
+                            kernel_size=(config.n_channels, 1),
+                            stride=(1, 1),
+                            bias=False,
+                        ),
+                    ),
+                    ("bn2", nn.BatchNorm2d(config.f2)),
+                    ("elu2", nn.ELU(inplace=True)),
+                    ("dropout2", nn.Dropout(config.dropout, inplace=True)),
+                    (
+                        "pool2",
+                        nn.AvgPool2d((1, config.pool2), stride=(1, config.stride2)),
+                    ),
+                    (
+                        "projection",
+                        nn.Conv2d(config.f2, config.embed_dim, kernel_size=(1, 1)),
+                    ),
+                ]
+            ),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.patch_embedding(x)
-        x = x.flatten(start_dim=1)
-
+        x = einops.rearrange(x, "b s t -> b 1 s t")
+        print(f"(debug): {x.shape}")
+        x = WrapDebugSequential(self.patch_embedding)(x)
+        x = einops.rearrange(x, "b e (s) (t) -> b (s t) e")
         return x
 
-    def jit_compile(self):
-        self.patch_embedding = self.patch_embedding.jit_compile()
-        return self
+    @property
+    def output_dim(self) -> int:
+        # The output is flattened, so we need to consider the spatial dimensions
+        # After AdaptiveAvgPool2d((1, pool1)), the output shape is (batch, f2, 1, pool1)
+        # When flattened, this becomes (batch, f2 * pool1)
+        if not isinstance(self.config, EEGEncoderConfig):
+            raise TypeError(f"Expected EEGEncoderConfig, got {type(self.config)}")
+        return self.config.f2 * self.config.pool1
 
 
 class LatentProjector(nn.Module):
@@ -257,17 +259,17 @@ class LatentProjector(nn.Module):
         super().__init__()
 
         self.l_proj = nn.Linear(embed_dim, proj_dim)
-        self.l_inner = nn.Sequential(
-            nn.GELU(),
-            nn.Linear(proj_dim, proj_dim),
-            nn.Dropout(dropout),
-        )
-        self.norm = nn.LayerNorm(proj_dim)
+        # self.l_inner = nn.Sequential(
+        #    nn.GELU(),
+        #    nn.Linear(proj_dim, proj_dim),
+        #    nn.Dropout(dropout),
+        # )
+        # self.norm = nn.LayerNorm(proj_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_res = x = self.l_proj(x)
-        x = self.l_inner(x) + x_res
-        x = self.norm(x)
+        # x = self.l_inner(x) + x_res
+        # x = self.norm(x)
 
         return x
 
@@ -290,6 +292,7 @@ class NICEConfig(ModelConfig):
     num_workers: int = 8
     temperature_init: float = math.log(1 / 0.07)
     data_seed: int = 42
+    project_image: bool = False
 
     @cached_property
     def latent_config(self) -> tuple[str, str, str, str]:
@@ -346,12 +349,16 @@ class NICEModel(Model):
         self.config = config
         self.eeg_encoder = EEGEncoder(config.eeg_config)
         self.eeg_projector = LatentProjector(
-            embed_dim=config.eeg_config.encoded_dim,
+            embed_dim=self.eeg_encoder.output_dim,
             proj_dim=config.project_dim,
         )
-        self.img_projector = LatentProjector(
-            embed_dim=config.img_latent_dim,
-            proj_dim=config.project_dim,
+        self.img_projector = (
+            LatentProjector(
+                embed_dim=config.img_latent_dim,
+                proj_dim=config.project_dim,
+            )
+            if config.project_image
+            else None
         )
         self.temperature = nn.Parameter(
             torch.tensor(config.temperature_init, dtype=torch.float32)
@@ -368,7 +375,8 @@ class NICEModel(Model):
             logging.info("Compiling model...")
             self.eeg_encoder = torch.compile(self.eeg_encoder)
             self.eeg_projector = torch.compile(self.eeg_projector)
-            self.img_projector = torch.compile(self.img_projector)
+            if self.img_projector is not None:
+                self.img_projector = torch.compile(self.img_projector)
 
         self.save_hyperparameters(
             {
@@ -416,21 +424,22 @@ class NICEModel(Model):
             lr=self.config.encoder_lr,
             betas=self.config.betas,
         )
-        projector_optimizer = torch.optim.Adam(
-            [
-                {
-                    "params": self.eeg_projector.parameters(),
-                    "lr": self.config.projector_lr,
-                },
+
+        projector_params = [
+            {"params": self.eeg_projector.parameters(), "lr": self.config.projector_lr},
+            {"params": [self.temperature], "lr": self.config.projector_lr},
+        ]
+
+        if self.img_projector is not None:
+            projector_params.append(
                 {
                     "params": self.img_projector.parameters(),
                     "lr": self.config.projector_lr,
-                },
-                {
-                    "params": [self.temperature],
-                    "lr": self.config.projector_lr,
-                },
-            ],
+                }
+            )
+
+        projector_optimizer = torch.optim.Adam(
+            projector_params,
             betas=self.config.betas,
         )
 
@@ -541,7 +550,8 @@ class NICEModel(Model):
         if not self.config.embed_normalized:
             img_latent = nn.functional.normalize(img_latent, dim=-1)
 
-        img_latent = self.img_projector(img_latent)
+        if self.img_projector is not None:
+            img_latent = self.img_projector(img_latent)
 
         sim = compute_similarity(
             eeg_latent=eeg_latent,

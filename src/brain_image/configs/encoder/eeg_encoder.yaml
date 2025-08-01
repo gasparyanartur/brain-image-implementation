@@ -1,12 +1,11 @@
-# EEG Encoder Configuration
-
-# Convolutional parameters
-temporal_kernel_size: 25
-spatial_kernel_size: 17
-temporal_pool_size: 41
-temporal_stride: 1
-hidden_dim: 40
-dropout: 0.5 
-
-# Final dimensions
-final_spatiotemporal_size: 36
+f1: 40
+f2: 40
+pool1: 51
+stride1: 5
+pool2: 1
+stride2: 1
+n_channels: 128
+kernel1: 64
+kernel2: 16
+dropout: 0.5
+embed_dim: 40
