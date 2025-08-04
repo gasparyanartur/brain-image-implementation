@@ -310,6 +310,7 @@ def preprocess_image(
         image, list(img_size), interpolation=tv2.InterpolationMode.BICUBIC
     )
     image = image / 255.0
+    image = torch.clamp(image, 0.0, 1.0)
     return image
 
 
