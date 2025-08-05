@@ -273,7 +273,6 @@ def load_image_from_path(path: Path) -> Tensor:
         raise FileNotFoundError(f"Image not found: {path}")
 
     img = torchvision.io.decode_image(str(path))
-    img = img.float()  # Convert to float tensor
     return img
 
 
