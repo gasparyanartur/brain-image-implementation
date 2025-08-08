@@ -5,13 +5,12 @@ defaults:
   - dataset: eeg_dataset
   - _self_
 
+# Model configuration
+model_name: aligned_synclr_16  # Options: aligned_synclr_16, unaligned_synclr_16, aligned_clip_32, unaligned_clip_32, sd_highlevel, sd_lowlevel
+task_type: align  # Options: align, recon
+
 # Generation settings
-batch_size: 256
-models:
-  - unaligned_synclr_16
-  - aligned_synclr_16
-  - unaligned_clip_32
-  - aligned_clip_32
+batch_size: 128
 splits:
   - train
   - test
@@ -19,4 +18,5 @@ img_size: [224, 224]
 models_path: models
 dtype: float32
 device: null
-output_dir: null
+download_weights: true
+output_dir: cache/tensorcache

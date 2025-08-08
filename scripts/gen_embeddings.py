@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import hydra
 import logging
 from pathlib import Path
@@ -9,6 +10,7 @@ import tqdm
 from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
 from brain_image.data import (
     EEGDatasetConfig,
+    TensorCache,
     batch_load_images,
     get_image_paths,
     preprocess_image,
@@ -19,13 +21,10 @@ from dreamsim.model import PerceptualModel
 
 
 class EmbeddingGenerationConfig(BaseConfig):
-    batch_size: int = 32
-    models: list[str] = [
-        "unaligned_synclr_16",
-        "aligned_synclr_16",
-        "unaligned_clip_32",
-        "aligned_clip_32",
-    ]
+    model_name: Literal["aligned_synclr_16", "unaligned_synclr_16", "aligned_clip_32", "unaligned_clip_32", "sd_highlevel", "sd_lowlevel"]
+    task_type: Literal["align", "recon"]
+
+    batch_size: int = 512
     splits: list[Literal["train", "test"]] = ["train", "test"]
     img_size: tuple[int, int] = (224, 224)
     models_path: Path = Path("models")
@@ -34,41 +33,12 @@ class EmbeddingGenerationConfig(BaseConfig):
     data_config: EEGDatasetConfig = EEGDatasetConfig()
     download_weights: bool = True
 
-    output_dir: Path | None = (
-        None  # If None, will be the same as the data_config.data_path / data_config.latents_dir
-    )
-
-
-def generate_latents(
-    embed_model: PerceptualModel,
-    img_paths: list[Path],
-    batch_size: int = 32,
-    img_size: tuple[int, int] = (224, 224),
-    device: str | None = None,
-    dtype: torch.dtype = DTYPE,
-) -> torch.Tensor:
-    """Generate embeddings for a given split of images."""
-    device = device or get_device_str()
-    embed_model.eval()
-    embed_model.to(device=device, dtype=dtype)
-    embed_model.requires_grad_(False)
-
-    latents = []
-    with torch.no_grad():
-        for i in tqdm.tqdm(range(0, len(img_paths), batch_size)):
-            paths = img_paths[i : i + batch_size]
-            imgs = batch_load_images(paths).to(device=device, dtype=dtype)
-            imgs = preprocess_image(imgs, img_size=img_size)
-
-            latent = embed_model.embed(imgs).detach().cpu()
-            latents.append(latent)
-
-    return torch.concat(latents, dim=0)
-
+    output_dir: Path = Path("cache/tensorcache")
 
 def run_generation(
     img_dir: Path,
     output_dir: Path,
+    task_type: str,
     model_name: str,
     split: Literal["train", "test"],
     models_path: Path = Path("models"),
@@ -82,10 +52,12 @@ def run_generation(
 
     logging.info(f"Loading image encoder for model {model_name} on device {device}")
     image_encoder = load_image_encoder(
+        task_type,
         model_name,
         models_path=models_path,
         download_weights=download_weights,
         device=device,
+        img_size=img_size,
     )
     logging.info(f"Generating {split} embeddings for model {model_name}")
 
@@ -94,20 +66,25 @@ def run_generation(
         split=split,
     )
 
-    train_embeddings = generate_latents(
-        image_encoder,
-        img_paths,
-        batch_size=batch_size,
-        img_size=img_size,
-        device=device,
-        dtype=dtype,
-    )
+    encoder_configs = [task_type, model_name]
 
-    dst_dir = output_dir / model_name / f"{split}_embeddings.pt"
-    dst_dir.parent.mkdir(parents=True, exist_ok=True)
+    device = device or get_device_str()
 
-    logging.info(f"Saving {split} embeddings to {dst_dir}")
-    torch.save(train_embeddings, dst_dir)
+    cache = TensorCache(cache_path=output_dir)
+    logging.info(f"Saving embeddings with model configs {encoder_configs} to cache directory: {output_dir}")
+
+    with torch.no_grad():
+        for i in tqdm.tqdm(range(0, len(img_paths), batch_size), desc="Generating embeddings..."):
+            paths = img_paths[i : i + batch_size]
+            imgs = batch_load_images(paths).to(device=device, dtype=dtype)
+
+            latent = image_encoder(imgs).detach().cpu()
+            
+            for path in paths:
+                cache.save_tensor(latent, str(path), *encoder_configs)
+
+
+    logging.info(f"Finished generating {split} embeddings for model {model_name}")
 
 
 def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
@@ -127,12 +104,12 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
     logging.info(f"Generating all embeddings using device: {device}")
 
     for split in config.splits:
-        for model_name in config.models:
             run_generation(
                 img_dir,
                 embed_dir,
+                task_type=config.task_type,
                 batch_size=config.batch_size,
-                model_name=model_name,
+                model_name=config.model_name,
                 split=split,
                 models_path=config.models_path,
                 img_size=config.img_size,
@@ -164,14 +141,16 @@ def main(cfg: DictConfig):
     # Create the embedding generation config
     config = EmbeddingGenerationConfig(
         batch_size=cfg.batch_size,
-        models=cfg.models,
+        model_name=cfg.model_name,
+        task_type=cfg.task_type,
         splits=cfg.splits,
         img_size=tuple(cfg.img_size),
         models_path=Path(cfg.models_path),
         dtype=cfg.dtype,
         device=cfg.device,
         data_config=dataset_config,
-        output_dir=Path(cfg.output_dir) if cfg.output_dir else None,
+        output_dir=Path(cfg.output_dir),
+        download_weights=cfg.download_weights,
     )
 
     logging.info("Starting embedding generation")

@@ -147,12 +147,22 @@ def mock_data_directory(tmp_path, mock_data_config):
         mock_data_config["test_batch_size"] * len(mock_data_config["test_categories"]),
         mock_data_config["latent_dim"],
     )
-    torch.save(
-        train_embeddings, data_dir / "img-latents" / "synclr" / "train_embeddings.pt"
-    )
-    torch.save(
-        test_embeddings, data_dir / "img-latents" / "synclr" / "test_embeddings.pt"
-    )
+
+    embedding_types = [
+        "align/aligned_synclr_16",
+        "align/unaligned_synclr_16",
+        "recon/sd_highlevel",
+        "recon/sd_lowlevel",
+    ]
+    for embedding_type in embedding_types:
+        path = data_dir / "img-latents" / embedding_type.replace("/", "_")
+        path.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            train_embeddings, path / "train_embeddings.pt"
+        )
+        torch.save(
+            test_embeddings, path / "test_embeddings.pt"
+        )
 
     mock_data_directory = {
         "root_dir": tmp_path,

@@ -11,7 +11,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
-from brain_image.model import Model, NICEModel, NICEConfig
+from brain_image.model import NICEModel, NICEConfig
 
 
 class TrainConfig(BaseConfig):
@@ -72,7 +72,7 @@ class NICETrainerConfig(TrainConfig):
 
 
 class Trainer:
-    def __init__(self, config: TrainConfig, model: Model):
+    def __init__(self, config: TrainConfig, model: pl.LightningModule):
         self.config = config
         self.model = model
         self.pl_trainer = self.create_pl_trainer()

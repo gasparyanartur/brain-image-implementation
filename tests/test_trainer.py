@@ -20,7 +20,7 @@ def mock_nice_trainer(mock_data_directory):
     log_dir = mock_data_directory["log_dir"]
     checkpoint_dir = mock_data_directory["checkpoint_dir"]
     config = NICEConfig(
-        model_name="synclr",
+        model_name="aligned_synclr_16",
         max_epochs=1,
     )
     dataset_config = EEGDatasetConfig(
@@ -31,8 +31,7 @@ def mock_nice_trainer(mock_data_directory):
         num_workers=0,
     )
     trainer_config = NICETrainerConfig(
-        submodel_config=config,
-        dataset_config=dataset_config,
+        run_name="test_nice",
         num_epochs=1,
         save_checkpoints=True,
         log_dir=log_dir,
@@ -42,7 +41,11 @@ def mock_nice_trainer(mock_data_directory):
         enable_model_summary=False,
         log_every_n_steps=1,
     )
-    trainer = trainer_config.create_trainer()
+    trainer = NICETrainer(
+        config=trainer_config,
+        model_config=config,
+        dataset_config=dataset_config,
+    )
     return {
         "trainer": trainer,
         "trainer_config": trainer_config,
@@ -56,7 +59,7 @@ def test_nice_trainer_runs_and_leaves_logs_and_checkpoints(mock_data_directory):
     log_dir = mock_data_directory["log_dir"]
     checkpoint_dir = mock_data_directory["checkpoint_dir"]
     config = NICEConfig(
-        model_name="synclr",
+        model_name="aligned_synclr_16",
         max_epochs=1,
     )
     dataset_config = EEGDatasetConfig(
@@ -67,8 +70,7 @@ def test_nice_trainer_runs_and_leaves_logs_and_checkpoints(mock_data_directory):
         num_workers=0,
     )
     trainer_config = NICETrainerConfig(
-        submodel_config=config,
-        dataset_config=dataset_config,
+        run_name="test_nice",
         num_epochs=1,
         save_checkpoints=True,
         log_dir=log_dir,
@@ -78,12 +80,17 @@ def test_nice_trainer_runs_and_leaves_logs_and_checkpoints(mock_data_directory):
         enable_model_summary=False,
         log_every_n_steps=1,
     )
-    trainer = trainer_config.create_trainer()
+    trainer = NICETrainer(
+        config=trainer_config,
+        model_config=config,
+        dataset_config=dataset_config,
+    )
 
     trainer.train()
-    assert any(trainer.config.checkpoint_dir.glob("*.ckpt")) or any(
-        trainer.config.checkpoint_dir.glob("*.pt")
-    )
+    if trainer.config.checkpoint_dir is not None:
+        assert any(trainer.config.checkpoint_dir.glob("*.ckpt")) or any(
+            trainer.config.checkpoint_dir.glob("*.pt")
+        )
     assert trainer.config.log_dir.exists() and any(trainer.config.log_dir.iterdir())
 
 
@@ -99,21 +106,13 @@ def test_nice_trainer_loss_decreases(mock_data_directory):
     log_dir = mock_data_directory["log_dir"]
     checkpoint_dir = mock_data_directory["checkpoint_dir"]
     config = NICEConfig(
-        model_name="synclr",
+        model_name="aligned_synclr_16",
         lr_scheduler="none",
         projector_warmup_epochs=0,
         encoder_warmup_epochs=0,
     )
     trainer_config = NICETrainerConfig(
-        submodel_config=config,
-        dataset_config=EEGDatasetConfig(
-            data_path=data_dir,
-            batch_size=2,
-            val_batch_size=2,
-            subs=[1],
-            num_workers=0,
-            shuffle_train=False,
-        ),
+        run_name="test_nice",
         num_epochs=3,
         save_checkpoints=True,
         log_dir=log_dir,
@@ -125,7 +124,18 @@ def test_nice_trainer_loss_decreases(mock_data_directory):
         overfit_batches=1,
     )
 
-    trainer = trainer_config.create_trainer()
+    trainer = NICETrainer(
+        config=trainer_config,
+        model_config=config,
+        dataset_config=EEGDatasetConfig(
+            data_path=data_dir,
+            batch_size=2,
+            val_batch_size=2,
+            subs=[1],
+            num_workers=0,
+            shuffle_train=False,
+        ),
+    )
     trainer = cast(NICETrainer, trainer)
     trainer.model = cast(NICEModel, trainer.model)
 
@@ -135,18 +145,29 @@ def test_nice_trainer_loss_decreases(mock_data_directory):
     eeg_data = batch["eeg_data"].to(trainer.model.device, dtype=trainer.model.dtype)
 
     with torch.no_grad():
-        sim = trainer.model.forward(img_latent, eeg_data)
+        sim = trainer.model.get_similarity(img_latent, eeg_data)
         initial_loss = trainer.model.get_loss(sim).item()
 
     # Train model
-    trainer = trainer_config.create_trainer()
+    trainer = NICETrainer(
+        config=trainer_config,
+        model_config=config,
+        dataset_config=EEGDatasetConfig(
+            data_path=data_dir,
+            batch_size=2,
+            val_batch_size=2,
+            subs=[1],
+            num_workers=0,
+            shuffle_train=False,
+        ),
+    )
 
     # Disable validation by patching the trainer creation
     trainer.train()
 
     # Final model
     with torch.no_grad():
-        sim = trainer.model.forward(img_latent, eeg_data)
+        sim = trainer.model.get_similarity(img_latent, eeg_data)
         final_loss = trainer.model.get_loss(sim).item()  # type: ignore
 
     assert final_loss < initial_loss

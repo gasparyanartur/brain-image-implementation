@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import lru_cache
+import hashlib
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -14,6 +16,56 @@ from torchvision.transforms import v2 as tv2
 from lightning.pytorch import LightningDataModule
 
 from brain_image.configs import DEFAULT_BATCH_SIZE, BaseConfig, GlobalConfig
+
+
+def encode_keys(*keys: str) -> str:
+    h = hashlib.sha1()
+    for key in keys:
+        h.update(key.encode())
+    return h.hexdigest()
+
+
+class TensorCache:
+    def __init__(
+        self,
+        cache_path: Path = Path("cache/tensorcache"),
+        memory_cache_size: int = 65536,
+    ):
+        self.cache_path = cache_path
+        self.cache_path.mkdir(parents=True, exist_ok=True)
+
+        self.memory_cache_size = memory_cache_size
+        self.memory_cache = {}
+        self.memory_cache_keys = []
+
+    def get_tensor_path(self, *keys: str) -> Path:
+        encoded_path = encode_keys(*keys)
+        full_path = self.cache_path / encoded_path
+        return full_path.with_suffix(".pt")
+
+    def save_tensor(self, tensor: torch.Tensor, *keys: str):
+        path = self.get_tensor_path(*keys)
+        self._add_to_memory_cache(path, tensor)
+
+        torch.save(tensor, path)
+
+    def load_tensor(self, *keys: str) -> torch.Tensor:
+        path = self.get_tensor_path(*keys)
+        if path in self.memory_cache:
+            return self.memory_cache[path]
+
+        tensor = torch.load(path)
+
+        self._add_to_memory_cache(path, tensor)
+        return tensor
+
+    def _add_to_memory_cache(self, path: Path, tensor: torch.Tensor):
+        self.memory_cache_keys.append(path)
+        self.memory_cache[path] = tensor
+
+        if len(self.memory_cache_keys) > self.memory_cache_size:
+            oldest_key = self.memory_cache_keys.pop(0)
+            self.memory_cache.pop(oldest_key)
 
 
 class DataConfig(BaseConfig, ABC):
@@ -92,20 +144,18 @@ def get_subset_dataset(
 
 
 class EEGDataModule(DataModule):
-    def __init__(self, config: EEGDatasetConfig, model_name: str):
+    def __init__(self, config: EEGDatasetConfig):
         super().__init__(config)
         self.config: EEGDatasetConfig = config
-        self.model_name = model_name
         self.rng = np.random.default_rng(42)
 
     def get_metadata(self) -> dict:
         return {}
 
-    def get_train_dataset(self) -> Dataset:
+    def get_train_dataset(self) -> EEGDataset:
         dataset = EEGDataset(
             self.config,
             split="train",
-            model_name=self.model_name,
         )
 
         # Apply train size limit if specified
@@ -119,8 +169,8 @@ class EEGDataModule(DataModule):
 
         return dataset
 
-    def get_val_dataset(self) -> Dataset:
-        dataset = EEGDataset(self.config, split="test", model_name=self.model_name)
+    def get_val_dataset(self) -> EEGDataset:
+        dataset = EEGDataset(self.config, split="test")
 
         # Apply validation size limit if specified
         if self.config.limit_val_size < 1.0:
@@ -131,8 +181,8 @@ class EEGDataModule(DataModule):
 
         return dataset
 
-    def get_test_dataset(self) -> Dataset:
-        dataset = EEGDataset(self.config, split="test", model_name=self.model_name)
+    def get_test_dataset(self) -> EEGDataset:
+        dataset = EEGDataset(self.config, split="test")
 
         # Apply test size limit if specified
         if self.config.limit_test_size < 1.0:
@@ -143,26 +193,28 @@ class EEGDataModule(DataModule):
 
         return dataset
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> torch.utils.data.DataLoader:
         return self._create_dataloader(
             self.get_train_dataset(),
             batch_size=self.config.batch_size,
             shuffle=self.config.shuffle_train,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> torch.utils.data.DataLoader:
         return self._create_dataloader(
             self.get_val_dataset(), batch_size=self.config.val_batch_size, shuffle=False
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> torch.utils.data.DataLoader:
         return self._create_dataloader(
             self.get_test_dataset(),
             batch_size=self.config.val_batch_size,
             shuffle=False,
         )
 
-    def _create_dataloader(self, dataset, shuffle=True, batch_size=None):
+    def _create_dataloader(
+        self, dataset: EEGDataset, shuffle=True, batch_size=None
+    ) -> torch.utils.data.DataLoader:
         if batch_size is None:
             batch_size = self.config.batch_size
 
@@ -181,11 +233,9 @@ class EEGDataset(Dataset):
         self,
         config: EEGDatasetConfig,
         split: Literal["train", "test"],
-        model_name: str = "synclr",
     ):
         self.config = config
         self.split = split
-        self.model_name = model_name
         self.imgs_per_concepts = (
             self.config.train_imgs_per_concept
             if split == "train"
@@ -203,12 +253,6 @@ class EEGDataset(Dataset):
         self.img_paths = get_image_paths(
             self.config.data_path / self.config.imgs_dir,
             split=split,
-        )
-        self.img_latents = torch.load(
-            self.config.data_path
-            / self.config.latents_dir
-            / model_name
-            / f"{img_embed_name}.pt"
         )
 
         self.eeg_data_paths = [
@@ -231,28 +275,25 @@ class EEGDataset(Dataset):
         )  # EEG has stacked over subs, so we need to find the right sample within the sub
 
         img_path = self.img_paths[img_idx]
-        img_latent = self.img_latents[img_idx]
         eeg_data = self.eeg_data[idx]
 
         return {
             "img_path": str(img_path),
-            "img_latent": img_latent,
             "eeg_data": eeg_data,
         }
 
 
 def prepare_datasets(
     config: EEGDatasetConfig,
-    model: str = "synclr",
     seed: int = 42,
     train_val_split: float = 0.8,
     use_test_as_val: bool = True,
 ) -> tuple[EEGDataset, EEGDataset, EEGDataset]:
-    train_dataset = EEGDataset(config, split="train", model_name=model)
-    test_dataset = EEGDataset(config, split="test", model_name=model)
+    train_dataset = EEGDataset(config, split="train")
+    test_dataset = EEGDataset(config, split="test")
 
     if use_test_as_val:
-        val_dataset = EEGDataset(config, split="test", model_name=model)
+        val_dataset = EEGDataset(config, split="test")
 
     else:
         split_rng = manual_seed(seed)
@@ -303,7 +344,7 @@ def load_eeg_data(
 
 
 def preprocess_image(
-    image: torch.Tensor, img_size: tuple[int, int] = (224, 224)
+    image: torch.Tensor, img_size: list[int] = [224, 224]
 ) -> torch.Tensor:
     image = tv2.functional.resize(
         image, list(img_size), interpolation=tv2.InterpolationMode.BICUBIC

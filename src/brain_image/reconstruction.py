@@ -316,3 +316,10 @@ class ReconstructionPipeline:
             * self.vae.config["scaling_factor"]
         )
         return low_level_latent
+
+    def compile(self):
+        self.unet = torch.compile(self.unet)
+        self.vae = torch.compile(self.vae)
+        self.image_encoder = torch.compile(self.image_encoder)
+        self.conditioning_image_preprocessor = torch.compile(self.conditioning_image_preprocessor)
+        self.low_level_image_preprocessor = torch.compile(self.low_level_image_preprocessor)

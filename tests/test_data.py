@@ -14,12 +14,12 @@ from brain_image.data import (
 
 def test_eeg_dataset_creation(mock_data_directory):
     config = EEGDatasetConfig(data_path=mock_data_directory["data_dir"], subs=[1])
-    train_dataset = EEGDataset(config, split="train", model_name="synclr")
+    train_dataset = EEGDataset(config, split="train", model_name="aligned_synclr_16")
     assert len(train_dataset) > 0
     assert len(train_dataset.img_paths) > 0
     assert train_dataset.img_latents.shape[0] > 0
     assert len(train_dataset.eeg_data) > 0
-    test_dataset = EEGDataset(config, split="test", model_name="synclr")
+    test_dataset = EEGDataset(config, split="test", model_name="aligned_synclr_16")
     assert len(test_dataset) > 0
     assert len(test_dataset.img_paths) > 0
     assert test_dataset.img_latents.shape[0] > 0
@@ -28,7 +28,7 @@ def test_eeg_dataset_creation(mock_data_directory):
 
 def test_eeg_dataset_getitem(mock_data_directory):
     config = EEGDatasetConfig(data_path=mock_data_directory["data_dir"], subs=[1])
-    dataset = EEGDataset(config, split="train", model_name="synclr")
+    dataset = EEGDataset(config, split="train", model_name="aligned_synclr_16")
     if len(dataset) > 0:
         item = dataset[0]
         assert isinstance(item, dict)
@@ -48,7 +48,7 @@ def test_eeg_data_module(mock_data_directory):
         subs=[1],
         num_workers=0,
     )
-    module = EEGDataModule(config, model_name="synclr")
+    module = EEGDataModule(config, model_name="aligned_synclr_16")
     train_loader = module.train_dataloader()
     val_loader = module.val_dataloader()
     test_loader = module.test_dataloader()
