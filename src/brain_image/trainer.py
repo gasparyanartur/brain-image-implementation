@@ -266,4 +266,4 @@ class NICETrainer(Trainer):
         super().__init__(config, model)
 
     def get_train_title_components(self) -> list[str]:
-        return super().get_train_title_components() + [self.model_config.model_name]
+        return super().get_train_title_components() + [self.model_config.align_target_model]

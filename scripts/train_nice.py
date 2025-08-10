@@ -38,7 +38,7 @@ class TrainNICEConfig(BaseConfig):
 
     # Component composition - these will be populated by Hydra
     dataset: EEGDatasetConfig = EEGDatasetConfig()
-    model: NICEConfig = NICEConfig(model_name="aligned_synclr")
+    model: NICEConfig = NICEConfig(align_target_model="aligned_synclr")
     trainer: NICETrainerConfig = NICETrainerConfig()
     encoder: EEGEncoderConfig = EEGEncoderConfig()
 

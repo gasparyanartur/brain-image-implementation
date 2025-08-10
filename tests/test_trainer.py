@@ -20,7 +20,7 @@ def mock_nice_trainer(mock_data_directory):
     log_dir = mock_data_directory["log_dir"]
     checkpoint_dir = mock_data_directory["checkpoint_dir"]
     config = NICEConfig(
-        model_name="aligned_synclr_16",
+        align_target_model="aligned_synclr_16",
         max_epochs=1,
     )
     dataset_config = EEGDatasetConfig(
@@ -59,7 +59,7 @@ def test_nice_trainer_runs_and_leaves_logs_and_checkpoints(mock_data_directory):
     log_dir = mock_data_directory["log_dir"]
     checkpoint_dir = mock_data_directory["checkpoint_dir"]
     config = NICEConfig(
-        model_name="aligned_synclr_16",
+        align_target_model="aligned_synclr_16",
         max_epochs=1,
     )
     dataset_config = EEGDatasetConfig(
@@ -106,7 +106,7 @@ def test_nice_trainer_loss_decreases(mock_data_directory):
     log_dir = mock_data_directory["log_dir"]
     checkpoint_dir = mock_data_directory["checkpoint_dir"]
     config = NICEConfig(
-        model_name="aligned_synclr_16",
+        align_target_model="aligned_synclr_16",
         lr_scheduler="none",
         projector_warmup_epochs=0,
         encoder_warmup_epochs=0,

@@ -18,7 +18,7 @@ import itertools as it
 import lightning as pl
 
 from brain_image.configs import BaseConfig, get_device, get_device_str
-from brain_image.data import EEGDataModule, EEGDatasetConfig, preprocess_image
+from brain_image.data import EEGDataModule, EEGDatasetConfig, TensorCache, preprocess_image
 import dreamsim
 from dreamsim.model import PerceptualModel
 
@@ -110,13 +110,14 @@ def load_image_encoder(
     model_config = extract_model_config(task_type, model_config_str)
 
     if model_config["task_type"] == "recon":
+        model_name = model_config["model_name"]
         pipe = ReconstructionPipeline.from_stable_diffusion(
             dtype=dtype,
             device=torch.device(device) if device else get_device(),
         )
         pipe.compile()
 
-        if model_config["model_name"] == "sd_highlevel":
+        if model_name == "sd_highlevel":
             def embed(imgs: torch.Tensor) -> torch.Tensor:
                 with torch.no_grad():
                     imgs = imgs.to(dtype=dtype, device=device)
@@ -125,14 +126,14 @@ def load_image_encoder(
                 return latent
             return embed
         
-        elif model_config["model_name"] == "sd_lowlevel":
+        elif model_name == "sd_lowlevel":
             raise NotImplementedError("Low-level SD model not implemented yet")
 
         else:
-            raise ValueError(f"Invalid model name: {model_config['model_name']}")
+            raise ValueError(f"Invalid model name: {model_name}")
 
     # Align
-    aligned_option = model_config["aligned_option"]
+    aligned_option, = model_config["aligned_option"]
     model_name = model_config["model_name"]
     patch_size = model_config["patch_size"]
     normalize_option = model_config["normalize_option"]
@@ -311,20 +312,29 @@ class LatentProjector(nn.Module):
 
 class NICEConfig(BaseConfig):
     eeg_config: EEGEncoderConfig = EEGEncoderConfig()
-    model_name: str = "aligned_synclr_16"
+
+    align_target_model: str = "aligned_synclr_16"
+    low_recon_model: str = "sd_lowlevel"
+    high_recon_model: str = "sd_highlevel"
+    do_high_recon: bool = False
+    do_low_recon: bool = False
+
     project_dim: int = 256
     eeg_latent_dim: int = 1440
     img_latent_dim: int = 768
+
     encoder_lr: float = 8e-3
     projector_lr: float = 8e-3
-    lr_scheduler: Literal["none", "cosine_anneal"] = "cosine_anneal"
-    betas: tuple[float, float] = (0.9, 0.999)
     encoder_min_lr: float = 1e-4
     projector_min_lr: float = 1e-4
+    lr_scheduler: Literal["none", "cosine_anneal"] = "cosine_anneal"
+    betas: tuple[float, float] = (0.9, 0.999)
+
+    max_epochs: int = 100
     projector_warmup_epochs: int = 2
     encoder_warmup_epochs: int = 4
     warmup_start_frac: float = 0.1
-    max_epochs: int = 100
+
     num_workers: int = 8
     temperature_init: float = math.log(1 / 0.07)
     data_seed: int = 42
@@ -332,7 +342,7 @@ class NICEConfig(BaseConfig):
 
     @cached_property
     def latent_config(self) -> dict[str, str]:
-        return extract_model_config("align", self.model_name)
+        return extract_model_config("align", self.align_target_model)
 
     @cached_property
     def embed_name(self) -> str:
@@ -513,7 +523,11 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             "top3_acc": top3_acc,
             "top5_acc": top5_acc,
         }
-
+    
+    def prepare_batch(self, batch: dict[str, Any], batch_idx: int, stage: Literal["train", "val", "test"]) -> dict[str, Any]:
+        if "img_latent" not in batch:
+            logging.warning("No image latents found in batch.")
+        return batch
 
 
 class NICEModel(EEGAlignmentModel):
@@ -522,9 +536,13 @@ class NICEModel(EEGAlignmentModel):
         config: NICEConfig | dict[str, Any],
         dataset_config: EEGDatasetConfig | dict[str, Any] = EEGDatasetConfig(),
         compile: bool = True,
+        cache_dir: Path | None = None,
         init_weights: bool = True,
     ):
         super(NICEModel, self).__init__()
+
+        self.tensor_cache = TensorCache(cache_path=cache_dir)
+
 
         # Convert dicts to Pydantic models if they aren't already
         if isinstance(config, dict):
@@ -557,7 +575,7 @@ class NICEModel(EEGAlignmentModel):
             self._init_normal_weights()
 
         # Create the data module
-        self.data_module = EEGDataModule(dataset_config, model_name=config.model_name)
+        self.data_module = EEGDataModule(dataset_config)
 
         if compile:
             logging.info("Compiling model...")
@@ -573,6 +591,18 @@ class NICEModel(EEGAlignmentModel):
             },
         )
 
+    def prepare_batch(self, batch: dict[str, Any], batch_idx: int, stage: Literal["train", "val", "test"]) -> dict[str, Any]:
+        # TODO: Implement this
+        # We want to do the following:
+        # Get image latent for alignment (align_image_latent)
+        # Get image for low level reconstruction (low_recon_image_latent)
+        # Get image for high level reconstruction (high_recon_image_latent)
+        
+        # We do this from the tensor cache, which we query by image_path, task_type, model_name
+
+        align_image_latent = self.tensor_cache.get(batch["img_path"], "align_image_latent")
+
+        return batch
 
     def _init_normal_weights(self):
         """Initialize weights for the model."""

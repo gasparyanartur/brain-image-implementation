@@ -50,13 +50,13 @@ def evaluate_nice(
 
     logger = TensorBoardLogger(
         save_dir=config.output_path,
-        name=model.config.model_name,
+        name=model.config.align_target_model,
         default_hp_metric=False,
     )
 
     csv_logger = CSVLogger(
         save_dir=config.output_path,
-        name=model.config.model_name,
+        name=model.config.align_target_model,
     )
 
     trainer = Trainer(

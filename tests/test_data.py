@@ -14,29 +14,25 @@ from brain_image.data import (
 
 def test_eeg_dataset_creation(mock_data_directory):
     config = EEGDatasetConfig(data_path=mock_data_directory["data_dir"], subs=[1])
-    train_dataset = EEGDataset(config, split="train", model_name="aligned_synclr_16")
+    train_dataset = EEGDataset(config, split="train")
     assert len(train_dataset) > 0
     assert len(train_dataset.img_paths) > 0
-    assert train_dataset.img_latents.shape[0] > 0
     assert len(train_dataset.eeg_data) > 0
-    test_dataset = EEGDataset(config, split="test", model_name="aligned_synclr_16")
+    test_dataset = EEGDataset(config, split="test")
     assert len(test_dataset) > 0
     assert len(test_dataset.img_paths) > 0
-    assert test_dataset.img_latents.shape[0] > 0
     assert len(test_dataset.eeg_data) > 0
 
 
 def test_eeg_dataset_getitem(mock_data_directory):
     config = EEGDatasetConfig(data_path=mock_data_directory["data_dir"], subs=[1])
-    dataset = EEGDataset(config, split="train", model_name="aligned_synclr_16")
+    dataset = EEGDataset(config, split="train")
     if len(dataset) > 0:
         item = dataset[0]
         assert isinstance(item, dict)
         assert "img_path" in item
-        assert "img_latent" in item
         assert "eeg_data" in item
         assert isinstance(item["img_path"], str)
-        assert isinstance(item["img_latent"], torch.Tensor)
         assert isinstance(item["eeg_data"], torch.Tensor)
 
 
@@ -48,7 +44,7 @@ def test_eeg_data_module(mock_data_directory):
         subs=[1],
         num_workers=0,
     )
-    module = EEGDataModule(config, model_name="aligned_synclr_16")
+    module = EEGDataModule(config)
     train_loader = module.train_dataloader()
     val_loader = module.val_dataloader()
     test_loader = module.test_dataloader()
@@ -57,9 +53,7 @@ def test_eeg_data_module(mock_data_directory):
     assert test_loader.batch_size == 2
     for batch in train_loader:
         assert "img_path" in batch
-        assert "img_latent" in batch
         assert "eeg_data" in batch
-        assert batch["img_latent"].shape[0] == 4
         assert batch["eeg_data"].shape[0] == 4
         break
 
