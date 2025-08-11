@@ -12,6 +12,7 @@ from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
 from brain_image.model import NICEModel, NICEConfig
+from brain_image.utils import get_dtype
 
 
 class TrainConfig(BaseConfig):
@@ -64,6 +65,7 @@ class NICETrainerConfig(TrainConfig):
     # NICE-specific training settings
     compile_model: bool = True
     init_weights: bool = True
+    dtype: str = "float16"
 
     checkpoint_monitor: str = "val_top1_acc"
     checkpoint_monitor_mode: Literal["min", "max"] = "max"
@@ -261,6 +263,7 @@ class NICETrainer(Trainer):
             dataset_config=dataset_config,
             compile=config.compile_model,
             init_weights=config.init_weights,
+            dtype=get_dtype(config.dtype),
         )
         self.model_config: NICEConfig = model_config
         super().__init__(config, model)

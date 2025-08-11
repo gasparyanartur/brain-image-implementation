@@ -254,11 +254,9 @@ class EEGDataset(Dataset):
         )
 
         if split == "train":
-            img_embed_name = "train_embeddings"
             eeg_name = "preprocessed_eeg_training"
 
         else:
-            img_embed_name = "test_embeddings"
             eeg_name = "preprocessed_eeg_test"
 
         self.img_paths = get_image_paths(

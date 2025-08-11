@@ -16,13 +16,22 @@ import einops
 import math
 import itertools as it
 import lightning as pl
+import tqdm
 
 from brain_image.configs import BaseConfig, get_device, get_device_str
-from brain_image.data import EEGDataModule, EEGDatasetConfig, TensorCache, preprocess_image
+from brain_image.data import (
+    EEGDataModule,
+    EEGDatasetConfig,
+    TensorCache,
+    batch_load_images,
+    load_image_from_path,
+    preprocess_image,
+)
 import dreamsim
 from dreamsim.model import PerceptualModel
 
 from brain_image.reconstruction import ReconstructionPipeline
+from brain_image.utils import get_dtype
 
 task_type_options = ["align", "recon"]
 model_name_options = ["synclr", "clip"]
@@ -106,6 +115,7 @@ def load_image_encoder(
     device: str | None = None,
     dtype: torch.dtype = torch.float16,
     img_size: tuple[int, int] = (224, 224),
+    compile: bool = True,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
     model_config = extract_model_config(task_type, model_config_str)
 
@@ -115,9 +125,11 @@ def load_image_encoder(
             dtype=dtype,
             device=torch.device(device) if device else get_device(),
         )
-        pipe.compile()
+        if compile:
+            pipe.compile()
 
         if model_name == "sd_highlevel":
+
             def embed(imgs: torch.Tensor) -> torch.Tensor:
                 with torch.no_grad():
                     imgs = imgs.to(device=device)
@@ -125,9 +137,11 @@ def load_image_encoder(
 
                     latent = latent.detach().cpu()
                 return latent
+
             return embed
-        
+
         elif model_name == "sd_lowlevel":
+
             def embed(imgs: torch.Tensor) -> torch.Tensor:
                 with torch.no_grad():
                     imgs = imgs.to(device=device)
@@ -135,6 +149,7 @@ def load_image_encoder(
 
                     latent = latent.detach().cpu()
                 return latent
+
             return embed
 
         else:
@@ -160,7 +175,7 @@ def load_image_encoder(
     if aligned_option == "unaligned":
         model = PerceptualModel(
             model_type=model_type,
-            normalize_embeds=normalize_option == "norm",
+            normalize_embeds=False,
             stride=patch_size,
             load_dir=str(models_path),
             baseline=True,
@@ -171,23 +186,28 @@ def load_image_encoder(
         model, _ = dreamsim.dreamsim(
             dreamsim_type=model_type,
             cache_dir=str(models_path),
-            normalize_embeds=normalize_option == "norm",
+            normalize_embeds=False,
             device=device or get_device_str(),
         )
 
     model = model.to(device=device, dtype=dtype)
     model.eval().requires_grad_(False)
-    model = torch.compile(model)
+    if compile:
+        model = torch.compile(model)
 
     logging.info(f"Model {model_name} loaded successfully.")
+
     def embed(imgs: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
             imgs = imgs.to(device=device)
-            imgs = preprocess_image(imgs, img_size=list(img_size))
+            imgs = preprocess_image(imgs, img_size=list(img_size)).to(
+                device=device, dtype=dtype
+            )
 
             latent = model.embed(imgs)
             latent = latent.detach().cpu()
         return latent
+
     return embed
 
 
@@ -319,18 +339,21 @@ class LatentProjector(nn.Module):
         return x
 
 
-class NICEConfig(BaseConfig):
-    eeg_config: EEGEncoderConfig = EEGEncoderConfig()
-
+class ReconConfig(BaseConfig):
     align_target_model: str = "unaligned_synclr_16"
     low_recon_model: str = "sd_lowlevel"
     high_recon_model: str = "sd_highlevel"
-    do_high_recon: bool = False
     do_low_recon: bool = False
+    do_high_recon: bool = False
 
-    project_dim: int = 256
+
+class NICEConfig(ReconConfig):
+    eeg_config: EEGEncoderConfig = EEGEncoderConfig()
+
+    project_dim: int = 768
     eeg_latent_dim: int = 1440
     img_latent_dim: int = 768
+    project_image: bool = False
 
     encoder_lr: float = 8e-3
     projector_lr: float = 8e-3
@@ -347,31 +370,14 @@ class NICEConfig(BaseConfig):
     num_workers: int = 8
     temperature_init: float = math.log(1 / 0.07)
     data_seed: int = 42
-    project_image: bool = False
 
     @cached_property
     def latent_config(self) -> dict[str, str]:
         return extract_model_config("align", self.align_target_model)
 
     @cached_property
-    def embed_name(self) -> str:
-        _, model_name, _, _ = self.latent_config
-        return model_name
-
-    @cached_property
-    def embed_aligned_option(self) -> str:
-        aligned_option, _, _, _ = self.latent_config
-        return aligned_option
-
-    @cached_property
-    def embed_patch_size(self) -> str:
-        _, _, patch_size, _ = self.latent_config
-        return patch_size
-
-    @cached_property
     def embed_normalized(self) -> bool:
-        _, _, _, normalize_option = self.latent_config
-        return normalize_option == "norm"
+        return self.latent_config.get("normalize_option") == "norm"
 
     @field_validator("eeg_config", mode="before")
     @classmethod
@@ -383,27 +389,43 @@ class NICEConfig(BaseConfig):
 
 
 class EEGAlignmentModel(ABC, pl.LightningModule):
-    @abstractmethod
-    def get_data_module(self) -> EEGDataModule:
-        raise NotImplementedError
+    def __init__(
+        self,
+        config: ReconConfig | dict[str, Any],
+        dataset_config: EEGDatasetConfig | dict[str, Any],
+        tensor_cache: TensorCache,
+        dtype: torch.dtype = torch.float16,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+        if isinstance(config, dict):
+            config = ReconConfig.model_validate(config)
+
+        if isinstance(dataset_config, dict):
+            dataset_config = EEGDatasetConfig.model_validate(dataset_config)
+
+        self.data_module = EEGDataModule(dataset_config)
+
+        self.tensor_cache = tensor_cache
+        self.config = config
 
     def train_dataloader(self) -> torch.utils.data.DataLoader:
         """Return the training dataloader."""
-        return self.get_data_module().train_dataloader()
+        return self.data_module.train_dataloader()
 
     def val_dataloader(self) -> torch.utils.data.DataLoader:
         """Return the validation dataloader."""
-        return self.get_data_module().val_dataloader()
+        return self.data_module.val_dataloader()
 
     def test_dataloader(self) -> torch.utils.data.DataLoader:
         """Return the test dataloader."""
-        return self.get_data_module().test_dataloader()
+        return self.data_module.test_dataloader()
 
     @cached_property
     def num_train_batches(self) -> int:
         """Return the length of the training dataloader."""
-        return len(self.get_data_module().train_dataloader())
-    
+        return len(self.data_module.train_dataloader())
 
     @classmethod
     def load_checkpoint(cls, checkpoint_path: str, **kwargs):
@@ -423,11 +445,11 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             torch.save(checkpoint, temp_file.name)
             return cls.load_from_checkpoint(temp_file.name, **kwargs)
 
-
     @abstractmethod
-    def get_similarity(self, img_latent: torch.Tensor, eeg_data: torch.Tensor) -> torch.Tensor:
+    def get_similarity(
+        self, img_latent: torch.Tensor, eeg_data: torch.Tensor
+    ) -> torch.Tensor:
         raise NotImplementedError
-
 
     def forward(self, img_latent: torch.Tensor, eeg_data: torch.Tensor) -> torch.Tensor:
         return self.get_similarity(img_latent, eeg_data)
@@ -448,6 +470,8 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         return (correct.any(dim=-1).float().sum() / correct.size(0)).item()
 
     def training_step(self, batch, batch_idx):
+        batch = self.prepare_batch(batch, batch_idx, "train")
+
         optimizers = self.optimizers()
         if not isinstance(optimizers, list):
             optimizers = [optimizers]
@@ -457,11 +481,16 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             schedulers = [schedulers]
 
         """Training step for the model."""
-        img_latent = batch["img_latent"].to(self.device, dtype=self.dtype)
+        # Alignment step
+        align_image_latent = batch["align_image_latent"].to(
+            self.device, dtype=self.dtype
+        )
         eeg_data = batch["eeg_data"].to(self.device, dtype=self.dtype)
 
-        sim = self.get_similarity(img_latent, eeg_data)
-        loss = self.get_loss(sim)
+        sim = self.get_similarity(align_image_latent, eeg_data)
+        align_loss = self.get_loss(sim)
+
+        loss = align_loss
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=False)
 
@@ -484,58 +513,126 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        img_latent = batch["img_latent"].to(self.device, dtype=self.dtype)
+        batch = self.prepare_batch(batch, batch_idx, "val")
+
+        align_image_latent = batch["align_image_latent"].to(
+            self.device, dtype=self.dtype
+        )
         eeg_data = batch["eeg_data"].to(self.device, dtype=self.dtype)
 
         with torch.no_grad():
-            sim = self(img_latent, eeg_data)
-            loss = self.get_loss(sim)
+            # Alignment
+            sim = self.get_similarity(align_image_latent, eeg_data)
+            align_loss = self.get_loss(sim)
 
             top1_acc = self.get_top_n_accuracy(sim, n=1)
             top3_acc = self.get_top_n_accuracy(sim, n=3)
             top5_acc = self.get_top_n_accuracy(sim, n=5)
 
-        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("val_top1_acc", top1_acc, prog_bar=False, on_step=False, on_epoch=True)
+        loss = align_loss
+
+        self.log(
+            "val_align_loss", align_loss, prog_bar=False, on_step=False, on_epoch=True
+        )
+        self.log("val_top1_acc", top1_acc, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val_top3_acc", top3_acc, prog_bar=False, on_step=False, on_epoch=True)
         self.log("val_top5_acc", top5_acc, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
 
         return {
             "loss": loss,
+            "align_loss": align_loss,
             "top1_acc": top1_acc,
             "top3_acc": top3_acc,
             "top5_acc": top5_acc,
         }
 
     def test_step(self, batch, batch_idx):
-        img_latent = batch["img_latent"].to(self.device, dtype=self.dtype)
+        batch = self.prepare_batch(batch, batch_idx, "test")
+
+        align_image_latent = batch["align_image_latent"].to(
+            self.device, dtype=self.dtype
+        )
         eeg_data = batch["eeg_data"].to(self.device, dtype=self.dtype)
 
         with torch.no_grad():
-            sim = self(img_latent, eeg_data)
-            loss = self.get_loss(sim)
+            # Alignment
+            sim = self.get_similarity(align_image_latent, eeg_data)
+            align_loss = self.get_loss(sim)
+
             top1_acc = self.get_top_n_accuracy(sim, n=1)
             top3_acc = self.get_top_n_accuracy(sim, n=3)
             top5_acc = self.get_top_n_accuracy(sim, n=5)
 
-        self.log("test_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("test_top1_acc", top1_acc, prog_bar=True, on_step=False, on_epoch=True)
+        loss = align_loss
+
+        self.log(
+            "test_align_loss", align_loss, prog_bar=False, on_step=False, on_epoch=True
+        )
+        self.log(
+            "test_top1_acc", top1_acc, prog_bar=False, on_step=False, on_epoch=True
+        )
         self.log(
             "test_top3_acc", top3_acc, prog_bar=False, on_step=False, on_epoch=True
         )
         self.log(
             "test_top5_acc", top5_acc, prog_bar=False, on_step=False, on_epoch=True
         )
+        self.log("test_loss", loss, prog_bar=False, on_step=False, on_epoch=True)
+
         return {
             "loss": loss,
+            "align_loss": align_loss,
             "top1_acc": top1_acc,
             "top3_acc": top3_acc,
             "top5_acc": top5_acc,
         }
-    
-    def prepare_batch(self, batch: dict[str, Any], batch_idx: int, stage: Literal["train", "val", "test"]) -> dict[str, Any]:
-        if "img_latent" not in batch:
-            logging.warning("No image latents found in batch.")
+
+    def _get_batch_from_cache(
+        self, img_paths: list[Path], *model_config: str
+    ) -> torch.Tensor:
+        return torch.stack(
+            [
+                self.tensor_cache.get(str(img_path), *model_config)
+                for img_path in img_paths
+            ]
+        )
+
+    def prepare_batch(
+        self,
+        batch: dict[str, Any],
+        batch_idx: int,
+        stage: Literal["train", "val", "test"],
+    ) -> dict[str, Any]:
+        img_paths = batch["img_path"]
+        eeg_data = batch["eeg_data"]
+        device = eeg_data.device
+
+        if stage == "val":
+            stage = "test"
+
+        align_image_latent = self._get_batch_from_cache(
+            img_paths, "align", self.config.align_target_model, stage
+        )
+        batch["align_image_latent"] = align_image_latent.to(
+            device=device, dtype=eeg_data.dtype
+        )
+
+        if self.config.do_low_recon:
+            low_recon_image_latent = self._get_batch_from_cache(
+                img_paths, "low_recon", self.config.low_recon_model, stage
+            )
+            batch["low_recon_image_latent"] = low_recon_image_latent.to(
+                device=device, dtype=eeg_data.dtype
+            )
+        if self.config.do_high_recon:
+            high_recon_image_latent = self._get_batch_from_cache(
+                img_paths, "high_recon", self.config.high_recon_model, stage
+            )
+            batch["high_recon_image_latent"] = high_recon_image_latent.to(
+                device=device, dtype=eeg_data.dtype
+            )
+
         return batch
 
 
@@ -546,22 +643,55 @@ class NICEModel(EEGAlignmentModel):
         dataset_config: EEGDatasetConfig | dict[str, Any] = EEGDatasetConfig(),
         compile: bool = True,
         cache_dir: Path | None = None,
+        dtype: torch.dtype = torch.float16,
         init_weights: bool = True,
     ):
-        super(NICEModel, self).__init__()
-
-        self.tensor_cache = TensorCache(cache_path=cache_dir or Path("cache/tensorcache"))
-
+        super(NICEModel, self).__init__(
+            config=config,
+            dataset_config=dataset_config,
+            tensor_cache=TensorCache(cache_path=cache_dir or Path("cache/tensorcache")),
+            dtype=dtype,
+        )
 
         # Convert dicts to Pydantic models if they aren't already
         if isinstance(config, dict):
             config = NICEConfig.model_validate(config)
 
-        if isinstance(dataset_config, dict):
-            dataset_config = EEGDatasetConfig.model_validate(dataset_config)
-
         self.automatic_optimization = False
         self.config = config
+
+        if not config.project_image and (config.project_dim != config.img_latent_dim):
+            raise ValueError(
+                "Projected dimension must match the image latent dimension if project_image is False"
+            )
+
+        self.align_image_encoder = load_image_encoder(
+            task_type="align",
+            model_config_str=config.align_target_model,
+            models_path=Path("models"),
+            download_weights=True,
+            device=get_device_str(),
+            dtype=dtype,
+            img_size=(224, 224),
+        )
+
+        """
+        self.raw_train_images = {
+            str(path): load_image_from_path(path).detach().cpu().to(dtype=dtype)
+            for path in tqdm.tqdm(
+                self.data_module.get_train_dataset().img_paths,
+                desc="Loading train images",
+            )
+        }
+        self.raw_test_images = {
+            str(path): load_image_from_path(path).detach().cpu().to(dtype=dtype)
+            for path in tqdm.tqdm(
+                self.data_module.get_test_dataset().img_paths,
+                desc="Loading test images",
+            )
+        }
+        """
+
         self.eeg_encoder = EEGEncoder(config.eeg_config)
         self.eeg_projector = LatentProjector(
             embed_dim=config.eeg_latent_dim,
@@ -583,9 +713,6 @@ class NICEModel(EEGAlignmentModel):
         if init_weights:
             self._init_normal_weights()
 
-        # Create the data module
-        self.data_module = EEGDataModule(dataset_config)
-
         if compile:
             logging.info("Compiling model...")
             self.eeg_encoder = torch.compile(self.eeg_encoder)
@@ -596,32 +723,9 @@ class NICEModel(EEGAlignmentModel):
         self.save_hyperparameters(
             {
                 "config": config.model_dump(mode="json"),
-                "dataset_config": dataset_config.model_dump(mode="json"),
+                "dataset_config": self.data_module.config.model_dump(mode="json"),
             },
         )
-
-    def prepare_batch(self, batch: dict[str, Any], batch_idx: int, stage: Literal["train", "val", "test"]) -> dict[str, Any]:
-        # TODO: Implement this
-        # We want to do the following:
-        # Get image latent for alignment (align_image_latent)
-        # Get image for low level reconstruction (low_recon_image_latent)
-        # Get image for high level reconstruction (high_recon_image_latent)
-        
-        # We do this from the tensor cache, which we query by image_path, task_type, model_name
-
-        img_paths = batch["img_path"]
-
-        align_image_latent = [self.tensor_cache.get(img_path, "align", self.config.align_target_model, stage) for img_path in img_paths]
-        low_recon_image_latent = [self.tensor_cache.get(img_path, "low_recon", self.config.low_recon_model, stage) for img_path in img_paths]
-        high_recon_image_latent = [self.tensor_cache.get(img_path, "high_recon", self.config.high_recon_model, stage) for img_path in img_paths]
-
-        batch["align_image_latent"] = align_image_latent
-        batch["low_recon_image_latent"] = low_recon_image_latent
-        batch["high_recon_image_latent"] = high_recon_image_latent
-
-        return batch
-
-        return batch
 
     def _init_normal_weights(self):
         """Initialize weights for the model."""
@@ -744,14 +848,15 @@ class NICEModel(EEGAlignmentModel):
             },
         ]
 
-
-    def get_similarity(self, img_latent: torch.Tensor, eeg_data: torch.Tensor) -> torch.Tensor:
+    def get_similarity(
+        self, img_latent: torch.Tensor, eeg_data: torch.Tensor
+    ) -> torch.Tensor:
         eeg_latent = self.eeg_encoder(eeg_data)
         eeg_latent = self.eeg_projector(eeg_latent)
 
         # Normalize the image latents if they are not already normalized
-        if not self.config.embed_normalized:
-            img_latent = nn.functional.normalize(img_latent, dim=-1)
+        # if not self.config.embed_normalized:
+        img_latent = nn.functional.normalize(img_latent, dim=-1)
 
         if self.img_projector is not None:
             img_latent = self.img_projector(img_latent)
@@ -763,10 +868,31 @@ class NICEModel(EEGAlignmentModel):
         )
 
         return sim
-    
+
     def get_data_module(self) -> EEGDataModule:
         return self.data_module
 
+    """
+    def prepare_batch(
+        self,
+        batch: dict[str, Any],
+        batch_idx: int,
+        stage: Literal["train", "val", "test"],
+    ) -> dict[str, Any]:
+        img_paths = batch["img_path"]
+        eeg_data = batch["eeg_data"]
+        device = eeg_data.device
+
+        # images = batch_load_images(map(Path, img_paths))
+        all_images = self.raw_train_images if stage == "train" else self.raw_test_images
+        images = torch.stack([all_images[path] for path in img_paths], dim=0)
+        batch["align_image_latent"] = self.align_image_encoder(images).to(
+            device=device,
+            dtype=get_dtype(self.dtype) if isinstance(self.dtype, str) else self.dtype,
+        )
+
+        return batch
+    """
 
 @torch.compile
 def compute_cross_entropy_loss(sim: torch.Tensor) -> torch.Tensor:

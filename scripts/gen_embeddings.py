@@ -80,8 +80,8 @@ def run_generation(
 
             latent = image_encoder(imgs)
             
-            for path in paths:
-                cache.save(latent, str(path), *encoder_configs)
+            for i_path, path in enumerate(paths):
+                cache.save(latent[i_path], str(path), *encoder_configs)
 
 
     logging.info(f"Finished generating {split} embeddings for model {model_name}")

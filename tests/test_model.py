@@ -176,7 +176,6 @@ def test_nice_model_with_data_module(mock_data_directory):
     # Test that we can get a batch
     for batch in train_loader:
         assert "img_path" in batch
-        assert "img_latent" in batch
         assert "eeg_data" in batch
         break
 
@@ -262,7 +261,7 @@ def test_nice_model_checkpoint_loading():
         }, checkpoint_path)
         
         # Load the checkpoint
-        loaded_model = NICEModel.load_checkpoint(checkpoint_path, config=config)
+        loaded_model = NICEModel.load_checkpoint(checkpoint_path)
         
         assert loaded_model is not None
         assert isinstance(loaded_model, NICEModel)
@@ -273,19 +272,3 @@ def test_nice_model_checkpoint_loading():
             Path(checkpoint_path).unlink()
 
 
-def test_eeg_alignment_model_abstract_methods():
-    """Test that EEGAlignmentModel abstract methods are properly defined."""
-    # Test that EEGAlignmentModel is abstract by checking if it has abstract methods
-    assert hasattr(EEGAlignmentModel, '__abstractmethods__')
-    assert 'get_data_module' in EEGAlignmentModel.__abstractmethods__
-    assert 'get_similarity' in EEGAlignmentModel.__abstractmethods__
-    
-    # Test that NICEModel properly implements the abstract methods
-    config = NICEConfig(align_target_model="aligned_synclr_16")
-    model = NICEModel(config=config, compile=False)
-    
-    # Check that the abstract methods are implemented
-    assert hasattr(model, 'get_data_module')
-    assert hasattr(model, 'get_similarity')
-    assert callable(model.get_data_module)
-    assert callable(model.get_similarity)

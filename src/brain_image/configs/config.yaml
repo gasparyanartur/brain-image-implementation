@@ -24,7 +24,7 @@ hydra:
 
 # Common settings
 device: null
-precision: 32
+precision: 16
 num_workers: 4
 compile_model: true
 log_path: logs

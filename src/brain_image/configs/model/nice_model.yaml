@@ -1,17 +1,25 @@
 # NICE Model Configuration
 
-# Model architecture
-model_name: aligned_synclr
+# Model architecture and reconstruction settings
+align_target_model: "unaligned_synclr_16"
+low_recon_model: "sd_lowlevel"
+high_recon_model: "sd_highlevel"
+do_high_recon: false
+do_low_recon: false
+
+# Projection dimensions
 project_dim: 768
+eeg_latent_dim: 1440
 img_latent_dim: 768
+project_image: false
 
 # Learning rate settings
 encoder_lr: 1e-3
 projector_lr: 1e-3
-lr_scheduler: cosine_anneal
-betas: [0.9, 0.999]
 encoder_min_lr: 1e-4
 projector_min_lr: 1e-4
+lr_scheduler: "cosine_anneal"
+betas: [0.9, 0.999]
 
 # Training schedule
 projector_warmup_epochs: 2
@@ -21,4 +29,5 @@ max_epochs: 100
 
 # Model parameters
 temperature_init: 2.659260  # log(1/0.07)
-data_seed: 42 
+data_seed: 42
+num_workers: 32 

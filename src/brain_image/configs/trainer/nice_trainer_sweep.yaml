@@ -1,9 +1,8 @@
-# NICE Trainer Configuration
+# NICE Trainer Configuration for Sweeps
 
 # Training settings
-run_name: nice
+run_name: "nice"
 num_epochs: 100
-num_workers: 32
 
 # Model compilation and initialization
 compile_model: true
@@ -13,6 +12,10 @@ init_weights: true
 log_dir: logs
 checkpoint_dir: null
 enable_barebones: false
+checkpoint_monitor: "val_top1_acc"
+checkpoint_monitor_mode: "max"
+checkpoint_monitor_early_stop: 10
+
 overfit_batches: 0
 precision: 16
 val_check_interval: 1.0
@@ -24,10 +27,11 @@ save_top_k: 0
 
 # Wandb settings
 enable_wandb: true
-wandb_project: brain-image-nice
+wandb_project: "brain-image"
 wandb_entity: null  # Set to your wandb username or team name
 wandb_log_model: false
-wandb_tags: [sweep]
+wandb_tags: ["sweep"]
+wandb_mode: "online"
 
 # Device settings
-accelerator: auto 
+accelerator: "auto" 
