@@ -289,6 +289,7 @@ class EEGDataset(Dataset):
         return {
             "img_path": str(img_path),
             "eeg_data": eeg_data,
+            "idx": idx,
         }
 
 
@@ -402,9 +403,12 @@ def get_image_paths(
     elif split == "test":
         image_dir = image_dir / "test_images"
 
-    img_paths: list[Path] = []
-    for ext in extensions:
-        img_paths.extend(list(image_dir.glob(f"**/*{ext}")))
+    img_paths = [
+        img_path
+        for concept_dir in sorted(image_dir.iterdir())
+        for img_path in sorted(concept_dir.iterdir())
+        if img_path.is_file() and img_path.suffix in extensions
+    ]
 
     return img_paths
 

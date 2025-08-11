@@ -17,7 +17,7 @@ checkpoint_monitor_mode: "max"
 checkpoint_monitor_early_stop: 10
 
 overfit_batches: 0
-precision: 16
+precision: 32
 val_check_interval: 1.0
 log_every_n_steps: 100
 enable_progress_bar: true

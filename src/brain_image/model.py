@@ -8,7 +8,8 @@ import logging
 from pathlib import Path
 import re
 import tempfile
-from typing import Any, Literal
+from typing import Any, Literal, cast
+from matplotlib.pyplot import bar
 from pydantic import BaseModel, field_validator
 import torch
 import torch.nn as nn
@@ -24,6 +25,7 @@ from brain_image.data import (
     EEGDatasetConfig,
     TensorCache,
     batch_load_images,
+    get_image_paths,
     load_image_from_path,
     preprocess_image,
 )
@@ -343,6 +345,7 @@ class ReconConfig(BaseConfig):
     align_target_model: str = "unaligned_synclr_16"
     low_recon_model: str = "sd_lowlevel"
     high_recon_model: str = "sd_highlevel"
+    do_align: bool = True
     do_low_recon: bool = False
     do_high_recon: bool = False
 
@@ -399,6 +402,14 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
     ):
         super().__init__(**kwargs)
 
+        self.params = {
+            "config": config,
+            "dataset_config": dataset_config,
+            "tensor_cache": tensor_cache,
+            "dtype": dtype,
+            **kwargs
+        }
+
         if isinstance(config, dict):
             config = ReconConfig.model_validate(config)
 
@@ -429,7 +440,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
     @classmethod
     def load_checkpoint(cls, checkpoint_path: str, **kwargs):
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         state_dict = checkpoint.pop("state_dict")
 
         # Remove the "eeg_encoder._orig_mod.X" and replace with "eeg_encoder.X"
@@ -588,12 +599,17 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             "top5_acc": top5_acc,
         }
 
+    def _get_image_latent_from_cache(
+        self, img_path: Path, *model_config: str
+    ) -> torch.Tensor:
+        return self.tensor_cache.get(str(img_path), *model_config)
+
     def _get_batch_from_cache(
         self, img_paths: list[Path], *model_config: str
     ) -> torch.Tensor:
         return torch.stack(
             [
-                self.tensor_cache.get(str(img_path), *model_config)
+                self._get_image_latent_from_cache(img_path, *model_config)
                 for img_path in img_paths
             ]
         )
@@ -611,12 +627,13 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         if stage == "val":
             stage = "test"
 
-        align_image_latent = self._get_batch_from_cache(
-            img_paths, "align", self.config.align_target_model, stage
-        )
-        batch["align_image_latent"] = align_image_latent.to(
-            device=device, dtype=eeg_data.dtype
-        )
+        if self.config.do_align:
+            align_image_latent = self._get_batch_from_cache(
+                img_paths, "align", self.config.align_target_model, stage
+            )
+            batch["align_image_latent"] = align_image_latent.to(
+                device=device, dtype=eeg_data.dtype
+            )
 
         if self.config.do_low_recon:
             low_recon_image_latent = self._get_batch_from_cache(
@@ -625,6 +642,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             batch["low_recon_image_latent"] = low_recon_image_latent.to(
                 device=device, dtype=eeg_data.dtype
             )
+
         if self.config.do_high_recon:
             high_recon_image_latent = self._get_batch_from_cache(
                 img_paths, "high_recon", self.config.high_recon_model, stage
@@ -643,6 +661,7 @@ class NICEModel(EEGAlignmentModel):
         dataset_config: EEGDatasetConfig | dict[str, Any] = EEGDatasetConfig(),
         compile: bool = True,
         cache_dir: Path | None = None,
+        preload_latents: bool = True,
         dtype: torch.dtype = torch.float16,
         init_weights: bool = True,
     ):
@@ -674,23 +693,6 @@ class NICEModel(EEGAlignmentModel):
             dtype=dtype,
             img_size=(224, 224),
         )
-
-        """
-        self.raw_train_images = {
-            str(path): load_image_from_path(path).detach().cpu().to(dtype=dtype)
-            for path in tqdm.tqdm(
-                self.data_module.get_train_dataset().img_paths,
-                desc="Loading train images",
-            )
-        }
-        self.raw_test_images = {
-            str(path): load_image_from_path(path).detach().cpu().to(dtype=dtype)
-            for path in tqdm.tqdm(
-                self.data_module.get_test_dataset().img_paths,
-                desc="Loading test images",
-            )
-        }
-        """
 
         self.eeg_encoder = EEGEncoder(config.eeg_config)
         self.eeg_projector = LatentProjector(
@@ -726,6 +728,30 @@ class NICEModel(EEGAlignmentModel):
                 "dataset_config": self.data_module.config.model_dump(mode="json"),
             },
         )
+
+        if preload_latents:
+            paths = [
+                    (path, split)
+                    for split in ["train", "test"]
+                    for path in get_image_paths(
+                        self.data_module.config.data_path
+                        / self.data_module.config.imgs_dir,
+                        split=cast(Literal["train", "test"], split),
+                    )
+            ]
+            for path, split in tqdm.tqdm(paths, desc="Preloading latents"):
+                if self.config.do_align:
+                    self._get_image_latent_from_cache(
+                        path, "align", self.config.align_target_model, split
+                    )
+                if self.config.do_low_recon:
+                    self._get_image_latent_from_cache(
+                        path, "low_recon", self.config.low_recon_model, split
+                    )
+                if self.config.do_high_recon:
+                    self._get_image_latent_from_cache(
+                        path, "high_recon", self.config.high_recon_model, split
+                    )
 
     def _init_normal_weights(self):
         """Initialize weights for the model."""
@@ -856,7 +882,7 @@ class NICEModel(EEGAlignmentModel):
 
         # Normalize the image latents if they are not already normalized
         # if not self.config.embed_normalized:
-        img_latent = nn.functional.normalize(img_latent, dim=-1)
+        # img_latent = nn.functional.normalize(img_latent, dim=-1)
 
         if self.img_projector is not None:
             img_latent = self.img_projector(img_latent)
@@ -872,27 +898,6 @@ class NICEModel(EEGAlignmentModel):
     def get_data_module(self) -> EEGDataModule:
         return self.data_module
 
-    """
-    def prepare_batch(
-        self,
-        batch: dict[str, Any],
-        batch_idx: int,
-        stage: Literal["train", "val", "test"],
-    ) -> dict[str, Any]:
-        img_paths = batch["img_path"]
-        eeg_data = batch["eeg_data"]
-        device = eeg_data.device
-
-        # images = batch_load_images(map(Path, img_paths))
-        all_images = self.raw_train_images if stage == "train" else self.raw_test_images
-        images = torch.stack([all_images[path] for path in img_paths], dim=0)
-        batch["align_image_latent"] = self.align_image_encoder(images).to(
-            device=device,
-            dtype=get_dtype(self.dtype) if isinstance(self.dtype, str) else self.dtype,
-        )
-
-        return batch
-    """
 
 @torch.compile
 def compute_cross_entropy_loss(sim: torch.Tensor) -> torch.Tensor:

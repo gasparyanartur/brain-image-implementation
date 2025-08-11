@@ -11,7 +11,7 @@ do_low_recon: false
 project_dim: 768
 eeg_latent_dim: 1440
 img_latent_dim: 768
-project_image: false
+project_image: true
 
 # Learning rate settings
 encoder_lr: 1e-3

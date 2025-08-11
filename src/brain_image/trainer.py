@@ -66,6 +66,8 @@ class NICETrainerConfig(TrainConfig):
     compile_model: bool = True
     init_weights: bool = True
     dtype: str = "float16"
+    cache_dir: Path = Path("cache")
+    preload_latents: bool = True
 
     checkpoint_monitor: str = "val_top1_acc"
     checkpoint_monitor_mode: Literal["min", "max"] = "max"
@@ -264,6 +266,8 @@ class NICETrainer(Trainer):
             compile=config.compile_model,
             init_weights=config.init_weights,
             dtype=get_dtype(config.dtype),
+            preload_latents=config.preload_latents,
+            cache_dir=config.cache_dir,
         )
         self.model_config: NICEConfig = model_config
         super().__init__(config, model)

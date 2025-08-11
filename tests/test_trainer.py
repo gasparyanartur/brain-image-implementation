@@ -79,6 +79,8 @@ def test_nice_trainer_runs_and_leaves_logs_and_checkpoints(mock_data_directory):
         enable_progress_bar=False,
         enable_model_summary=False,
         log_every_n_steps=1,
+        preload_latents=False,
+        cache_dir=Path("cache"),
     )
     trainer = NICETrainer(
         config=trainer_config,
@@ -111,65 +113,71 @@ def test_nice_trainer_loss_decreases(mock_data_directory):
         projector_warmup_epochs=0,
         encoder_warmup_epochs=0,
     )
-    trainer_config = NICETrainerConfig(
-        run_name="test_nice",
-        num_epochs=3,
-        save_checkpoints=True,
-        log_dir=log_dir,
-        checkpoint_dir=checkpoint_dir,
-        enable_barebones=True,
-        enable_progress_bar=False,
-        enable_model_summary=False,
-        log_every_n_steps=1,
-        overfit_batches=1,
-    )
 
-    trainer = NICETrainer(
-        config=trainer_config,
-        model_config=config,
-        dataset_config=EEGDatasetConfig(
-            data_path=data_dir,
-            batch_size=2,
-            val_batch_size=2,
-            subs=[1],
-            num_workers=0,
-            shuffle_train=False,
-        ),
-    )
-    trainer = cast(NICETrainer, trainer)
-    trainer.model = cast(NICEModel, trainer.model)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        #TODO: Fix this test at some point
 
-    train_dataloader = trainer.model.data_module.train_dataloader()
-    batch = next(iter(train_dataloader))
-    img_latent = batch["img_latent"].to(trainer.model.device, dtype=trainer.model.dtype)
-    eeg_data = batch["eeg_data"].to(trainer.model.device, dtype=trainer.model.dtype)
+        trainer_config = NICETrainerConfig(
+            run_name="test_nice",
+            num_epochs=3,
+            save_checkpoints=True,
+            log_dir=log_dir,
+            checkpoint_dir=checkpoint_dir,
+            enable_barebones=True,
+            enable_progress_bar=False,
+            enable_model_summary=False,
+            log_every_n_steps=1,
+            overfit_batches=1,
+            preload_latents=False,
+            cache_dir=Path(tmp_dir),
+        )
 
-    with torch.no_grad():
-        sim = trainer.model.get_similarity(img_latent, eeg_data)
-        initial_loss = trainer.model.get_loss(sim).item()
+        trainer = NICETrainer(
+            config=trainer_config,
+            model_config=config,
+            dataset_config=EEGDatasetConfig(
+                data_path=data_dir,
+                batch_size=2,
+                val_batch_size=2,
+                subs=[1],
+                num_workers=0,
+                shuffle_train=False,
+            ),
+        )
+        trainer = cast(NICETrainer, trainer)
+        trainer.model = cast(NICEModel, trainer.model)
 
-    # Train model
-    trainer = NICETrainer(
-        config=trainer_config,
-        model_config=config,
-        dataset_config=EEGDatasetConfig(
-            data_path=data_dir,
-            batch_size=2,
-            val_batch_size=2,
-            subs=[1],
-            num_workers=0,
-            shuffle_train=False,
-        ),
-    )
+        train_dataloader = trainer.model.data_module.train_dataloader()
+        batch = next(iter(train_dataloader))
+        img_latent = batch["img_latent"].to(trainer.model.device, dtype=trainer.model.dtype)
+        eeg_data = batch["eeg_data"].to(trainer.model.device, dtype=trainer.model.dtype)
 
-    # Disable validation by patching the trainer creation
-    trainer.train()
+        with torch.no_grad():
+            sim = trainer.model.get_similarity(img_latent, eeg_data)
+            initial_loss = trainer.model.get_loss(sim).item()
 
-    # Final model
-    with torch.no_grad():
-        sim = trainer.model.get_similarity(img_latent, eeg_data)
-        final_loss = trainer.model.get_loss(sim).item()  # type: ignore
+        # Train model
+        trainer = NICETrainer(
+            config=trainer_config,
+            model_config=config,
+            dataset_config=EEGDatasetConfig(
+                data_path=data_dir,
+                batch_size=2,
+                val_batch_size=2,
+                subs=[1],
+                num_workers=0,
+                shuffle_train=False,
+            ),
+        )
 
-    assert final_loss < initial_loss
+        # Disable validation by patching the trainer creation
+        trainer.train()
 
-    print(f"Initial loss: {initial_loss}, Final loss: {final_loss}")
+        # Final model
+        with torch.no_grad():
+            sim = trainer.model.get_similarity(img_latent, eeg_data)
+            final_loss = trainer.model.get_loss(sim).item()  # type: ignore
+
+        assert final_loss < initial_loss
+
+        print(f"Initial loss: {initial_loss}, Final loss: {final_loss}")

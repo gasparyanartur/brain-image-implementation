@@ -56,7 +56,7 @@ def test_latent_projector_creation():
 def test_nice_model_creation():
     """Test that NICE model can be created successfully."""
     config = NICEConfig(align_target_model="aligned_synclr_16")
-    model = NICEModel(config=config, compile=False)
+    model = NICEModel(config=config, compile=False, preload_latents=False)
 
     assert model is not None
     assert hasattr(model, "eeg_encoder")
@@ -70,7 +70,7 @@ def test_nice_model_creation():
 def test_nice_model_forward_pass():
     """Test that NICE model can perform a forward pass."""
     config = NICEConfig(align_target_model="aligned_synclr_16")
-    model = NICEModel(config=config, compile=False)
+    model = NICEModel(config=config, compile=False, preload_latents=False)
 
     # Create mock input data
     batch_size = 4
@@ -88,7 +88,7 @@ def test_nice_model_forward_pass():
 def test_nice_model_get_similarity():
     """Test that NICE model can compute similarity."""
     config = NICEConfig(align_target_model="aligned_synclr_16")
-    model = NICEModel(config=config, compile=False)
+    model = NICEModel(config=config, compile=False, preload_latents=False)
 
     # Create mock input data
     batch_size = 4
@@ -106,7 +106,7 @@ def test_nice_model_get_similarity():
 def test_nice_model_loss_computation():
     """Test that NICE model can compute loss."""
     config = NICEConfig(align_target_model="aligned_synclr_16")
-    model = NICEModel(config=config, compile=False)
+    model = NICEModel(config=config, compile=False, preload_latents=False)
 
     # Create mock input data
     batch_size = 4
@@ -127,7 +127,7 @@ def test_nice_model_loss_computation():
 def test_nice_model_accuracy_computation():
     """Test that NICE model can compute accuracy."""
     config = NICEConfig(align_target_model="aligned_synclr_16")
-    model = NICEModel(config=config, compile=False)
+    model = NICEModel(config=config, compile=False, preload_latents=False)
 
     # Create mock input data
     batch_size = 8  # Use larger batch size for top-5 test
@@ -162,6 +162,7 @@ def test_nice_model_with_data_module(mock_data_directory):
         config=config,
         dataset_config=dataset_config,
         compile=False,
+        preload_latents=False,
     )
 
     # Test that dataloaders can be created
@@ -183,7 +184,7 @@ def test_nice_model_with_data_module(mock_data_directory):
 def test_nice_model_configure_optimizers():
     """Test that NICE model can configure optimizers."""
     config = NICEConfig(align_target_model="aligned_synclr_16")
-    model = NICEModel(config=config, compile=False)
+    model = NICEModel(config=config, compile=False, preload_latents=False)
     
     optimizers = model.configure_optimizers()
     
@@ -230,7 +231,7 @@ def test_nice_model_with_image_projection():
         align_target_model="aligned_synclr_16",
         project_image=True
     )
-    model = NICEModel(config=config, compile=False)
+    model = NICEModel(config=config, compile=False, preload_latents=False)
     
     assert model.img_projector is not None
     
@@ -247,7 +248,7 @@ def test_nice_model_with_image_projection():
 def test_nice_model_checkpoint_loading():
     """Test that NICE model can load checkpoints."""
     config = NICEConfig(align_target_model="aligned_synclr_16")
-    model = NICEModel(config=config, compile=False)
+    model = NICEModel(config=config, compile=False, preload_latents=False)
     
     # Create a temporary checkpoint
     with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp_file:
@@ -258,10 +259,11 @@ def test_nice_model_checkpoint_loading():
         torch.save({
             "state_dict": model.state_dict(),
             "hyperparameters": model.hparams,
+            "pytorch-lightning_version": "1.10.0",
         }, checkpoint_path)
         
         # Load the checkpoint
-        loaded_model = NICEModel.load_checkpoint(checkpoint_path)
+        loaded_model = NICEModel.load_checkpoint(checkpoint_path, config=config, compile=False, preload_latents=False)
         
         assert loaded_model is not None
         assert isinstance(loaded_model, NICEModel)
