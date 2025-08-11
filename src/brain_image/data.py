@@ -18,11 +18,14 @@ from lightning.pytorch import LightningDataModule
 from brain_image.configs import DEFAULT_BATCH_SIZE, BaseConfig, GlobalConfig
 
 
-def encode_keys(*keys: str) -> str:
-    h = hashlib.sha1()
-    for key in keys:
-        h.update(key.encode())
-    return h.hexdigest()
+def encode_keys(*keys: str, use_encrypt: bool = False) -> str:
+    if use_encrypt:
+        h = hashlib.sha1()
+        for key in keys:
+            h.update(key.encode())
+        return h.hexdigest()
+    else:
+        return "/".join(keys)
 
 
 class TensorCache:
@@ -30,6 +33,8 @@ class TensorCache:
         self,
         cache_path: Path = Path("cache/tensorcache"),
         memory_cache_size: int = 65536,
+        use_encrypt: bool = False,
+        overwrite: bool = True,
     ):
         self.cache_path = cache_path
         self.cache_path.mkdir(parents=True, exist_ok=True)
@@ -37,20 +42,27 @@ class TensorCache:
         self.memory_cache_size = memory_cache_size
         self.memory_cache = {}
         self.memory_cache_keys = []
+        self.use_encrypt = use_encrypt
+        self.overwrite = overwrite
 
-    def get_tensor_path(self, *keys: str) -> Path:
-        encoded_path = encode_keys(*keys)
+    def _get_tensor_path(self, *keys: str) -> Path:
+        encoded_path = encode_keys(*keys, use_encrypt=self.use_encrypt)
         full_path = self.cache_path / encoded_path
         return full_path.with_suffix(".pt")
 
-    def save_tensor(self, tensor: torch.Tensor, *keys: str):
-        path = self.get_tensor_path(*keys)
+    def save(self, tensor: torch.Tensor, *keys: str):
+        path = self._get_tensor_path(*keys)
         self._add_to_memory_cache(path, tensor)
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        if path.exists() and not self.overwrite:
+            raise FileExistsError(f"File already exists: {path}")
 
         torch.save(tensor, path)
 
-    def load_tensor(self, *keys: str) -> torch.Tensor:
-        path = self.get_tensor_path(*keys)
+    def get(self, *keys: str) -> torch.Tensor:
+        path = self._get_tensor_path(*keys)
         if path in self.memory_cache:
             return self.memory_cache[path]
 
@@ -127,7 +139,6 @@ class EEGDatasetConfig(DataConfig):
 
     imgs_dir: str = "imgs"
     eeg_dir: str = "eeg"
-    latents_dir: str = "img-latents"
 
     train_imgs_per_concept: int = 10
     test_imgs_per_concept: int = 1
@@ -350,7 +361,6 @@ def preprocess_image(
         image, list(img_size), interpolation=tv2.InterpolationMode.BICUBIC
     )
     image = image / 255.0
-    image = torch.clamp(image, 0.0, 1.0)
     return image
 
 
@@ -382,7 +392,7 @@ def preprocess_eeg_data(
 def get_image_paths(
     image_dir: Path,
     split: Literal["train", "test"],
-    extensions: tuple[str, ...] = (".jpg", ".png"),
+    extensions: tuple[str, ...] = (".jpg", ".png", ".jpeg"),
 ) -> list[Path]:
     """Get all image paths from a directory."""
     if not image_dir.exists():
@@ -394,12 +404,9 @@ def get_image_paths(
     elif split == "test":
         image_dir = image_dir / "test_images"
 
-    img_paths = [
-        img_path
-        for concept_dir in sorted(image_dir.iterdir())
-        for img_path in sorted(concept_dir.iterdir())
-        if img_path.is_file() and img_path.suffix in extensions
-    ]
+    img_paths: list[Path] = []
+    for ext in extensions:
+        img_paths.extend(list(image_dir.glob(f"**/*{ext}")))
 
     return img_paths
 

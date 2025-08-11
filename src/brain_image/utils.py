@@ -139,6 +139,8 @@ def setup():
     logging.basicConfig(level=logging.INFO)
     dotenv.load_dotenv()
 
+    torch.set_float32_matmul_precision('high')
+
     tok = os.environ.get("HF_API_TOKEN")
     if not tok:
         raise ValueError("HF_API_TOKEN is not set. Please set it in the .env file")

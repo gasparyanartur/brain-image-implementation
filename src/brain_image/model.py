@@ -120,20 +120,28 @@ def load_image_encoder(
         if model_name == "sd_highlevel":
             def embed(imgs: torch.Tensor) -> torch.Tensor:
                 with torch.no_grad():
-                    imgs = imgs.to(dtype=dtype, device=device)
+                    imgs = imgs.to(device=device)
                     latent = pipe.encode_conditioning_image(imgs)
+
                     latent = latent.detach().cpu()
                 return latent
             return embed
         
         elif model_name == "sd_lowlevel":
-            raise NotImplementedError("Low-level SD model not implemented yet")
+            def embed(imgs: torch.Tensor) -> torch.Tensor:
+                with torch.no_grad():
+                    imgs = imgs.to(device=device)
+                    latent = pipe.encode_low_level_image(imgs)
+
+                    latent = latent.detach().cpu()
+                return latent
+            return embed
 
         else:
             raise ValueError(f"Invalid model name: {model_name}")
 
     # Align
-    aligned_option, = model_config["aligned_option"]
+    aligned_option = model_config["aligned_option"]
     model_name = model_config["model_name"]
     patch_size = model_config["patch_size"]
     normalize_option = model_config["normalize_option"]
@@ -174,8 +182,9 @@ def load_image_encoder(
     logging.info(f"Model {model_name} loaded successfully.")
     def embed(imgs: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
-            imgs = imgs.to(dtype=dtype, device=device)
+            imgs = imgs.to(device=device)
             imgs = preprocess_image(imgs, img_size=list(img_size))
+
             latent = model.embed(imgs)
             latent = latent.detach().cpu()
         return latent
@@ -313,7 +322,7 @@ class LatentProjector(nn.Module):
 class NICEConfig(BaseConfig):
     eeg_config: EEGEncoderConfig = EEGEncoderConfig()
 
-    align_target_model: str = "aligned_synclr_16"
+    align_target_model: str = "unaligned_synclr_16"
     low_recon_model: str = "sd_lowlevel"
     high_recon_model: str = "sd_highlevel"
     do_high_recon: bool = False
@@ -541,7 +550,7 @@ class NICEModel(EEGAlignmentModel):
     ):
         super(NICEModel, self).__init__()
 
-        self.tensor_cache = TensorCache(cache_path=cache_dir)
+        self.tensor_cache = TensorCache(cache_path=cache_dir or Path("cache/tensorcache"))
 
 
         # Convert dicts to Pydantic models if they aren't already
@@ -600,7 +609,17 @@ class NICEModel(EEGAlignmentModel):
         
         # We do this from the tensor cache, which we query by image_path, task_type, model_name
 
-        align_image_latent = self.tensor_cache.get(batch["img_path"], "align_image_latent")
+        img_paths = batch["img_path"]
+
+        align_image_latent = [self.tensor_cache.get(img_path, "align", self.config.align_target_model, stage) for img_path in img_paths]
+        low_recon_image_latent = [self.tensor_cache.get(img_path, "low_recon", self.config.low_recon_model, stage) for img_path in img_paths]
+        high_recon_image_latent = [self.tensor_cache.get(img_path, "high_recon", self.config.high_recon_model, stage) for img_path in img_paths]
+
+        batch["align_image_latent"] = align_image_latent
+        batch["low_recon_image_latent"] = low_recon_image_latent
+        batch["high_recon_image_latent"] = high_recon_image_latent
+
+        return batch
 
         return batch
 

@@ -2,7 +2,6 @@
 
 # Default components
 defaults:
-  - dataset: eeg_dataset
   - _self_
 
 # Model configuration
@@ -20,3 +19,4 @@ dtype: float32
 device: null
 download_weights: true
 output_dir: cache/tensorcache
+img_dir: data/things-eeg2/imgs

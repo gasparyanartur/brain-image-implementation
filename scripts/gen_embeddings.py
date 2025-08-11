@@ -30,9 +30,8 @@ class EmbeddingGenerationConfig(BaseConfig):
     models_path: Path = Path("models")
     dtype: str = "float32"
     device: str | None = None
-    data_config: EEGDatasetConfig = EEGDatasetConfig()
     download_weights: bool = True
-
+    img_dir: Path = Path("data/things-eeg2/imgs")
     output_dir: Path = Path("cache/tensorcache")
 
 def run_generation(
@@ -58,6 +57,7 @@ def run_generation(
         download_weights=download_weights,
         device=device,
         img_size=img_size,
+        dtype=dtype,
     )
     logging.info(f"Generating {split} embeddings for model {model_name}")
 
@@ -66,7 +66,7 @@ def run_generation(
         split=split,
     )
 
-    encoder_configs = [task_type, model_name]
+    encoder_configs = [task_type, model_name, split]
 
     device = device or get_device_str()
 
@@ -76,37 +76,25 @@ def run_generation(
     with torch.no_grad():
         for i in tqdm.tqdm(range(0, len(img_paths), batch_size), desc="Generating embeddings..."):
             paths = img_paths[i : i + batch_size]
-            imgs = batch_load_images(paths).to(device=device, dtype=dtype)
+            imgs = batch_load_images(paths).to(device=device)
 
-            latent = image_encoder(imgs).detach().cpu()
+            latent = image_encoder(imgs)
             
             for path in paths:
-                cache.save_tensor(latent, str(path), *encoder_configs)
+                cache.save(latent, str(path), *encoder_configs)
 
 
     logging.info(f"Finished generating {split} embeddings for model {model_name}")
 
 
 def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
-    img_dir = config.data_config.data_path / config.data_config.imgs_dir
-    embed_dir = (
-        config.output_dir
-        or config.data_config.data_path / config.data_config.latents_dir
-    )
-
-    if not img_dir.exists():
-        raise FileNotFoundError(f"Image directory {img_dir} does not exist")
-
-    if not embed_dir.exists():
-        embed_dir.mkdir(parents=True, exist_ok=True)
-
     device = config.device or get_device_str()
     logging.info(f"Generating all embeddings using device: {device}")
 
     for split in config.splits:
             run_generation(
-                img_dir,
-                embed_dir,
+                config.img_dir,
+                output_dir=config.output_dir,
                 task_type=config.task_type,
                 batch_size=config.batch_size,
                 model_name=config.model_name,
@@ -135,9 +123,6 @@ def main(cfg: DictConfig):
 
     logging.info(f"Using device: {get_device_str()}")
 
-    # Create config from the composed configuration
-    dataset_config = EEGDatasetConfig(**cfg.dataset)
-
     # Create the embedding generation config
     config = EmbeddingGenerationConfig(
         batch_size=cfg.batch_size,
@@ -148,7 +133,7 @@ def main(cfg: DictConfig):
         models_path=Path(cfg.models_path),
         dtype=cfg.dtype,
         device=cfg.device,
-        data_config=dataset_config,
+        img_dir=Path(cfg.img_dir),
         output_dir=Path(cfg.output_dir),
         download_weights=cfg.download_weights,
     )

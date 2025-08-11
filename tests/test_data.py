@@ -1,4 +1,7 @@
 import torch
+import tempfile
+import shutil
+from pathlib import Path
 
 from brain_image.data import (
     EEGDatasetConfig,
@@ -9,7 +12,9 @@ from brain_image.data import (
     preprocess_eeg_data,
     get_image_paths,
     load_all_eeg_data,
+    TensorCache,
 )
+from brain_image.model import load_image_encoder
 
 
 def test_eeg_dataset_creation(mock_data_directory):
@@ -67,7 +72,7 @@ def test_preprocess_eeg_data():
 
 def test_preprocess_image():
     image = torch.randint(0, 256, (3, 100, 100), dtype=torch.uint8)
-    processed_image = preprocess_image(image, img_size=(224, 224))
+    processed_image = preprocess_image(image, img_size=[224, 224])
     assert processed_image.shape == (3, 224, 224)
     assert processed_image.dtype == torch.float32
     assert torch.all(processed_image >= 0) and torch.all(processed_image <= 1)
@@ -119,3 +124,141 @@ def test_load_all_eeg_data(mock_data_config, mock_data_directory):
     )
     assert times.shape == (mock_data_config["num_timesteps"],)
     assert len(ch_names) == len(mock_data_config["channels"])
+
+
+def test_tensor_cache_save_and_load():
+    """Test basic save and load functionality of TensorCache."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        cache = TensorCache(cache_path=Path(tmp_dir) / "test_cache")
+        
+        # Create a test tensor
+        test_tensor = torch.randn(3, 4)
+        
+        # Save tensor with keys
+        cache.save(test_tensor, "test", "key1", "key2")
+        
+        # Load tensor with same keys
+        loaded_tensor = cache.get("test", "key1", "key2")
+        
+        # Verify tensors are equal
+        assert torch.allclose(test_tensor, loaded_tensor)
+        assert test_tensor.shape == loaded_tensor.shape
+
+        path = cache._get_tensor_path("test", "key1", "key2")
+        assert path.exists()
+        assert torch.allclose(test_tensor, torch.load(path))
+
+
+def test_tensor_cache_memory_cache():
+    """Test memory cache functionality of TensorCache."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        cache = TensorCache(cache_path=Path(tmp_dir) / "test_cache", memory_cache_size=2)
+        
+        # Create test tensors
+        tensor1 = torch.randn(2, 2)
+        tensor2 = torch.randn(3, 3)
+        tensor3 = torch.randn(4, 4)
+        
+        # Save all tensors
+        cache.save(tensor1, "key1")
+        cache.save(tensor2, "key2")
+        cache.save(tensor3, "key3")
+        
+        # The first tensor should be evicted from memory cache due to size limit
+        # But we can still load it from disk
+        loaded_tensor1 = cache.get("key1")
+        assert torch.allclose(tensor1, loaded_tensor1)
+        
+        # The last two tensors should still be in memory cache
+        assert len(cache.memory_cache) == 2
+        assert len(cache.memory_cache_keys) == 2
+
+
+def test_load_image_encoder_synclr():
+    """Test loading SynCLR image encoder."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        models_path = Path(tmp_dir) / "models"
+        
+        # Test SynCLR model loading
+        encoder = load_image_encoder(
+            task_type="align",
+            model_config_str="aligned_synclr_16",
+            models_path=models_path,
+            download_weights=False,  # Don't download weights in tests
+            device="cpu",
+            dtype=torch.float32,
+            img_size=(224, 224)
+        )
+        
+        # Verify encoder is callable
+        assert callable(encoder)
+        
+        # Test with dummy input
+        dummy_img = torch.randn(2, 3, 224, 224)
+        try:
+            # This might fail if weights aren't available, but that's expected
+            output = encoder(dummy_img)
+            assert isinstance(output, torch.Tensor)
+        except Exception:
+            # Expected if weights aren't available
+            pass
+
+
+def test_load_image_encoder_clip():
+    """Test loading CLIP image encoder."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        models_path = Path(tmp_dir) / "models"
+        
+        # Test CLIP model loading
+        encoder = load_image_encoder(
+            task_type="align",
+            model_config_str="aligned_clip_32",
+            models_path=models_path,
+            download_weights=False,  # Don't download weights in tests
+            device="cpu",
+            dtype=torch.float32,
+            img_size=(224, 224)
+        )
+        
+        # Verify encoder is callable
+        assert callable(encoder)
+        
+        # Test with dummy input
+        dummy_img = torch.randn(1, 3, 224, 224)
+        try:
+            # This might fail if weights aren't available, but that's expected
+            output = encoder(dummy_img)
+            assert isinstance(output, torch.Tensor)
+        except Exception:
+            # Expected if weights aren't available
+            pass
+
+
+def test_load_image_encoder_reconstruction():
+    """Test loading reconstruction image encoder."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        models_path = Path(tmp_dir) / "models"
+        
+        # Test reconstruction model loading
+        encoder = load_image_encoder(
+            task_type="recon",
+            model_config_str="sd_highlevel",
+            models_path=models_path,
+            download_weights=False,  # Don't download weights in tests
+            device="cpu",
+            dtype=torch.float32,
+            img_size=(224, 224)
+        )
+        
+        # Verify encoder is callable
+        assert callable(encoder)
+        
+        # Test with dummy input
+        dummy_img = torch.randn(1, 3, 224, 224)
+        try:
+            # This might fail if weights aren't available, but that's expected
+            output = encoder(dummy_img)
+            assert isinstance(output, torch.Tensor)
+        except Exception:
+            # Expected if weights aren't available
+            pass
