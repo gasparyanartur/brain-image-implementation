@@ -657,7 +657,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             if wandb_logger is not None:
                 wandb_logger.log_image(
                 key=f"{stage}_recon",
-                images=[recon.detach().cpu() for recon in reconstructions],
+                images=[recon.detach().cpu().float() for recon in reconstructions],
             )
 
         image_paths = [Path(path) for path in batch["img_path"][:num_reconstructions]]
