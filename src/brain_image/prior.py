@@ -236,6 +236,7 @@ class BrainDiffusionPrior(DiffusionPrior):
     def __init__(
         self,
         net: DiffusionPriorNetwork,
+        image_embed_dim: int,
         timesteps: int = 1000,
         cond_drop_prob: float = 0.0,
         text_cond_drop_prob: float | None = None,
@@ -259,10 +260,12 @@ class BrainDiffusionPrior(DiffusionPrior):
             predict_x_start=predict_x_start,
             predict_v=predict_v,
             beta_schedule=beta_schedule,
+            image_embed_dim=image_embed_dim,
             *args,
             **kwargs,
         )
         self.net = net
+        self.image_embed_dim = image_embed_dim
 
     @torch.no_grad()
     def p_sample(
