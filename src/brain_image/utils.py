@@ -136,7 +136,7 @@ def show_image(
 
 
 def setup():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     dotenv.load_dotenv()
 
     torch.set_float32_matmul_precision('high')
@@ -144,5 +144,7 @@ def setup():
     tok = os.environ.get("HF_API_TOKEN")
     if not tok:
         raise ValueError("HF_API_TOKEN is not set. Please set it in the .env file")
+
+    logging.info(f"Using device: {DEVICE}")
 
     login(token=tok)

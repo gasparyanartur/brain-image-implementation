@@ -16,7 +16,7 @@ from brain_image.data import (
     preprocess_image,
 )
 from brain_image.model import load_image_encoder
-from brain_image.utils import DTYPE, get_dtype
+from brain_image.utils import DTYPE, get_dtype, setup
 from dreamsim.model import PerceptualModel
 
 
@@ -115,13 +115,7 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
 def main(cfg: DictConfig):
     """Main function for embedding generation with clean configuration."""
 
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-    )
-
-    logging.info(f"Using device: {get_device_str()}")
+    setup()
 
     # Create the embedding generation config
     config = EmbeddingGenerationConfig(

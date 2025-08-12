@@ -11,6 +11,7 @@ import tempfile
 from typing import Any, Literal, cast
 from matplotlib.pyplot import bar
 from pydantic import BaseModel, field_validator
+from sympy import O
 import torch
 import torch.nn as nn
 import einops
@@ -349,11 +350,13 @@ class ReconConfig(BaseConfig):
     do_low_recon: bool = False
     do_high_recon: bool = False
 
+    project_dim: int = 768
+
+
 
 class NICEConfig(ReconConfig):
     eeg_config: EEGEncoderConfig = EEGEncoderConfig()
 
-    project_dim: int = 768
     eeg_latent_dim: int = 1440
     img_latent_dim: int = 768
     project_image: bool = False
@@ -420,6 +423,12 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
         self.tensor_cache = tensor_cache
         self.config = config
+
+        if config.do_high_recon:
+            # We will use a diffusion prior for this
+            # TODO
+            ...
+
 
     def train_dataloader(self) -> torch.utils.data.DataLoader:
         """Return the training dataloader."""
