@@ -19,9 +19,15 @@ echo "Date: $(date)"
 
 image_path=${APPTAINER_IMAGE_PATH:-/home/x_artga/projdir/images/brain_2025_07_03.sif}
 
+# Get CLI arguments (all arguments passed to this script)
+CLI_ARGS="$@"
+
+echo "CLI_ARGS: $CLI_ARGS"
+
+
 # Run the embedding generation script
 ./scripts/container/run_singularity.sh \
-    python /workspace/scripts/gen_embeddings.py
+    python /workspace/scripts/gen_embeddings.py $CLI_ARGS
 
 # Check exit status
 if [ $? -eq 0 ]; then
