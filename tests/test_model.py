@@ -117,7 +117,7 @@ def test_nice_model_loss_computation():
     sim = model.get_similarity(img_latent, eeg_data)
 
     # Compute loss
-    loss = model.get_loss(sim)
+    loss = model.get_align_loss(sim)
 
     # Check loss
     assert torch.isfinite(loss)
@@ -233,7 +233,7 @@ def test_nice_model_with_image_projection():
     )
     model = NICEModel(config=config, compile=False, preload_latents=False)
     
-    assert model.img_projector is not None
+    assert model.align_img_projector is not None
     
     # Test forward pass
     batch_size = 4

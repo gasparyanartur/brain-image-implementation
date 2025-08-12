@@ -146,5 +146,6 @@ def setup():
         raise ValueError("HF_API_TOKEN is not set. Please set it in the .env file")
 
     logging.info(f"Using device: {DEVICE}")
-
+    logging.info(f"Using dtype: {DTYPE}")
+    logging.info(f"Using directory: {os.getcwd()}")
     login(token=tok)

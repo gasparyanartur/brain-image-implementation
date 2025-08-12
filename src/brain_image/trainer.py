@@ -66,7 +66,7 @@ class NICETrainerConfig(TrainConfig):
     compile_model: bool = True
     init_weights: bool = True
     dtype: str = "float16"
-    cache_dir: Path = Path("cache")
+    cache_dir: Path = Path("cache/tensorcache")
     preload_latents: bool = True
 
     checkpoint_monitor: str = "val_top1_acc"

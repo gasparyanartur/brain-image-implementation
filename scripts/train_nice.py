@@ -13,6 +13,7 @@ import torch
 from pathlib import Path
 
 from brain_image.configs import GlobalConfig
+from brain_image.utils import setup
 
 # Initialize wandb login at script startup
 try:
@@ -81,20 +82,13 @@ def train_nice(trainer: NICETrainer, checkpoint_path: Path | None = None):
 def main(cfg: DictConfig):
     """Main function for NICE training with modular configuration."""
 
-    config = TrainNICEConfig.from_hydra_config(cfg)
+    setup()
 
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-    )
+    config = TrainNICEConfig.from_hydra_config(cfg)
 
     logging.info(f"Training with config:")
     for key, value in config.model_dump(mode="json").items():
         logging.info(f"  {key}: {value}")
-
-    # Set torch precision
-    torch.set_float32_matmul_precision("high")
 
     # Create trainer with composed components
     trainer = NICETrainer(

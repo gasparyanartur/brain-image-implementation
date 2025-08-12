@@ -68,8 +68,6 @@ def run_generation(
 
     encoder_configs = [task_type, model_name, split]
 
-    device = device or get_device_str()
-
     cache = TensorCache(cache_path=output_dir)
     logging.info(f"Saving embeddings with model configs {encoder_configs} to cache directory: {output_dir}")
 

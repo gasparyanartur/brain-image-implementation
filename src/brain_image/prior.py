@@ -1,8 +1,7 @@
-
 import logging
 import random
 
-from typing import cast
+from typing import Literal, cast
 from PIL.Image import Image
 
 import tqdm
@@ -29,13 +28,15 @@ class DiffusionPriorNetwork(nn.Module):
     def __init__(
         self,
         dim,
-        num_timesteps: int | None = None,
+        num_timesteps: int | None = 1000,
         num_time_embeds: int = 1,
         num_image_embeds: int = 1,
         num_text_embeds: int = 1,
         max_text_len: int = 256,
         self_cond: bool = False,
+        depth: int = 6,
         num_output_tokens: int = 256,
+        causal_transformer_kwargs: dict = {},
         **kwargs,
     ):
         super().__init__()
@@ -77,7 +78,9 @@ class DiffusionPriorNetwork(nn.Module):
         )
 
         self.learned_query = nn.Parameter(torch.randn(dim))
-        self.causal_transformer = CausalTransformer(dim=dim, **kwargs)
+        self.causal_transformer = CausalTransformer(
+            dim=dim, depth=depth, **causal_transformer_kwargs
+        )
 
         # dalle1 learned padding strategy
 
@@ -124,7 +127,7 @@ class DiffusionPriorNetwork(nn.Module):
         text_embed: torch.Tensor | None = None,
         text_encodings: torch.Tensor | None = None,
         self_cond: torch.Tensor | None = None,
-        text_cond_drop_prob: float=0.0,
+        text_cond_drop_prob: float = 0.0,
         image_cond_drop_prob=0.0,
     ):
         batch, dim, device, dtype = (
@@ -231,9 +234,34 @@ class BrainDiffusionPrior(DiffusionPrior):
     # Adapted from https://github.com/medarc-ai/fmri-reconstruction-nsd/blob/main/src/models.py#l232
 
     def __init__(
-        self, net: DiffusionPriorNetwork, *args, **kwargs
+        self,
+        net: DiffusionPriorNetwork,
+        timesteps: int = 1000,
+        cond_drop_prob: float = 0.0,
+        text_cond_drop_prob: float | None = None,
+        image_cond_drop_prob: float | None = None,
+        loss_type: Literal["l1", "l2", "huber"] = "l2",
+        predict_x_start: bool = True,
+        predict_v: bool = False,
+        beta_schedule: Literal["cosine", "linear", "quadratic", "jsd", "sigmoid"] = "cosine",
+        condition_on_text_encodings: bool = False,
+        *args,
+        **kwargs,
     ):
-        super().__init__(net=net, *args, **kwargs)
+        super().__init__(
+            net=net,
+            timesteps=timesteps,
+            condition_on_text_encodings=condition_on_text_encodings,
+            cond_drop_prob=cond_drop_prob,
+            text_cond_drop_prob=text_cond_drop_prob,
+            image_cond_drop_prob=image_cond_drop_prob,
+            loss_type=loss_type,
+            predict_x_start=predict_x_start,
+            predict_v=predict_v,
+            beta_schedule=beta_schedule,
+            *args,
+            **kwargs,
+        )
         self.net = net
 
     @torch.no_grad()
@@ -243,8 +271,8 @@ class BrainDiffusionPrior(DiffusionPrior):
         t: torch.Tensor,
         text_cond: dict | None = None,
         self_cond: torch.Tensor | None = None,
-        clip_denoised: bool=True,
-        cond_scale: float=1.0,
+        clip_denoised: bool = True,
+        cond_scale: float = 1.0,
         generator: torch.Generator | None = None,
     ):
         b = x.shape[0]
@@ -266,7 +294,12 @@ class BrainDiffusionPrior(DiffusionPrior):
 
     @torch.no_grad()
     def p_sample_loop_ddpm(
-        self, shape: Size, text_cond: dict, cond_scale: float=1.0, generator: torch.Generator | None = None, progress_bar: bool = False
+        self,
+        shape: torch.Size,
+        text_cond: dict,
+        cond_scale: float = 1.0,
+        generator: torch.Generator | None = None,
+        progress_bar: bool = False,
     ):
         batch = shape[0]
         device = cast(torch.device, self.device)
@@ -304,7 +337,13 @@ class BrainDiffusionPrior(DiffusionPrior):
 
         return image_embed
 
-    def p_losses(self, image_embed: torch.Tensor, times: torch.Tensor, text_cond: dict, noise: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def p_losses(
+        self,
+        image_embed: torch.Tensor,
+        times: torch.Tensor,
+        text_cond: dict,
+        noise: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         noise = noise or torch.randn_like(image_embed)
 
         image_embed_noisy = self.noise_scheduler.q_sample(
@@ -343,7 +382,9 @@ class BrainDiffusionPrior(DiffusionPrior):
         text: str | None = None,
         image: Image | None = None,
         brain_embedding: torch.Tensor | None = None,
-        text_embedding: torch.Tensor | None = None,  # allow for training on preprocessed CLIP text and image embeddings
+        text_embedding: (
+            torch.Tensor | None
+        ) = None,  # allow for training on preprocessed CLIP text and image embeddings
         image_embedding: torch.Tensor | None = None,
         text_encodings: torch.Tensor | None = None,  # as well as CLIP text encodings
         *args,
@@ -351,14 +392,22 @@ class BrainDiffusionPrior(DiffusionPrior):
     ):
         # Validate inputs
         assert (
-            (text is not None) or (text_embedding is not None) or (brain_embedding is not None)
+            (text is not None)
+            or (text_embedding is not None)
+            or (brain_embedding is not None)
         ), "either text, text embedding, or voxel must be supplied"
 
         if text is not None or image is not None:
-            logging.warning("Text or image was passed in. Using clip to embed text and image. This part of the code may not be tested properly.")
-            assert self.clip is not None, "clip must be trained if you wish to pass in text or image"
+            logging.warning(
+                "Text or image was passed in. Using clip to embed text and image. This part of the code may not be tested properly."
+            )
+            assert (
+                self.clip is not None
+            ), "clip must be trained if you wish to pass in text or image"
 
-        assert (image is not None) or (image_embedding is not None), "either image or image embedding must be supplied"
+        assert (image is not None) or (
+            image_embedding is not None
+        ), "either image or image embedding must be supplied"
         assert not (
             self.condition_on_text_encodings
             and (text_encodings is None and text is None)
@@ -366,27 +415,29 @@ class BrainDiffusionPrior(DiffusionPrior):
 
         if brain_embedding is not None:
             if text_embedding is not None:
-                logging.warning("Both text embedding and brain embedding were passed in. Using brain embedding.")
+                logging.warning(
+                    "Both text embedding and brain embedding were passed in. Using brain embedding."
+                )
 
             text_embedding = brain_embedding
 
         if image is not None:
-            image_embedding, _ = self.clip.embed_image(image) # type: ignore
+            image_embedding, _ = self.clip.embed_image(image)  # type: ignore
 
         # calculate text conditionings, based on what is passed in
 
         if text is not None:
-            text_embedding, text_encodings = self.clip.embed_text(text) # type: ignore
+            text_embedding, text_encodings = self.clip.embed_text(text)  # type: ignore
 
         text_cond = dict(text_embed=text_embedding)
 
-
         if self.condition_on_text_encodings:
-            assert text_encodings is not None, "text encodings must be present for diffusion prior if specified"
+            assert (
+                text_encodings is not None
+            ), "text encodings must be present for diffusion prior if specified"
             text_cond = {**text_cond, "text_encodings": text_encodings}
 
-
-        # Setup diffusion 
+        # Setup diffusion
 
         assert image_embedding is not None, "image embedding must be present"
         assert text_embedding is not None, "text embedding must be present"

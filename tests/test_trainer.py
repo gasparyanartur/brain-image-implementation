@@ -154,7 +154,7 @@ def test_nice_trainer_loss_decreases(mock_data_directory):
 
         with torch.no_grad():
             sim = trainer.model.get_similarity(img_latent, eeg_data)
-            initial_loss = trainer.model.get_loss(sim).item()
+            initial_loss = trainer.model.get_align_loss(sim).item()
 
         # Train model
         trainer = NICETrainer(
