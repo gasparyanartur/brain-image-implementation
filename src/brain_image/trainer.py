@@ -69,8 +69,8 @@ class NICETrainerConfig(TrainConfig):
     cache_dir: Path = Path("cache/tensorcache")
     preload_latents: bool = True
 
-    checkpoint_monitor: str = "val_top1_acc"
-    checkpoint_monitor_mode: Literal["min", "max"] = "max"
+    checkpoint_monitor: str = "val_loss"
+    checkpoint_monitor_mode: Literal["min", "max"] = "min"
 
     wandb_tags: list[str] = ["nice"]
 
@@ -121,6 +121,7 @@ class Trainer:
                 *self.config.wandb_tags,
                 "train",
             ]
+
             if "SLURM_JOB_ID" in os.environ:
                 wandb_tags.append("slurm")
             else:

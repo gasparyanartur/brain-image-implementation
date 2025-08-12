@@ -22,6 +22,8 @@ import math
 import itertools as it
 import lightning as pl
 import tqdm
+from lightning.pytorch.loggers import WandbLogger
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 from brain_image.configs import BaseConfig, get_device, get_device_str
 from brain_image.data import (
@@ -359,7 +361,7 @@ class EEGAlignmentConfig(BaseConfig):
 
     align_loss_factor: float = 1.0
     prior_loss_factor: float = 0.01
-
+    recon_loss_factor: float = 0.01
     project_image: bool = False
 
     eeg_latent_dim: int = 1440
@@ -391,8 +393,6 @@ class NICEConfig(EEGAlignmentConfig):
     max_epochs: int = 100
 
     warmup_start_frac: float = 0.1
-
-    num_workers: int = 8
     data_seed: int = 42
 
     @cached_property
@@ -457,6 +457,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             self._init_normal_weights()
 
         self.prior: BrainDiffusionPrior | None = None
+
 
         if config.do_high_recon:
             # TODO: Add diffusion prior config to these configs
@@ -534,6 +535,16 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
     def num_train_batches(self) -> int:
         """Return the length of the training dataloader."""
         return len(self.data_module.train_dataloader())
+
+    @cached_property
+    def num_val_batches(self) -> int:
+        """Return the length of the validation dataloader."""
+        return len(self.data_module.val_dataloader())
+
+    @cached_property
+    def num_test_batches(self) -> int:
+        """Return the length of the test dataloader."""
+        return len(self.data_module.test_dataloader())
 
     @classmethod
     def load_checkpoint(cls, checkpoint_path: str, **kwargs):
@@ -629,13 +640,86 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         self, batch, batch_idx
     ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
         loss, outputs, metrics = self.run_step(batch, batch_idx, "val")
+
+        if batch_idx == self.num_val_batches - 1:
+            self.evaluate_reconstructions(batch, batch_idx, "val")
+
         return loss, outputs, metrics
+    
+    @torch.no_grad()
+    def evaluate_reconstructions(self, batch, batch_idx, stage: Literal["val", "test"], log_images: bool = True, num_reconstructions: int = 3):
+        reconstructions = self.get_reconstructions(batch, batch_idx, stage, num_reconstructions=num_reconstructions)
+        if reconstructions is None:
+            return
+                    
+        if log_images:
+            wandb_logger = self.get_wandb_logger()
+            if wandb_logger is not None:
+                wandb_logger.log_image(
+                key=f"{stage}_recon",
+                images=[recon.detach().cpu() for recon in reconstructions],
+            )
+
+        image_paths = [Path(path) for path in batch["img_path"][:num_reconstructions]]
+        images = batch_load_images(image_paths).to(reconstructions.device, dtype=reconstructions.dtype)
+
+        lpips_score = self._get_lpips_score(reconstructions, images)
+        self.log(f"{stage}_recon_lpips", lpips_score, prog_bar=True, on_step=False, on_epoch=True)
+
+    @torch.no_grad()
+    def _get_lpips_score(self, reconstructions: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
+        lpips = LearnedPerceptualImagePatchSimilarity(net_type='squeeze')
+        lpips.requires_grad_(False)
+        lpips.to(self.device)
+
+        # Prepare images for lpips - Need to be in the [-1, 1] range and same shape as reconstructions
+        reconstructions = reconstructions*2-1
+        images = images/255.0
+        images = torch.nn.functional.interpolate(images, reconstructions.shape[-2:], mode="bicubic")
+        images = torch.clamp(images, min=0, max=1)
+        images = images*2-1
+
+        return lpips(reconstructions, images)
 
     def test_step(
         self, batch, batch_idx
     ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
         loss, outputs, metrics = self.run_step(batch, batch_idx, "test")
+
+        if batch_idx == self.num_test_batches - 1:
+            self.evaluate_reconstructions(batch, batch_idx, "test")
+
         return loss, outputs, metrics
+    
+    def get_wandb_logger(self) -> WandbLogger | None:
+        for logger in self.loggers:
+            if isinstance(logger, WandbLogger):
+                return logger
+        return None
+
+
+    @torch.no_grad()
+    def get_reconstructions(self, batch, batch_idx, stage: Literal["val", "test"], num_reconstructions: int = 3) -> torch.Tensor | None:
+        if self.prior is None:
+            return None
+
+        batch_size = num_reconstructions        
+
+        dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
+        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
+
+        eeg_data = batch["eeg_data"][:batch_size].to(device, dtype=dtype)
+        eeg_embed = self.get_brain_encoder()(eeg_data)
+        eeg_proj = self.get_brain_projector()(eeg_embed)
+
+        prior_pred = self.prior.p_sample_loop_ddpm(torch.Size([batch_size, self.config.img_latent_dim]), brain_embedding=eeg_proj, dtype=dtype)
+
+        pipe = ReconstructionPipeline.from_stable_diffusion(dtype=dtype, device=device)
+        imgs_reconstructed = pipe.reconstruct_latents(prior_pred)
+        del pipe
+
+        return imgs_reconstructed
+
 
     def run_step(
         self, batch, batch_idx, stage: Literal["train", "val", "test"]
@@ -658,6 +742,8 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         loss = torch.zeros((1,), device=device, dtype=dtype, requires_grad=True)
         metrics = {}
         outputs = {}
+
+        on_step = stage == "train"
 
         with torch.no_grad() if (stage == "val" or stage == "test") else nullcontext():
             if self.config.do_align:
@@ -685,7 +771,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                     f"{stage}_align_loss",
                     align_loss,
                     prog_bar=False,
-                    on_step=False,
+                    on_step=on_step,
                     on_epoch=True,
                 )
 
@@ -707,21 +793,21 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                         f"{stage}_top1_acc",
                         top1_acc,
                         prog_bar=True,
-                        on_step=False,
+                        on_step=on_step,
                         on_epoch=True,
                     )
                     self.log(
                         f"{stage}_top3_acc",
                         top3_acc,
                         prog_bar=False,
-                        on_step=False,
+                        on_step=on_step,
                         on_epoch=True,
                     )
                     self.log(
                         f"{stage}_top5_acc",
                         top5_acc,
                         prog_bar=False,
-                        on_step=False,
+                        on_step=on_step,
                         on_epoch=True,
                     )
 
@@ -738,19 +824,30 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                 prior_loss = prior_loss * self.config.prior_loss_factor
                 loss = loss + prior_loss
 
+                recon_loss = torch.nn.functional.mse_loss(high_recon_image_latent, prior_pred)
+                recon_loss = recon_loss * self.config.recon_loss_factor
+                loss = loss + recon_loss
+
                 metrics.update({"prior_loss": prior_loss})
 
-                outputs.update({"prior_pred": prior_pred})
+                outputs.update({"prior_pred": prior_pred, "recon_loss": recon_loss})
 
                 self.log(
                     f"{stage}_prior_loss",
                     prior_loss,
                     prog_bar=False,
-                    on_step=False,
+                    on_step=on_step,
                     on_epoch=True,
                 )
 
-        self.log(f"{stage}_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+                self.log(
+                    f"{stage}_recon_loss",
+                    recon_loss,
+                    prog_bar=False,
+                    on_step=on_step,
+                    on_epoch=True,
+                )
+        self.log(f"{stage}_loss", loss, prog_bar=True, on_step=on_step, on_epoch=True)
 
         return loss, outputs, metrics
 
@@ -829,7 +926,6 @@ class NICEModel(EEGAlignmentModel):
             preload_latents=preload_latents,
         )
 
-        # Convert dicts to Pydantic models if they aren't already
         if isinstance(config, dict):
             config = NICEConfig.model_validate(config)
 
@@ -841,7 +937,6 @@ class NICEModel(EEGAlignmentModel):
             )
 
         
-
         self.eeg_encoder = EEGEncoder(config.eeg_config)
         self.eeg_projector = LatentProjector(
             embed_dim=config.eeg_latent_dim,

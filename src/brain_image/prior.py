@@ -45,6 +45,7 @@ class DiffusionPriorNetwork(nn.Module):
         self.num_time_embeds = num_time_embeds
         self.num_image_embeds = num_image_embeds
         self.num_text_embeds = num_text_embeds
+        self.num_timesteps = num_timesteps
 
         self.to_text_embeds = nn.Sequential(
             (
@@ -299,18 +300,22 @@ class BrainDiffusionPrior(DiffusionPrior):
     def p_sample_loop_ddpm(
         self,
         shape: torch.Size,
-        text_cond: dict,
+        brain_embedding: torch.Tensor | None = None,
+        text_cond: dict = {},
         cond_scale: float = 1.0,
         generator: torch.Generator | None = None,
         progress_bar: bool = False,
+        dtype: torch.dtype = torch.float32,
     ):
         batch = shape[0]
         device = cast(torch.device, self.device)
 
-        if generator is None:
-            image_embed = torch.randn(shape, device=device)
-        else:
-            image_embed = torch.randn(shape, device=device, generator=generator)
+        if brain_embedding is not None:
+            brain_embedding.to(dtype)
+            text_cond = {**text_cond, "text_embed": brain_embedding}
+
+
+        image_embed = torch.randn(shape, device=device, dtype=dtype, generator=generator)
 
         x_start = None  # for self-conditioning
 
@@ -325,6 +330,7 @@ class BrainDiffusionPrior(DiffusionPrior):
         ):
             times = torch.full((batch,), i, device=device, dtype=torch.long)
 
+
             self_cond = x_start if self.net.self_cond else None
             image_embed, x_start = self.p_sample(
                 image_embed,
@@ -334,11 +340,12 @@ class BrainDiffusionPrior(DiffusionPrior):
                 cond_scale=cond_scale,
                 generator=generator,
             )
+            image_embed = image_embed.to(dtype)
 
         if self.sampling_final_clamp_l2norm and self.predict_x_start:
             image_embed = self.l2norm_clamp_embed(image_embed)
 
-        return image_embed
+        return image_embed.to(dtype)
 
     def p_losses(
         self,

@@ -9,7 +9,15 @@
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/train_nice.py",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "args": [
+                "model.align_target_model=unaligned_synclr_16",
+                "model.do_high_recon=true",
+                "dataset.batch_size=64",
+                "dataset.limit_train_size=0.01",
+                "trainer.compile_model=false",
+                "dataset.num_workers=12"
+            ]
         }
     ]
 }

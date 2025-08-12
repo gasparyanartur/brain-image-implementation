@@ -12,12 +12,12 @@ init_weights: true
 log_dir: logs
 checkpoint_dir: null
 enable_barebones: false
-checkpoint_monitor: "val_top1_acc"
-checkpoint_monitor_mode: "max"
+checkpoint_monitor: "val_loss"
+checkpoint_monitor_mode: "min"
 checkpoint_monitor_early_stop: 10
 
 overfit_batches: 0
-precision: 32
+precision: 16
 val_check_interval: 1.0
 log_every_n_steps: 100
 enable_progress_bar: true
