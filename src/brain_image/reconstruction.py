@@ -68,6 +68,7 @@ class ReconstructionPipeline:
         )
         self.image_processor = image_processor
 
+
     @classmethod
     def from_stable_diffusion(
         cls,

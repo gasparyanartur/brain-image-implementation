@@ -547,11 +547,15 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         return len(self.data_module.test_dataloader())
 
     @classmethod
-    def load_checkpoint(cls, checkpoint_path: str, **kwargs):
+    def load_checkpoint(cls, checkpoint_path: str | Path, undo_compile: bool = False, **kwargs):
+        print(checkpoint_path)
+        checkpoint_path = Path(checkpoint_path)
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        if not undo_compile:
+            return super().load_from_checkpoint(checkpoint_path, **kwargs)
+        
         state_dict = checkpoint.pop("state_dict")
 
-        # Remove the "eeg_encoder._orig_mod.X" and replace with "eeg_encoder.X"
         for key in list(state_dict.keys()):
             if re.search(r"_orig_mod\.", key):
                 new_key = re.sub(r"_orig_mod\.", "", key)
@@ -562,7 +566,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         # Save to temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as temp_file:
             torch.save(checkpoint, temp_file.name)
-            return cls.load_from_checkpoint(temp_file.name, **kwargs)
+            return cls.load_checkpoint(temp_file.name, undo_compile=False, compile=False, **kwargs)
 
     @abstractmethod
     def get_similarity(
@@ -912,6 +916,7 @@ class NICEModel(EEGAlignmentModel):
         config: NICEConfig | dict[str, Any],
         dataset_config: EEGDatasetConfig | dict[str, Any] = EEGDatasetConfig(),
         compile: bool = True,
+        modules_to_compile: list[str] = ["eeg_encoder", "eeg_projector", "align_img_projector", "prior"],
         cache_dir: Path | None = None,
         preload_latents: bool = True,
         dtype: torch.dtype = torch.float16,
@@ -954,12 +959,18 @@ class NICEModel(EEGAlignmentModel):
 
         if compile:
             logging.info("Compiling model...")
-            self.eeg_encoder = torch.compile(self.eeg_encoder)
-            self.eeg_projector = torch.compile(self.eeg_projector)
-            if self.align_img_projector is not None:
-                self.align_img_projector = torch.compile(self.align_img_projector)
-            if self.prior is not None:
-                self.prior = cast(BrainDiffusionPrior, torch.compile(self.prior))
+            for module in modules_to_compile:
+                match module:
+                    case "eeg_encoder":
+                        self.eeg_encoder = torch.compile(self.eeg_encoder)
+                    case "eeg_projector":
+                        self.eeg_projector = torch.compile(self.eeg_projector)
+                    case "align_img_projector":
+                        self.align_img_projector = torch.compile(self.align_img_projector)
+                    case "prior":
+                        self.prior = cast(BrainDiffusionPrior, torch.compile(self.prior))
+                    case _:
+                        raise ValueError(f"Unknown module to compile: {module}")
 
         self.save_hyperparameters(
             {
@@ -967,6 +978,9 @@ class NICEModel(EEGAlignmentModel):
                 "dataset_config": self.data_module.config.model_dump(mode="json"),
             },
         )
+
+        self.compile: bool = compile
+        self.modules_to_compile: list[str] = modules_to_compile
 
     def get_brain_encoder(self) -> nn.Module:
         return cast(nn.Module, self.eeg_encoder)
