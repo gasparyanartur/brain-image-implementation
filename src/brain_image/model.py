@@ -722,9 +722,12 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
         device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
 
-        eeg_data = batch["eeg_data"][:batch_size].to(device, dtype=dtype)
-        eeg_embed = self.get_brain_encoder()(eeg_data)
-        eeg_proj = self.get_brain_projector()(eeg_embed)
+        if self.config.prior_debug_mode:
+            eeg_proj = batch["align_image_latent"][:batch_size].to(device, dtype=dtype)
+        else:
+            eeg_data = batch["eeg_data"][:batch_size].to(device, dtype=dtype)
+            eeg_embed = self.get_brain_encoder()(eeg_data)
+            eeg_proj = self.get_brain_projector()(eeg_embed)
 
         prior_pred = self.prior.p_sample_loop_ddpm(torch.Size([batch_size, self.config.img_latent_dim]), brain_embedding=eeg_proj, dtype=dtype)
 

@@ -4,6 +4,7 @@
 align_target_model: "unaligned_synclr_16"
 low_recon_model: "sd_lowlevel"
 high_recon_model: "sd_highlevel"
+do_align: true
 do_high_recon: true
 do_low_recon: false
 do_prior: true

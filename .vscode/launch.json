@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Train NICE",
+            "name": "Python Debugger: Train NICE - Full",
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/train_nice.py",
@@ -13,7 +13,24 @@
             "args": [
                 "model.align_target_model=unaligned_synclr_16",
                 "model.do_high_recon=true",
-                "dataset.batch_size=64",
+                "dataset.batch_size=32",
+                "dataset.limit_train_size=0.01",
+                "trainer.compile_model=false",
+                "dataset.num_workers=12"
+            ]
+        },
+        {
+            "name": "Python Debugger: Train NICE - Prior Debug",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/train_nice.py",
+            "console": "integratedTerminal",
+            "args": [
+                "model.prior_debug_mode=true",
+                "model.do_align=false",
+                "model.do_low_recon=false",
+                "model.do_high_recon=true",
+                "dataset.batch_size=32",
                 "dataset.limit_train_size=0.01",
                 "trainer.compile_model=false",
                 "dataset.num_workers=12"
