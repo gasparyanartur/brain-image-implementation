@@ -226,7 +226,8 @@ class DiffusionPriorNetwork(nn.Module):
 
         # get learned query, which should predict the image embedding (per DDPM timestep)
 
-        pred_image_embed = tokens[..., -1, :]
+        # Use the CLS token to predict the image embedding
+        pred_image_embed = tokens[..., 0, :]
 
         return pred_image_embed
 

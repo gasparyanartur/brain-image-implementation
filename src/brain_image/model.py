@@ -850,13 +850,13 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                 prior_loss = prior_loss * self.config.prior_loss_factor
                 loss = loss + prior_loss
 
-                recon_loss = torch.nn.functional.mse_loss(high_recon_image_latent, prior_pred)
-                recon_loss = recon_loss * self.config.recon_loss_factor
-                loss = loss + recon_loss
+                #recon_loss = torch.nn.functional.mse_loss(high_recon_image_latent, prior_pred)
+                #recon_loss = recon_loss * self.config.recon_loss_factor
+                #loss = loss + recon_loss
 
                 metrics.update({"prior_loss": prior_loss})
 
-                outputs.update({"prior_pred": prior_pred, "recon_loss": recon_loss})
+                outputs.update({"prior_pred": prior_pred})
 
                 self.log(
                     f"{stage}_prior_loss",
@@ -866,13 +866,13 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                     on_epoch=True,
                 )
 
-                self.log(
-                    f"{stage}_recon_loss",
-                    recon_loss,
-                    prog_bar=False,
-                    on_step=on_step,
-                    on_epoch=True,
-                )
+                #self.log(
+                #    f"{stage}_recon_loss",
+                #    recon_loss,
+                #    prog_bar=False,
+                #    on_step=on_step,
+                #    on_epoch=True,
+                #)
         self.log(f"{stage}_loss", loss, prog_bar=True, on_step=on_step, on_epoch=True)
 
         return loss, outputs, metrics
