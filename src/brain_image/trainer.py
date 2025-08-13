@@ -65,7 +65,7 @@ class NICETrainerConfig(TrainConfig):
     # NICE-specific training settings
     compile_model: bool = True
     init_weights: bool = True
-    dtype: str = "float16"
+    dtype: str = "float32"
     cache_dir: Path = Path("cache/tensorcache")
     preload_latents: bool = True
 
@@ -126,6 +126,9 @@ class Trainer:
                 wandb_tags.append("slurm")
             else:
                 wandb_tags.append("local")
+
+            if self.config.overfit_batches != 0:
+                wandb_tags.append("overfit")
 
             name = self.get_train_title()
             wandb_logger = WandbLogger(

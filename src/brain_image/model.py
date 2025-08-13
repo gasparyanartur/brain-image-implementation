@@ -368,6 +368,8 @@ class EEGAlignmentConfig(BaseConfig):
     img_latent_dim: int = 768
     project_dim: int = 768
 
+    prior_debug_mode: bool = False      # If True, will use the target image in the prior and disable alignment
+
     temperature_init: float = math.log(1 / 0.07)
 
 
@@ -428,6 +430,8 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             False  # Disable automatic optimization, we will handle it manually
         )
 
+
+
         self.params = {
             "config": config,
             "dataset_config": dataset_config,
@@ -453,6 +457,11 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         )
         self.loss = nn.CrossEntropyLoss()
 
+        if self.config.prior_debug_mode:
+            self.config.do_align = False
+            self.config.do_low_recon = False
+            self.config.do_high_recon = True
+
         if init_weights:
             self._init_normal_weights()
 
@@ -468,6 +477,8 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                 net=prior_net,
                 image_embed_dim=config.project_dim,
             )
+        elif config.do_low_recon:
+            raise ValueError("Cannot do low level reconstruction in without high level reconstruction")
 
         if preload_latents:
             self._preload_latents()
@@ -548,7 +559,6 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
     @classmethod
     def load_checkpoint(cls, checkpoint_path: str | Path, undo_compile: bool = False, **kwargs):
-        print(checkpoint_path)
         checkpoint_path = Path(checkpoint_path)
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         if not undo_compile:
@@ -739,9 +749,12 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             else get_device(self.device)
         )
 
-        eeg_data = batch["eeg_data"].to(device, dtype=dtype)
-        eeg_latent = self.get_brain_encoder()(eeg_data)
-        proj_eeg_latent = self.get_brain_projector()(eeg_latent)
+        if self.eeg_encoder is not None:
+            eeg_data = batch["eeg_data"].to(device, dtype=dtype)
+            eeg_latent = self.get_brain_encoder()(eeg_data)
+            proj_eeg_latent = self.get_brain_projector()(eeg_latent)
+        else:
+            proj_eeg_latent = None
 
         loss = torch.zeros((1,), device=device, dtype=dtype, requires_grad=True)
         metrics = {}
@@ -751,6 +764,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
         with torch.no_grad() if (stage == "val" or stage == "test") else nullcontext():
             if self.config.do_align:
+                assert proj_eeg_latent is not None, "EEG latent is not initialized"
                 align_image_latent = batch["align_image_latent"].to(device, dtype=dtype)
 
                 if self.config.project_image:
@@ -816,6 +830,11 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                     )
 
             if self.config.do_high_recon:
+                if self.config.prior_debug_mode:
+                    proj_eeg_latent = batch["align_image_latent"].to(device, dtype=dtype)
+                else:
+                    assert proj_eeg_latent is not None, "EEG latent is not initialized"
+
                 assert self.prior is not None, "Prior is not initialized"
 
                 high_recon_image_latent = batch["high_recon_image_latent"].to(device, dtype=dtype)
@@ -883,7 +902,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         if stage == "val":
             stage = "test"
 
-        if self.config.do_align:
+        if self.config.do_align or self.config.prior_debug_mode:
             align_image_latent = self._get_batch_from_cache(
                 img_paths, "align", self.config.align_target_model, stage
             )
@@ -942,18 +961,18 @@ class NICEModel(EEGAlignmentModel):
             )
 
         
-        self.eeg_encoder = EEGEncoder(config.eeg_config)
-        self.eeg_projector = LatentProjector(
+        self.eeg_encoder: EEGEncoder | None = EEGEncoder(config.eeg_config) if not config.prior_debug_mode else None
+        self.eeg_projector: LatentProjector | None = LatentProjector(
             embed_dim=config.eeg_latent_dim,
             proj_dim=config.project_dim,
-        )
-        
-        self.align_img_projector = (
+        ) if not config.prior_debug_mode else None
+
+        self.align_img_projector: LatentProjector | None = (
             LatentProjector(
                 embed_dim=config.img_latent_dim,
                 proj_dim=config.project_dim,
             )
-            if config.project_image
+            if config.project_image and not config.prior_debug_mode
             else None
         )
 
@@ -962,13 +981,17 @@ class NICEModel(EEGAlignmentModel):
             for module in modules_to_compile:
                 match module:
                     case "eeg_encoder":
-                        self.eeg_encoder = torch.compile(self.eeg_encoder)
+                        if self.eeg_encoder is not None:
+                            self.eeg_encoder = cast(EEGEncoder, torch.compile(self.eeg_encoder))
                     case "eeg_projector":
-                        self.eeg_projector = torch.compile(self.eeg_projector)
+                        if self.eeg_projector is not None:
+                            self.eeg_projector = cast(LatentProjector, torch.compile(self.eeg_projector))
                     case "align_img_projector":
-                        self.align_img_projector = torch.compile(self.align_img_projector)
+                        if self.align_img_projector is not None:
+                            self.align_img_projector = cast(LatentProjector, torch.compile(self.align_img_projector))
                     case "prior":
-                        self.prior = cast(BrainDiffusionPrior, torch.compile(self.prior))
+                        if self.prior is not None:
+                            self.prior = cast(BrainDiffusionPrior, torch.compile(self.prior))
                     case _:
                         raise ValueError(f"Unknown module to compile: {module}")
 
@@ -999,12 +1022,16 @@ class NICEModel(EEGAlignmentModel):
             self.eeg_encoder.parameters(),
             lr=self.config.encoder_lr,
             betas=self.config.betas,
-        )
+        ) if self.eeg_encoder is not None else None
 
-        projector_params = [
-            {"params": self.eeg_projector.parameters(), "lr": self.config.projector_lr},
-            {"params": [self.temperature], "lr": self.config.projector_lr},
-        ]
+        projector_params = []
+
+        if self.eeg_projector is not None:
+            projector_params.append(
+                {"params": self.eeg_projector.parameters(), "lr": self.config.projector_lr}
+            )
+        if self.temperature is not None:
+            projector_params.append({"params": [self.temperature], "lr": self.config.projector_lr})
 
         if self.align_img_projector is not None:
             projector_params.append(
@@ -1014,16 +1041,22 @@ class NICEModel(EEGAlignmentModel):
                 }
             )
 
-        projector_optimizer = torch.optim.Adam(
-            projector_params,
+        if projector_params:
+            projector_optimizer = torch.optim.Adam(
+                projector_params,
+                betas=self.config.betas,
+            )
+        else:
+            projector_optimizer = None
+
+        if self.prior is not None:
+            prior_optimizer = torch.optim.Adam(
+                self.prior.parameters(),
+                lr=self.config.prior_lr,
             betas=self.config.betas,
         )
-
-        prior_optimizer = torch.optim.Adam(
-            self.prior.parameters(),
-            lr=self.config.prior_lr,
-            betas=self.config.betas,
-        ) if self.prior is not None else None
+        else:
+            prior_optimizer = None
 
         encoder_schedulers = []
         projector_schedulers = []
@@ -1033,7 +1066,7 @@ class NICEModel(EEGAlignmentModel):
         encoder_milestones = []
         prior_milestones = []
 
-        if self.config.encoder_warmup_epochs > 0:
+        if self.config.encoder_warmup_epochs > 0 and encoder_optimizer is not None:
             encoder_schedulers.append(
                 torch.optim.lr_scheduler.LinearLR(
                     encoder_optimizer,
@@ -1043,7 +1076,7 @@ class NICEModel(EEGAlignmentModel):
             )
             encoder_milestones.append(self.config.encoder_warmup_epochs)
 
-        if self.config.projector_warmup_epochs > 0:
+        if self.config.projector_warmup_epochs > 0 and projector_optimizer is not None:
             projector_schedulers.append(
                 torch.optim.lr_scheduler.LinearLR(
                     projector_optimizer,
@@ -1066,18 +1099,20 @@ class NICEModel(EEGAlignmentModel):
 
         match self.config.lr_scheduler:
             case "none":
-                encoder_schedulers.append(
-                    torch.optim.lr_scheduler.ConstantLR(
-                        encoder_optimizer,
-                        factor=1.0,
+                if encoder_optimizer is not None:
+                    encoder_schedulers.append(
+                        torch.optim.lr_scheduler.ConstantLR(
+                            encoder_optimizer,
+                            factor=1.0,
+                        )
                     )
-                )
-                projector_schedulers.append(
-                    torch.optim.lr_scheduler.ConstantLR(
-                        projector_optimizer,
-                        factor=1.0,
+                if projector_optimizer is not None:
+                    projector_schedulers.append(
+                        torch.optim.lr_scheduler.ConstantLR(
+                            projector_optimizer,
+                            factor=1.0,
+                        )
                     )
-                )
                 if prior_optimizer is not None:
                     prior_schedulers.append(
                         torch.optim.lr_scheduler.ConstantLR(
@@ -1086,20 +1121,22 @@ class NICEModel(EEGAlignmentModel):
                         )
                     )
             case "cosine_anneal":
-                encoder_schedulers.append(
-                    torch.optim.lr_scheduler.CosineAnnealingLR(
-                        encoder_optimizer,
-                        T_max=self.config.max_epochs,
-                        eta_min=self.config.encoder_min_lr,
+                if encoder_optimizer is not None:
+                    encoder_schedulers.append(
+                        torch.optim.lr_scheduler.CosineAnnealingLR(
+                            encoder_optimizer,
+                            T_max=self.config.max_epochs,
+                            eta_min=self.config.encoder_min_lr,
+                        )
                     )
-                )
-                projector_schedulers.append(
-                    torch.optim.lr_scheduler.CosineAnnealingLR(
-                        projector_optimizer,
-                        T_max=self.config.max_epochs,
-                        eta_min=self.config.projector_min_lr,
+                if projector_optimizer is not None:
+                    projector_schedulers.append(
+                        torch.optim.lr_scheduler.CosineAnnealingLR(
+                            projector_optimizer,
+                            T_max=self.config.max_epochs,
+                            eta_min=self.config.projector_min_lr,
+                        )
                     )
-                )
                 if prior_optimizer is not None:
                     prior_schedulers.append(
                         torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -1111,16 +1148,23 @@ class NICEModel(EEGAlignmentModel):
             case _:
                 raise ValueError(f"Unknown lr_scheduler: {self.config.lr_scheduler}")
 
-        encoder_scheduler = torch.optim.lr_scheduler.SequentialLR(
-            encoder_optimizer,
-            schedulers=encoder_schedulers,
-            milestones=encoder_milestones,
-        )
-        projector_scheduler = torch.optim.lr_scheduler.SequentialLR(
-            projector_optimizer,
-            schedulers=projector_schedulers,
-            milestones=projector_milestones,
-        )
+        if encoder_optimizer is not None:
+            encoder_scheduler = torch.optim.lr_scheduler.SequentialLR(
+                encoder_optimizer,
+                schedulers=encoder_schedulers,
+                milestones=encoder_milestones,
+            )
+        else:
+            encoder_scheduler = None
+
+        if projector_optimizer is not None:
+            projector_scheduler = torch.optim.lr_scheduler.SequentialLR(
+                projector_optimizer,
+                schedulers=projector_schedulers,
+                milestones=projector_milestones,
+            )
+        else:
+            projector_scheduler = None
 
         if prior_optimizer is not None:
             prior_scheduler = (
@@ -1133,29 +1177,31 @@ class NICEModel(EEGAlignmentModel):
         else:
             prior_scheduler = None
 
-        optimizer_configs = [
-            {
+        optimizer_configs = []
+        
+        if encoder_optimizer is not None:
+            optimizer_configs.append({
                 "optimizer": encoder_optimizer,
                 "lr_scheduler": encoder_scheduler,
                 "interval": "step",
                 "frequency": 1,
-            },
-            {
+            })
+            
+        if projector_optimizer is not None:
+            optimizer_configs.append({
                 "optimizer": projector_optimizer,
                 "lr_scheduler": projector_scheduler,
                 "interval": "step",
                 "frequency": 1,
-            }
-        ]
+            })
+            
         if prior_optimizer is not None:
-            optimizer_configs.append(
-                {
-                    "optimizer": prior_optimizer,
-                    "lr_scheduler": prior_scheduler,
-                    "interval": "step",
-                    "frequency": 1,
-                }
-            )
+            optimizer_configs.append({
+                "optimizer": prior_optimizer,
+                "lr_scheduler": prior_scheduler,
+                "interval": "step",
+                "frequency": 1,
+            })
 
         return optimizer_configs
 

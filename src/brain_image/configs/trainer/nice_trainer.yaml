@@ -8,6 +8,9 @@ num_epochs: 100
 compile_model: true
 init_weights: true
 
+precision: 32 #16
+dtype: "float32"
+
 # Logging and checkpointing
 log_dir: logs
 checkpoint_dir: null
@@ -17,7 +20,7 @@ checkpoint_monitor_mode: "min"
 checkpoint_monitor_early_stop: 10
 
 overfit_batches: 0
-precision: 16
+
 val_check_interval: 1.0
 log_every_n_steps: 100
 enable_progress_bar: true
