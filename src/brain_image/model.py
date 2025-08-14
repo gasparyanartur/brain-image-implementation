@@ -469,13 +469,8 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
 
         if config.do_high_recon:
-            # TODO: Add diffusion prior config to these configs
-            prior_net = DiffusionPriorNetwork(
-                dim=config.project_dim,
-            )
-            self.prior = BrainDiffusionPrior(
-                net=prior_net,
-                image_embed_dim=config.project_dim,
+            self.prior = BrainDiffusionPrior.from_pretrained(
+                dtype=dtype,
             )
         elif config.do_low_recon:
             raise ValueError("Cannot do low level reconstruction in without high level reconstruction")

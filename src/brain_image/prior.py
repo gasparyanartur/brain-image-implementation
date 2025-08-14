@@ -1,9 +1,13 @@
+import json
 import logging
+from pathlib import Path
 import random
 
 from typing import Literal, cast
 from PIL.Image import Image
 
+from regex import P
+import requests
 import tqdm
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
@@ -19,7 +23,10 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from dalle2_pytorch import DiffusionPrior
+from dalle2_pytorch.train_configs import DiffusionPriorNetworkConfig
 from dalle2_pytorch.dalle2_pytorch import CausalTransformer, SinusoidalPosEmb, MLP
+
+from brain_image.utils import DEVICE, DTYPE
 
 
 class DiffusionPriorNetwork(nn.Module):
@@ -36,7 +43,6 @@ class DiffusionPriorNetwork(nn.Module):
         self_cond: bool = False,
         depth: int = 6,
         num_output_tokens: int = 256,
-        causal_transformer_kwargs: dict = {},
         **kwargs,
     ):
         super().__init__()
@@ -80,7 +86,7 @@ class DiffusionPriorNetwork(nn.Module):
 
         self.learned_query = nn.Parameter(torch.randn(dim))
         self.causal_transformer = CausalTransformer(
-            dim=dim, depth=depth, **causal_transformer_kwargs
+            dim=dim, depth=depth, **kwargs
         )
 
         # dalle1 learned padding strategy
@@ -269,6 +275,86 @@ class BrainDiffusionPrior(DiffusionPrior):
         self.net = net
         self.image_embed_dim = image_embed_dim
 
+    @staticmethod
+    def from_pretrained(
+        prior_config_path: str | Path = Path("models/prior_config.json"),
+        prior_checkpoint_path: str | Path = Path("models/prior_checkpoint.pt"),
+        device: torch.device = DEVICE,
+        dtype: torch.dtype = DTYPE,
+        download_if_missing: bool = True,
+        prior_config_url: str = "https://huggingface.co/nousr/conditioned-prior/raw/main/vit-l-14/aesthetic/prior_config.json",
+        prior_checkpoint_url: str = "https://huggingface.co/nousr/conditioned-prior/resolve/main/vit-l-14/aesthetic/best.pth",
+        net_kwargs: dict = {},
+        prior_kwargs: dict = {},
+        max_text_len: int = 256,
+        **kwargs,
+    ):
+        prior_config_path = Path(prior_config_path)
+        prior_checkpoint_path = Path(prior_checkpoint_path)
+
+        logging.info(f"Loading prior network config from {prior_config_path}")
+
+        if download_if_missing and not prior_config_path.exists():
+            logging.info(f"Could not find prior network config at {prior_config_path}. Downloading from {prior_config_url}...")
+            prior_config_path.parent.mkdir(parents=True, exist_ok=True)
+            response = requests.get(
+                prior_config_url,
+                allow_redirects=True,
+            )
+            response.raise_for_status()
+
+            logging.info(f"Saving downloaded config to {prior_config_path}")
+            with open(prior_config_path, "w") as f:
+                json.dump(response.json(), f)
+
+        if download_if_missing and not prior_checkpoint_path.exists():
+            logging.info(f"Could not find prior network checkpoint at {prior_checkpoint_path}. Downloading from {prior_checkpoint_url}...")
+            prior_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+
+            response = requests.get(
+                prior_checkpoint_url,
+                allow_redirects=True,
+                stream=True,
+            )
+            response.raise_for_status()
+            with open(prior_checkpoint_path, "wb") as f, tqdm.tqdm(
+                desc="Downloading prior network checkpoint",
+                total=int(response.headers.get("content-length", 0)),
+                unit="iB",
+                unit_scale=True,
+                unit_divisor=1024,
+            ) as pbar:
+                for chunk in response.iter_content(chunk_size=1024):
+                    size = f.write(chunk)
+                    pbar.update(size)
+
+        with open(prior_config_path, "r") as f:
+            config = json.load(f)
+
+        prior_config = config.pop("prior")
+        prior_config["condition_on_text_encodings"] = False
+
+        net_config = prior_config.pop("net")
+        prior_config.pop("clip")
+
+        prior_config.update(prior_kwargs)
+        net_config["max_text_len"] = max_text_len
+        net_config.update(net_kwargs)
+    
+        net_config = DiffusionPriorNetworkConfig(**net_config).model_dump()  # Validate configs
+        net = DiffusionPriorNetwork(**net_config)
+
+        # From https://github.com/MedARC-AI/fMRI-reconstruction-NSD/blob/main/src/models.py#L390:
+        #   Note these keys will be missing (maybe due to an update to the code since training)
+        #   "net.null_text_encodings", "net.null_text_embeds", "net.null_image_embed"
+        #   I don't think these get used if `cond_drop_prob = 0` though (which is the default here)
+        prior =  BrainDiffusionPrior(net=net, clip=None, **prior_config).to(device, dtype)
+
+        prior_checkpoint = torch.load(prior_checkpoint_path, map_location=device)
+        prior.load_state_dict(prior_checkpoint, strict=False)
+
+        return prior
+
     @torch.no_grad()
     def p_sample(
         self,
@@ -321,7 +407,7 @@ class BrainDiffusionPrior(DiffusionPrior):
         x_start = None  # for self-conditioning
 
         if self.init_image_embed_l2norm:
-            image_embed = image_embed.norm(dim=-1) * cast(float, self.image_embed_scale)
+            image_embed = image_embed.norm(dim=-1, p=2) * cast(float, self.image_embed_scale)
 
         for i in tqdm.tqdm(
             reversed(range(0, self.noise_scheduler.num_timesteps)),
