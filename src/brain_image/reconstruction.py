@@ -21,6 +21,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_image_variat
 )
 
 from brain_image.configs import get_device
+from brain_image.utils import DTYPE
 
 
 class ReconstructionPipeline:
@@ -74,7 +75,7 @@ class ReconstructionPipeline:
         cls,
         model_id: str = "lambdalabs/sd-image-variations-diffusers",
         device: torch.device = get_device(),
-        dtype: torch.dtype = torch.float16,
+        dtype: torch.dtype = DTYPE,
         revision: str = "v2.0",
         cond_image_preprocessor: Callable | None = None,
         low_level_image_preprocessor: Callable | None = None,
@@ -158,7 +159,7 @@ class ReconstructionPipeline:
         conditioning_latent: torch.Tensor,  # <batch_size, 768>
         low_image_latent: torch.Tensor | None = None,  # <batch_size, 4, 64, 64>
         guidance_scale: float = 7.5,
-        num_inference_steps: int = 50,
+        num_inference_steps: int = 25,
         noise_strength: float = 1.0,
         device: torch.device = get_device(),
         seed: int = 0,

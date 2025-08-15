@@ -32,7 +32,7 @@
                 "model.do_high_recon=true",
                 "dataset.batch_size=32",
                 "dataset.limit_train_size=0.01",
-                "trainer.compile_model=false",
+                "trainer.compile_model=true",
                 "dataset.num_workers=12"
             ]
         }

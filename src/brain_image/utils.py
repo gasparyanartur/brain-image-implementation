@@ -41,7 +41,7 @@ else:
 if "DTYPE" in os.environ:
     DTYPE = get_dtype(os.environ["DTYPE"])
 else:
-    DTYPE = torch.float16
+    DTYPE = torch.float32
 
 
 def update_config_with_nested_key(

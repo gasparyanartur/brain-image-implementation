@@ -35,7 +35,8 @@ class TrainConfig(BaseConfig):
     checkpoint_monitor_early_stop: int = 10
 
     overfit_batches: int = 0
-    precision: Literal[16, 32, 64] = 16
+    dtype: Literal["float16", "float32"] = "float32"
+
     val_check_interval: float = 1.0
     log_every_n_steps: int = 100
     enable_progress_bar: bool = True
@@ -65,7 +66,6 @@ class NICETrainerConfig(TrainConfig):
     # NICE-specific training settings
     compile_model: bool = True
     init_weights: bool = True
-    dtype: str = "float32"
     cache_dir: Path = Path("cache/tensorcache")
     preload_latents: bool = True
 
@@ -141,7 +141,7 @@ class Trainer:
             )
             loggers.append(wandb_logger)
 
-        precision = "bf16-mixed" if self.config.precision == 16 else "32-true"
+        precision = "bf16-mixed" if self.config.dtype == "float16" else "32-true"
         accelerator = self.config.accelerator or "auto"
 
         return pl.Trainer(
