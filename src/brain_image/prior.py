@@ -398,9 +398,7 @@ class BrainDiffusionPrior(DiffusionPrior):
         device = cast(torch.device, self.device)
 
         if brain_embedding is not None:
-            brain_embedding.to(dtype)
-            text_cond = {**text_cond, "text_embed": brain_embedding}
-
+            text_cond = {**text_cond, "text_embed": brain_embedding.to(dtype)}
 
         image_embed = torch.randn(shape, device=device, dtype=dtype, generator=generator)
 

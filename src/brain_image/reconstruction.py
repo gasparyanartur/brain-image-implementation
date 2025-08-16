@@ -15,6 +15,7 @@ from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.image_processor import VaeImageProcessor
+import tqdm
 from transformers import CLIPImageProcessor
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_image_variation import (
     StableDiffusionImageVariationPipeline,
@@ -34,7 +35,7 @@ class ReconstructionPipeline:
         image_processor: VaeImageProcessor | None = None,
         cond_image_preprocessor: Callable | None = None,
         low_level_image_preprocessor: Callable | None = None,
-        dtype: torch.dtype = torch.float16,
+        dtype: torch.dtype = DTYPE,
         **kwargs: dict,
     ):
         self.unet = unet
@@ -162,6 +163,7 @@ class ReconstructionPipeline:
         num_inference_steps: int = 25,
         noise_strength: float = 1.0,
         device: torch.device = get_device(),
+        progress_bar: bool = False,
         seed: int = 0,
         backend: Literal[
             "stable_diffusion", "versatile_diffusion"
@@ -233,7 +235,7 @@ class ReconstructionPipeline:
             conditioning_latent = torch.cat([uncond_latent, conditioning_latent])
 
         # Denoising Loop
-        for i, t in enumerate(timesteps):
+        for i, t in enumerate(tqdm.tqdm(timesteps, disable=not progress_bar, desc="Reconstructing Latents")):
             latent_model_input = (
                 torch.cat([latents] * 2) if do_classifier_free_guidance else latents
             )

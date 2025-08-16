@@ -39,7 +39,7 @@ import dreamsim
 from dreamsim.model import PerceptualModel
 
 from brain_image.reconstruction import ReconstructionPipeline
-from brain_image.utils import get_dtype
+from brain_image.utils import DTYPE, get_dtype
 from brain_image.prior import BrainDiffusionPrior, DiffusionPriorNetwork
 
 task_type_options = ["align", "recon"]
@@ -122,7 +122,7 @@ def load_image_encoder(
     models_path: Path,
     download_weights: bool = True,
     device: str | torch.device | None = None,
-    dtype: torch.dtype = torch.float16,
+    dtype: torch.dtype = DTYPE,
     img_size: tuple[int, int] = (224, 224),
     compile: bool = True,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
@@ -420,7 +420,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         config: EEGAlignmentConfig | dict[str, Any],
         dataset_config: EEGDatasetConfig | dict[str, Any],
         tensor_cache: TensorCache,
-        dtype: torch.dtype = torch.float16,
+        dtype: torch.dtype = DTYPE,
         init_weights: bool = True,
         preload_latents: bool = True,
         **kwargs,
@@ -617,6 +617,8 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         raise NotImplementedError
 
     def training_step(self, batch, batch_idx):
+        if self.prior is not None:
+            self.prior.train()
         
         optimizers = self.optimizers()
         if not isinstance(optimizers, list):
@@ -654,36 +656,74 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         self, batch, batch_idx
     ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
         
+        if self.prior is not None:
+            self.prior.eval()
+
         dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
         device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
+
+        
 
         with torch.autocast(device_type=device.type, dtype=dtype):
             loss, outputs, metrics = self.run_step(batch, batch_idx, "val")
 
-            if batch_idx == self.num_val_batches - 1:
-                self.evaluate_reconstructions(batch, batch_idx, "val")
+        if batch_idx == 0:
+            self.evaluate_reconstructions(batch, batch_idx, "val")
 
         return loss, outputs, metrics
     
+    def test_step(
+        self, batch, batch_idx
+    ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
+        if self.prior is not None:
+            self.prior.eval()
+
+        dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
+        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
+
+        with torch.autocast(device_type=device.type, dtype=dtype):
+            loss, outputs, metrics = self.run_step(batch, batch_idx, "test")
+
+        if batch_idx == 0:
+            self.evaluate_reconstructions(batch, batch_idx, "test")
+
+        return loss, outputs, metrics
+    
+
     @torch.no_grad()
     def evaluate_reconstructions(self, batch, batch_idx, stage: Literal["val", "test"], log_images: bool = True, num_reconstructions: int = 3):
-        reconstructions = self.get_reconstructions(batch, batch_idx, stage, num_reconstructions=num_reconstructions)
-        if reconstructions is None:
-            return
+        reconstructions, target_latent, target_imgs = self.get_reconstructions(batch, batch_idx, stage, num_reconstructions=num_reconstructions)
                     
         if log_images:
             wandb_logger = self.get_wandb_logger()
             if wandb_logger is not None:
-                wandb_logger.log_image(
-                key=f"{stage}_recon",
-                images=[recon.detach().cpu().float() for recon in reconstructions],
-            )
+                if reconstructions is not None:
+                    wandb_logger.log_image(
+                        key=f"{stage}_recon",
+                        images=[recon.detach().cpu().float() for recon in reconstructions],
+                    )
+                if target_latent is not None:
+                    wandb_logger.log_image(
+                        key=f"{stage}_target_latent",
+                        images=[latent.detach().cpu().float() for latent in target_latent],
+                    )
+                if target_imgs is not None:
+                    wandb_logger.log_image(
+                        key=f"{stage}_target_imgs",
+                        images=[img.detach().cpu().float() for img in target_imgs],
+                    )
+
+        if reconstructions is None or target_latent is None or target_imgs is None:
+            return
 
         image_paths = [Path(path) for path in batch["img_path"][:num_reconstructions]]
         images = batch_load_images(image_paths).to(reconstructions.device, dtype=reconstructions.dtype)
 
         lpips_score = self._get_lpips_score(reconstructions, images)
-        self.log(f"{stage}_recon_lpips", lpips_score, prog_bar=True, on_step=False, on_epoch=True)
+        recon_l2 = torch.nn.functional.mse_loss(reconstructions, target_imgs)
+
+        self.log(f"{stage}_recon_lpips", lpips_score, prog_bar=False, on_step=False, on_epoch=True)
+        self.log(f"{stage}_recon_l2", recon_l2, prog_bar=False, on_step=False, on_epoch=True)
 
     @torch.no_grad()
     def _get_lpips_score(self, reconstructions: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
@@ -700,20 +740,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
         return lpips(reconstructions, images)
 
-    def test_step(
-        self, batch, batch_idx
-    ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
-        dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
-        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
-
-        with torch.autocast(device_type=device.type, dtype=dtype):
-            loss, outputs, metrics = self.run_step(batch, batch_idx, "test")
-
-            if batch_idx == self.num_test_batches - 1:
-                self.evaluate_reconstructions(batch, batch_idx, "test")
-
-        return loss, outputs, metrics
-    
+   
     def get_wandb_logger(self) -> WandbLogger | None:
         for logger in self.loggers:
             if isinstance(logger, WandbLogger):
@@ -721,10 +748,14 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         return None
 
 
-    @torch.no_grad()
-    def get_reconstructions(self, batch, batch_idx, stage: Literal["val", "test"], num_reconstructions: int = 3) -> torch.Tensor | None:
+    @torch.no_grad() 
+    def get_reconstructions(self, batch, batch_idx, stage: Literal["val", "test"], num_reconstructions: int = 3) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+        # Imgs Reconstructed: Conditioning on Aligned Brain Latent, Predicting Target Latent with Prior
+        # Target Latent: Conditioning on Target Latent, Predicting Target Latent with Prior (Does prior do anything with target?)
+        # Target Imgs: Conditioning on Target Latent, Skipping prior, what does perfect reconstruction look like?
+
         if self.prior is None:
-            return None
+            return None, None, None
 
         batch_size = num_reconstructions        
 
@@ -738,13 +769,25 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             eeg_embed = self.get_brain_encoder()(eeg_data)
             eeg_proj = self.get_brain_projector()(eeg_embed)
 
-        prior_pred = self.prior.p_sample_loop_ddpm(torch.Size([batch_size, self.config.img_latent_dim]), brain_embedding=eeg_proj, dtype=dtype)
+        target_latent = batch["high_recon_image_latent"][:batch_size].to(device, dtype=dtype)
+        prior_cond = torch.cat([eeg_proj, target_latent], dim=0)
+        #prior_cond = eeg_proj
+
+        prior_pred = self.prior.p_sample_loop_ddpm(torch.Size([len(prior_cond), self.config.img_latent_dim]), brain_embedding=prior_cond, dtype=dtype, progress_bar=True)
+        conditioning = torch.cat([prior_pred, target_latent], dim=0)
+        #conditioning = prior_pred
 
         pipe = ReconstructionPipeline.from_stable_diffusion(dtype=dtype, device=device)
-        imgs_reconstructed = pipe.reconstruct_latents(prior_pred)
+        reconstruction = pipe.reconstruct_latents(conditioning, progress_bar=True)
         del pipe
-
-        return imgs_reconstructed
+ 
+        #imgs_reconstructed = None
+        #target_imgs = None
+        #target_latent = reconstruction
+        #imgs_reconstructed = reconstruction
+        #imgs_reconstructed, target_latent = torch.chunk(reconstruction, 2, dim=0)
+        imgs_reconstructed, target_latent, target_imgs = torch.chunk(reconstruction, 3, dim=0)
+        return imgs_reconstructed, target_latent, target_imgs
 
 
     def run_step(
@@ -944,7 +987,7 @@ class NICEModel(EEGAlignmentModel):
         modules_to_compile: list[str] = ["eeg_encoder", "eeg_projector", "align_img_projector", "prior"],
         cache_dir: Path | None = None,
         preload_latents: bool = True,
-        dtype: torch.dtype = torch.float16,
+        dtype: torch.dtype = DTYPE,
         init_weights: bool = True,
     ):
         super(NICEModel, self).__init__(
@@ -984,7 +1027,7 @@ class NICEModel(EEGAlignmentModel):
 
         if compile:
             compile_kwargs = {
-                "fullgraph": True,
+                
             }
 
             logging.info(f"Compiling model with kwargs: {compile_kwargs}")
