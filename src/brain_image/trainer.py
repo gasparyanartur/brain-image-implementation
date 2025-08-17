@@ -30,7 +30,7 @@ class TrainConfig(BaseConfig):
     log_dir: Path = Path("logs")
     checkpoint_dir: Path | None = None
     enable_barebones: bool = False
-    checkpoint_monitor: str = "val_top1_acc"
+    checkpoint_monitor: str = "VAL__loss"
     checkpoint_monitor_mode: Literal["min", "max"] = "max"
     checkpoint_monitor_early_stop: int = 10
 
@@ -88,7 +88,6 @@ class Trainer:
         if self.config.save_checkpoints:
             checkpoint_callback = ModelCheckpoint(
                 monitor=self.config.checkpoint_monitor,
-                # dirpath=self.config.checkpoint_dir,
                 filename=f"{self.config.run_name}-{{epoch:02d}}-{{{self.config.checkpoint_monitor.replace('/', '_')}:.4f}}",
                 save_top_k=self.config.save_top_k,
                 mode=self.config.checkpoint_monitor_mode,
@@ -235,20 +234,22 @@ class Trainer:
         return predictions or []
 
     def save_checkpoint(self, filepath: Path):
-        """Save model checkpoint manually."""
         self.pl_trainer.save_checkpoint(str(filepath))
         logging.info(f"Saved checkpoint to {filepath}")
 
     def load_checkpoint(self, filepath: Path):
-        """Load model from checkpoint."""
-        # Load the checkpoint
-        checkpoint = torch.load(filepath, map_location=self.config.accelerator)
+        if self.config.accelerator is None or self.config.accelerator == "auto":
+            map_location = "cpu"
+        elif self.config.accelerator in ["cpu", "gpu", "cuda"]:
+            map_location = "cuda"
+        else:   # Assume it's already a valid device string (e.g., "cuda:0")
+            map_location = self.config.accelerator
+            
+        checkpoint = torch.load(filepath, map_location=map_location)
 
-        # Load model state
         self.model.load_state_dict(checkpoint["state_dict"])
 
         logging.info(f"Loaded checkpoint from {filepath}")
-
 
 class NICETrainer(Trainer):
     def __init__(

@@ -405,7 +405,7 @@ class BrainDiffusionPrior(DiffusionPrior):
         x_start = None  # for self-conditioning
 
         if self.init_image_embed_l2norm:
-            image_embed = image_embed.norm(dim=-1, p=2) * cast(float, self.image_embed_scale)
+            image_embed = image_embed.norm(dim=-1) * cast(float, self.image_embed_scale)
 
         for i in tqdm.tqdm(
             reversed(range(0, self.noise_scheduler.num_timesteps)),
@@ -414,7 +414,6 @@ class BrainDiffusionPrior(DiffusionPrior):
             disable=not progress_bar,
         ):
             times = torch.full((batch,), i, device=device, dtype=torch.long)
-
 
             self_cond = x_start if self.net.self_cond else None
             image_embed, x_start = self.p_sample(
@@ -460,6 +459,7 @@ class BrainDiffusionPrior(DiffusionPrior):
         )
 
         if self.predict_x_start and self.training_clamp_l2norm:
+            logging.info(f"Clamping pred with image scaling {self.image_embed_scale}")
             pred = self.l2norm_clamp_embed(pred)
 
         if self.predict_v:

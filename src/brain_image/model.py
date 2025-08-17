@@ -5,6 +5,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
+from dataclasses import dataclass
 from functools import cached_property, lru_cache
 import logging
 import os
@@ -191,7 +192,7 @@ def load_image_encoder(
             stride=patch_size,
             load_dir=str(models_path),
             baseline=True,
-            device=device or get_device_str(),   # type: ignore
+            device=device or get_device_str(),  # type: ignore
         )
 
     else:
@@ -199,7 +200,7 @@ def load_image_encoder(
             dreamsim_type=model_type,
             cache_dir=str(models_path),
             normalize_embeds=False,
-            device=device or get_device_str(),   # type: ignore
+            device=device or get_device_str(),  # type: ignore
         )
 
     model = model.to(device=device, dtype=dtype)
@@ -360,18 +361,19 @@ class EEGAlignmentConfig(BaseConfig):
     do_high_recon: bool = False
 
     align_loss_factor: float = 1.0
-    prior_loss_factor: float = 0.01
-    recon_loss_factor: float = 0.01
+    prior_loss_factor: float = 1.0
+    recon_loss_factor: float = 10.0
     project_image: bool = False
 
     eeg_latent_dim: int = 1440
     img_latent_dim: int = 768
     project_dim: int = 768
 
-    prior_debug_mode: bool = False      # If True, will use the target image in the prior and disable alignment
+    prior_debug_mode: bool = (
+        False  # If True, will use the target image in the prior and disable alignment
+    )
 
     temperature_init: float = math.log(1 / 0.07)
-
 
 
 class NICEConfig(EEGAlignmentConfig):
@@ -379,22 +381,28 @@ class NICEConfig(EEGAlignmentConfig):
 
     encoder_lr: float = 1e-3
     projector_lr: float = 1e-3
-    prior_lr: float = 1e-3
+    prior_lr: float = 5e-5
+    embed_adapter_lr: float = 1e-3
+    prior_adapter_lr: float = 1e-3
 
     encoder_min_lr: float = 1e-5
     projector_min_lr: float = 1e-5
-    prior_min_lr: float = 1e-5
+    prior_min_lr: float = 1e-6
+    embed_adapter_min_lr: float = 1e-5
+    prior_adapter_min_lr: float = 1e-5
 
     encoder_warmup_epochs: int = 1
     projector_warmup_epochs: int = 1
     prior_warmup_epochs: int = 1
+    embed_adapter_warmup_epochs: int = 1
+    prior_adapter_warmup_epochs: int = 1
 
     lr_scheduler: Literal["none", "cosine_anneal"] = "cosine_anneal"
     betas: tuple[float, float] = (0.9, 0.999)
 
     max_epochs: int = 100
 
-    warmup_start_frac: float = 0.1
+    warmup_start_frac: float = 0.35
     data_seed: int = 42
 
     @cached_property
@@ -430,8 +438,6 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             False  # Disable automatic optimization, we will handle it manually
         )
 
-
-
         self.params = {
             "config": config,
             "dataset_config": dataset_config,
@@ -466,17 +472,41 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             self._init_normal_weights()
 
         self.prior: BrainDiffusionPrior | None = None
+        self.embed_adapter: nn.Sequential | None = (
+            nn.Sequential(
+                nn.LayerNorm(self.config.img_latent_dim),
+                nn.Linear(self.config.img_latent_dim, self.config.img_latent_dim * 2),
+                nn.GELU(),
+                nn.Linear(self.config.img_latent_dim * 2, self.config.img_latent_dim),
+            )
+            if self.config.do_high_recon
+            else None
+        )
 
+        self.prior_adapter: nn.Sequential | None = (
+            nn.Sequential(
+                nn.LayerNorm(self.config.img_latent_dim),
+                nn.Linear(self.config.img_latent_dim, self.config.img_latent_dim * 2),
+                nn.GELU(),
+                nn.Linear(self.config.img_latent_dim * 2, self.config.img_latent_dim),
+            )
+            if self.config.do_high_recon
+            else None
+        )
 
-        if config.do_high_recon:
+        if self.config.do_high_recon:
             self.prior = BrainDiffusionPrior.from_pretrained(
                 dtype=dtype,
             )
-        elif config.do_low_recon:
-            raise ValueError("Cannot do low level reconstruction in without high level reconstruction")
+        elif self.config.do_low_recon:
+            raise ValueError(
+                "Cannot do low level reconstruction in without high level reconstruction"
+            )
 
         if preload_latents:
             self._preload_latents()
+
+        self.learning_rate_options: list[dict[str, Any]] = []
 
     def _preload_latents(self, parallel: bool = True):
         def preload_latent(path: Path, split: Literal["train", "val", "test"]):
@@ -504,7 +534,9 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
         if parallel:
             with ThreadPoolExecutor() as executor:
-                logging.info(f"Preloading latents in parallel with {executor._max_workers} workers")
+                logging.info(
+                    f"Preloading latents in parallel with {executor._max_workers} workers"
+                )
                 outs = executor.map(preload_latent, *zip(*paths))
                 num_items = sum(1 for _ in outs)
                 logging.info(f"Preloaded {num_items} latents")
@@ -553,12 +585,14 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         return len(self.data_module.test_dataloader())
 
     @classmethod
-    def load_checkpoint(cls, checkpoint_path: str | Path, undo_compile: bool = False, **kwargs):
+    def load_checkpoint(
+        cls, checkpoint_path: str | Path, undo_compile: bool = False, **kwargs
+    ):
         checkpoint_path = Path(checkpoint_path)
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         if not undo_compile:
             return super().load_from_checkpoint(checkpoint_path, **kwargs)
-        
+
         state_dict = checkpoint.pop("state_dict")
 
         for key in list(state_dict.keys()):
@@ -571,7 +605,9 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         # Save to temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as temp_file:
             torch.save(checkpoint, temp_file.name)
-            return cls.load_checkpoint(temp_file.name, undo_compile=False, compile=False, **kwargs)
+            return cls.load_checkpoint(
+                temp_file.name, undo_compile=False, compile=False, **kwargs
+            )
 
     @abstractmethod
     def get_similarity(
@@ -619,7 +655,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
     def training_step(self, batch, batch_idx):
         if self.prior is not None:
             self.prior.train()
-        
+
         optimizers = self.optimizers()
         if not isinstance(optimizers, list):
             optimizers = [optimizers]
@@ -628,8 +664,14 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         if not isinstance(schedulers, list):
             schedulers = [schedulers]
 
-        dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
-        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
+        dtype = (
+            self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
+        )
+        device = (
+            self.device
+            if isinstance(self.device, torch.device)
+            else get_device(self.device)
+        )
 
         with torch.autocast(device_type=device.type, dtype=dtype):
             loss, outputs, metrics = self.run_step(batch, batch_idx, "train")
@@ -650,152 +692,72 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
                 scheduler.step()  # type: ignore
 
+            for opt_option in self.learning_rate_options:
+                name = opt_option["name"]
+                lr = opt_option["lr_scheduler"].get_last_lr()[0]
+                self.log(f"LR__{name}", lr, prog_bar=False, on_step=True, on_epoch=False)
+
         return loss
 
     def validation_step(
         self, batch, batch_idx
     ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
-        
+
         if self.prior is not None:
             self.prior.eval()
 
-        dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
-        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
-
-        
+        dtype = (
+            self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
+        )
+        device = (
+            self.device
+            if isinstance(self.device, torch.device)
+            else get_device(self.device)
+        )
 
         with torch.autocast(device_type=device.type, dtype=dtype):
             loss, outputs, metrics = self.run_step(batch, batch_idx, "val")
 
-        if batch_idx == 0:
+        if batch_idx == self.num_val_batches - 1:
             self.evaluate_reconstructions(batch, batch_idx, "val")
 
         return loss, outputs, metrics
-    
+
     def test_step(
         self, batch, batch_idx
     ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
         if self.prior is not None:
             self.prior.eval()
 
-        dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
-        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
+        dtype = (
+            self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
+        )
+        device = (
+            self.device
+            if isinstance(self.device, torch.device)
+            else get_device(self.device)
+        )
 
         with torch.autocast(device_type=device.type, dtype=dtype):
             loss, outputs, metrics = self.run_step(batch, batch_idx, "test")
 
-        if batch_idx == 0:
+        if batch_idx == self.num_test_batches - 1:
             self.evaluate_reconstructions(batch, batch_idx, "test")
 
         return loss, outputs, metrics
-    
-
-    @torch.no_grad()
-    def evaluate_reconstructions(self, batch, batch_idx, stage: Literal["val", "test"], log_images: bool = True, num_reconstructions: int = 3):
-        reconstructions, target_latent, target_imgs = self.get_reconstructions(batch, batch_idx, stage, num_reconstructions=num_reconstructions)
-                    
-        if log_images:
-            wandb_logger = self.get_wandb_logger()
-            if wandb_logger is not None:
-                if reconstructions is not None:
-                    wandb_logger.log_image(
-                        key=f"{stage}_recon",
-                        images=[recon.detach().cpu().float() for recon in reconstructions],
-                    )
-                if target_latent is not None:
-                    wandb_logger.log_image(
-                        key=f"{stage}_target_latent",
-                        images=[latent.detach().cpu().float() for latent in target_latent],
-                    )
-                if target_imgs is not None:
-                    wandb_logger.log_image(
-                        key=f"{stage}_target_imgs",
-                        images=[img.detach().cpu().float() for img in target_imgs],
-                    )
-
-        if reconstructions is None or target_latent is None or target_imgs is None:
-            return
-
-        image_paths = [Path(path) for path in batch["img_path"][:num_reconstructions]]
-        images = batch_load_images(image_paths).to(reconstructions.device, dtype=reconstructions.dtype)
-
-        lpips_score = self._get_lpips_score(reconstructions, images)
-        recon_l2 = torch.nn.functional.mse_loss(reconstructions, target_imgs)
-
-        self.log(f"{stage}_recon_lpips", lpips_score, prog_bar=False, on_step=False, on_epoch=True)
-        self.log(f"{stage}_recon_l2", recon_l2, prog_bar=False, on_step=False, on_epoch=True)
-
-    @torch.no_grad()
-    def _get_lpips_score(self, reconstructions: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
-        lpips = LearnedPerceptualImagePatchSimilarity(net_type='squeeze')
-        lpips.requires_grad_(False)
-        lpips.to(self.device)
-
-        # Prepare images for lpips - Need to be in the [-1, 1] range and same shape as reconstructions
-        reconstructions = reconstructions*2-1
-        images = images/255.0
-        images = torch.nn.functional.interpolate(images, reconstructions.shape[-2:], mode="bicubic")
-        images = torch.clamp(images, min=0, max=1)
-        images = images*2-1
-
-        return lpips(reconstructions, images)
-
-   
-    def get_wandb_logger(self) -> WandbLogger | None:
-        for logger in self.loggers:
-            if isinstance(logger, WandbLogger):
-                return logger
-        return None
-
-
-    @torch.no_grad() 
-    def get_reconstructions(self, batch, batch_idx, stage: Literal["val", "test"], num_reconstructions: int = 3) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
-        # Imgs Reconstructed: Conditioning on Aligned Brain Latent, Predicting Target Latent with Prior
-        # Target Latent: Conditioning on Target Latent, Predicting Target Latent with Prior (Does prior do anything with target?)
-        # Target Imgs: Conditioning on Target Latent, Skipping prior, what does perfect reconstruction look like?
-
-        if self.prior is None:
-            return None, None, None
-
-        batch_size = num_reconstructions        
-
-        dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
-        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
-
-        if self.config.prior_debug_mode:
-            eeg_proj = batch["align_image_latent"][:batch_size].to(device, dtype=dtype)
-        else:
-            eeg_data = batch["eeg_data"][:batch_size].to(device, dtype=dtype)
-            eeg_embed = self.get_brain_encoder()(eeg_data)
-            eeg_proj = self.get_brain_projector()(eeg_embed)
-
-        target_latent = batch["high_recon_image_latent"][:batch_size].to(device, dtype=dtype)
-        prior_cond = torch.cat([eeg_proj, target_latent], dim=0)
-        #prior_cond = eeg_proj
-
-        prior_pred = self.prior.p_sample_loop_ddpm(torch.Size([len(prior_cond), self.config.img_latent_dim]), brain_embedding=prior_cond, dtype=dtype, progress_bar=True)
-        conditioning = torch.cat([prior_pred, target_latent], dim=0)
-        #conditioning = prior_pred
-
-        pipe = ReconstructionPipeline.from_stable_diffusion(dtype=dtype, device=device)
-        reconstruction = pipe.reconstruct_latents(conditioning, progress_bar=True)
-        del pipe
- 
-        #imgs_reconstructed = None
-        #target_imgs = None
-        #target_latent = reconstruction
-        #imgs_reconstructed = reconstruction
-        #imgs_reconstructed, target_latent = torch.chunk(reconstruction, 2, dim=0)
-        imgs_reconstructed, target_latent, target_imgs = torch.chunk(reconstruction, 3, dim=0)
-        return imgs_reconstructed, target_latent, target_imgs
-
 
     def run_step(
         self, batch, batch_idx, stage: Literal["train", "val", "test"]
     ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
         batch = self.prepare_batch(batch, batch_idx, stage)
 
-        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
+        stage_prefix = f"{stage.upper()}__"
+
+        device = (
+            self.device
+            if isinstance(self.device, torch.device)
+            else get_device(self.device)
+        )
 
         with torch.autocast(device_type=device.type):
             if self.eeg_encoder is not None:
@@ -805,19 +767,25 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             else:
                 proj_eeg_latent = None
 
-            loss = torch.zeros((1,), device=device, requires_grad=stage=="train")
+            loss = torch.zeros((1,), device=device, requires_grad=stage == "train")
             metrics = {}
             outputs = {}
 
             on_step = stage == "train"
 
-            with torch.no_grad() if (stage == "val" or stage == "test") else nullcontext():
+            with (
+                torch.no_grad()
+                if (stage == "val" or stage == "test")
+                else nullcontext()
+            ):
                 if self.config.do_align:
                     assert proj_eeg_latent is not None, "EEG latent is not initialized"
                     align_image_latent = batch["align_image_latent"].to(device)
 
                     if self.config.project_image:
-                        align_image_latent = self.get_img_align_projector()(align_image_latent)
+                        align_image_latent = self.get_img_align_projector()(
+                            align_image_latent
+                        )
 
                     align_loss, align_sim = self.get_align_loss(
                         align_image_latent, proj_eeg_latent
@@ -835,7 +803,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                     )
 
                     self.log(
-                        f"{stage}_align_loss",
+                        f"{stage_prefix}align_loss",
                         align_loss,
                         prog_bar=False,
                         on_step=on_step,
@@ -857,71 +825,282 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                         )
 
                         self.log(
-                            f"{stage}_top1_acc",
+                            f"{stage_prefix}top1_acc",
                             top1_acc,
                             prog_bar=True,
                             on_step=on_step,
-                            on_epoch=True,
+                            on_epoch=not on_step,
                         )
                         self.log(
-                            f"{stage}_top3_acc",
+                            f"{stage_prefix}top3_acc",
                             top3_acc,
                             prog_bar=False,
                             on_step=on_step,
-                            on_epoch=True,
+                            on_epoch=not on_step,
                         )
                         self.log(
-                            f"{stage}_top5_acc",
+                            f"{stage_prefix}top5_acc",
                             top5_acc,
                             prog_bar=False,
                             on_step=on_step,
-                            on_epoch=True,
+                            on_epoch=not on_step,
                         )
 
                 if self.config.do_high_recon:
                     if self.config.prior_debug_mode:
                         proj_eeg_latent = batch["align_image_latent"].to(device)
                     else:
-                        assert proj_eeg_latent is not None, "EEG latent is not initialized"
+                        assert (
+                            proj_eeg_latent is not None
+                        ), "EEG latent is not initialized"
 
                     assert self.prior is not None, "Prior is not initialized"
 
-                    high_recon_image_latent = batch["high_recon_image_latent"].to(device)
+                    high_recon_image_latent = cast(
+                        torch.Tensor, batch["high_recon_image_latent"].to(device)
+                    )
+
+                    if self.embed_adapter is not None:
+                        proj_eeg_latent = self.embed_adapter(proj_eeg_latent)
 
                     # Note: We use the projected EEG latent here because the original latent is not same dim as images
                     prior_loss, prior_pred = self.prior(
-                        brain_embedding=proj_eeg_latent,        
-                        image_embedding=high_recon_image_latent,
+                        brain_embedding=proj_eeg_latent,
+                        image_embedding=high_recon_image_latent / high_recon_image_latent.norm(dim=-1, keepdim=True),
                     )
-                    prior_loss = prior_loss * self.config.prior_loss_factor
+
+                    prior_pred = prior_pred / self.prior.image_embed_scale
+
+                    if self.prior_adapter is not None:
+                        prior_pred = self.prior_adapter(prior_pred)
+
+                    prior_loss = (
+                        (
+                            prior_loss
+                            + torch.nn.functional.mse_loss(
+                                prior_pred, high_recon_image_latent
+                            )
+                        )
+                        / 2
+                        * self.config.prior_loss_factor
+                    )
                     loss = loss + prior_loss
 
-                    #recon_loss = torch.nn.functional.mse_loss(high_recon_image_latent, prior_pred)
-                    #recon_loss = recon_loss * self.config.recon_loss_factor
-                    #loss = loss + recon_loss
+                    recon_sim_loss = (
+                        torch.nn.functional.cosine_similarity(
+                            high_recon_image_latent, prior_pred, dim=-1
+                        )
+                        .abs()
+                        .mean()
+                    )
+                    recon_sim_loss = recon_sim_loss * self.config.recon_loss_factor
+                    loss = loss + recon_sim_loss
 
-                    metrics.update({"prior_loss": prior_loss})
+                    with torch.no_grad():
+                        prior_pred_norm = prior_pred.norm(dim=-1).mean()
+                        target_latent_norm = high_recon_image_latent.norm(dim=-1).mean()
+
+                    metrics.update(
+                        {
+                            "prior_loss": prior_loss,
+                            "prior_pred_norm": prior_pred_norm,
+                            "target_latent_norm": target_latent_norm,
+                        }
+                    )
 
                     outputs.update({"prior_pred": prior_pred})
 
                     self.log(
-                        f"{stage}_prior_loss",
+                        f"{stage_prefix}prior_loss",
                         prior_loss,
                         prog_bar=False,
                         on_step=on_step,
-                        on_epoch=True,
+                        on_epoch=not on_step,
+                    )
+                    self.log(
+                        f"{stage_prefix}recon_sim_loss",
+                        recon_sim_loss,
+                        prog_bar=False,
+                        on_step=on_step,
+                        on_epoch=not on_step,
+                    )
+                    self.log(
+                        f"{stage_prefix}prior_pred_norm",
+                        prior_pred_norm,
+                        prog_bar=False,
+                        on_step=on_step,
+                        on_epoch=not on_step,
+                    )
+                    self.log(
+                        f"{stage_prefix}target_latent_norm",
+                        target_latent_norm,
+                        prog_bar=False,
+                        on_step=on_step,
+                        on_epoch=not on_step,
                     )
 
-                    #self.log(
-                    #    f"{stage}_recon_loss",
-                    #    recon_loss,
-                    #    prog_bar=False,
-                    #    on_step=on_step,
-                    #    on_epoch=True,
-                    #)
-            self.log(f"{stage}_loss", loss, prog_bar=True, on_step=on_step, on_epoch=True)
+            self.log(
+                f"{stage_prefix}loss", loss, prog_bar=False, on_step=on_step, on_epoch=not on_step
+            )
 
         return loss, outputs, metrics
+
+
+
+    @torch.no_grad()
+    def evaluate_reconstructions(
+        self,
+        batch,
+        batch_idx,
+        stage: Literal["val", "test"],
+        log_images: bool = True,
+        num_reconstructions: int = 3,
+    ):
+        reconstructions, target_latent, target_imgs = self.get_reconstructions(
+            batch, batch_idx, stage, num_reconstructions=num_reconstructions
+        )
+
+        stage_prefix = f"{stage.upper()}__"
+
+        if log_images:
+            wandb_logger = self.get_wandb_logger()
+            if wandb_logger is not None:
+                if reconstructions is not None:
+                    wandb_logger.log_image(
+                        key=f"{stage_prefix}recon",
+                        images=[
+                            recon.detach().cpu().float() for recon in reconstructions
+                        ],
+                    )
+                if target_latent is not None:
+                    wandb_logger.log_image(
+                        key=f"{stage_prefix}target_latent",
+                        images=[
+                            latent.detach().cpu().float() for latent in target_latent
+                        ],
+                    )
+                if target_imgs is not None:
+                    wandb_logger.log_image(
+                        key=f"{stage_prefix}target_imgs",
+                        images=[img.detach().cpu().float() for img in target_imgs],
+                    )
+
+        if reconstructions is None or target_latent is None or target_imgs is None:
+            return
+
+        image_paths = [Path(path) for path in batch["img_path"][:num_reconstructions]]
+        images = batch_load_images(image_paths).to(
+            reconstructions.device, dtype=reconstructions.dtype
+        )
+
+        lpips_score = self._get_lpips_score(reconstructions, images)
+        recon_l2 = torch.nn.functional.mse_loss(reconstructions, target_imgs)
+
+        self.log(
+            f"{stage_prefix}recon_lpips",
+            lpips_score,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+        )
+        self.log(
+            f"{stage_prefix}recon_l2", recon_l2, prog_bar=False, on_step=False, on_epoch=True
+        )
+
+    @torch.no_grad()
+    def _get_lpips_score(
+        self, reconstructions: torch.Tensor, images: torch.Tensor
+    ) -> torch.Tensor:
+        lpips = LearnedPerceptualImagePatchSimilarity(net_type="squeeze")
+        lpips.requires_grad_(False)
+        lpips.to(self.device)
+
+        # Prepare images for lpips - Need to be in the [-1, 1] range and same shape as reconstructions
+        reconstructions = reconstructions * 2 - 1
+        images = images / 255.0
+        images = torch.nn.functional.interpolate(
+            images, reconstructions.shape[-2:], mode="bicubic"
+        )
+        images = torch.clamp(images, min=0, max=1)
+        images = images * 2 - 1
+
+        return lpips(reconstructions, images)
+
+    def get_wandb_logger(self) -> WandbLogger | None:
+        for logger in self.loggers:
+            if isinstance(logger, WandbLogger):
+                return logger
+        return None
+
+    @torch.no_grad()
+    def get_reconstructions(
+        self,
+        batch,
+        batch_idx,
+        stage: Literal["val", "test"],
+        num_reconstructions: int = 3,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+        # Imgs Reconstructed: Conditioning on Aligned Brain Latent, Predicting Target Latent with Prior
+        # Target Latent: Conditioning on Target Latent, Predicting Target Latent with Prior (Does prior do anything with target?)
+        # Target Imgs: Conditioning on Target Latent, Skipping prior, what does perfect reconstruction look like?
+
+        if self.prior is None:
+            return None, None, None
+
+        batch_size = num_reconstructions
+
+        dtype = (
+            self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
+        )
+        device = (
+            self.device
+            if isinstance(self.device, torch.device)
+            else get_device(self.device)
+        )
+
+        if self.config.prior_debug_mode:
+            eeg_proj = batch["align_image_latent"][:batch_size].to(device, dtype=dtype)
+        else:
+            eeg_data = batch["eeg_data"][:batch_size].to(device, dtype=dtype)
+            eeg_embed = self.get_brain_encoder()(eeg_data)
+            eeg_proj = self.get_brain_projector()(eeg_embed)
+
+        if self.embed_adapter is not None:
+            eeg_proj = self.embed_adapter(eeg_proj)
+
+        target_latent = batch["high_recon_image_latent"][:batch_size].to(
+            device, dtype=dtype
+        )
+        prior_cond = torch.cat([eeg_proj, target_latent], dim=0)
+        # prior_cond = eeg_proj
+
+        prior_pred = self.prior.p_sample_loop(
+            torch.Size([len(prior_cond), self.config.img_latent_dim]),
+            brain_embedding=prior_cond,
+            dtype=dtype,
+            progress_bar=True,
+        )
+
+        if self.prior_adapter is not None:
+            prior_pred = self.prior_adapter(prior_pred)
+
+        conditioning = torch.cat([prior_pred, target_latent], dim=0)
+        # conditioning = prior_pred
+
+        pipe = ReconstructionPipeline.from_stable_diffusion(dtype=dtype, device=device)
+        reconstruction = pipe.reconstruct_latents(conditioning, progress_bar=True)
+        del pipe
+
+        # imgs_reconstructed = None
+        # target_imgs = None
+        # target_latent = reconstruction
+        # imgs_reconstructed = reconstruction
+        # imgs_reconstructed, target_latent = torch.chunk(reconstruction, 2, dim=0)
+        imgs_reconstructed, target_latent, target_imgs = torch.chunk(
+            reconstruction, 3, dim=0
+        )
+        return imgs_reconstructed, target_latent, target_imgs
+
 
     def _get_image_latent_from_cache(
         self, img_path: Path, *model_config: str
@@ -984,7 +1163,14 @@ class NICEModel(EEGAlignmentModel):
         config: NICEConfig | dict[str, Any],
         dataset_config: EEGDatasetConfig | dict[str, Any] = EEGDatasetConfig(),
         compile: bool = True,
-        modules_to_compile: list[str] = ["eeg_encoder", "eeg_projector", "align_img_projector", "prior"],
+        modules_to_compile: list[str] = [
+            "eeg_encoder",
+            "eeg_projector",
+            "align_img_projector",
+            "prior",
+            "embed_adapter",
+            "prior_adapter",
+        ],
         cache_dir: Path | None = None,
         preload_latents: bool = True,
         dtype: torch.dtype = DTYPE,
@@ -1009,12 +1195,17 @@ class NICEModel(EEGAlignmentModel):
                 "Projected dimension must match the image latent dimension if project_image is False"
             )
 
-        
-        self.eeg_encoder: EEGEncoder | None = EEGEncoder(config.eeg_config) if not config.prior_debug_mode else None
-        self.eeg_projector: LatentProjector | None = LatentProjector(
-            embed_dim=config.eeg_latent_dim,
-            proj_dim=config.project_dim,
-        ) if not config.prior_debug_mode else None
+        self.eeg_encoder: EEGEncoder | None = (
+            EEGEncoder(config.eeg_config) if not config.prior_debug_mode else None
+        )
+        self.eeg_projector: LatentProjector | None = (
+            LatentProjector(
+                embed_dim=config.eeg_latent_dim,
+                proj_dim=config.project_dim,
+            )
+            if not config.prior_debug_mode
+            else None
+        )
 
         self.align_img_projector: LatentProjector | None = (
             LatentProjector(
@@ -1026,9 +1217,7 @@ class NICEModel(EEGAlignmentModel):
         )
 
         if compile:
-            compile_kwargs = {
-                
-            }
+            compile_kwargs = {}
 
             logging.info(f"Compiling model with kwargs: {compile_kwargs}")
 
@@ -1046,6 +1235,12 @@ class NICEModel(EEGAlignmentModel):
                     case "prior":
                         if self.prior is not None:
                             self.prior.compile(**compile_kwargs)
+                    case "prior_adapter":
+                        if self.prior_adapter is not None:
+                            self.prior_adapter.compile(**compile_kwargs)
+                    case "embed_adapter":
+                        if self.embed_adapter is not None:
+                            self.embed_adapter.compile(**compile_kwargs)
                     case _:
                         raise ValueError(f"Unknown module to compile: {module}")
 
@@ -1069,195 +1264,120 @@ class NICEModel(EEGAlignmentModel):
         return cast(nn.Module, self.align_img_projector)
 
     def configure_optimizers(self):
-        """Configure optimizers for the model."""
-        # TODO: Refactor
+        @dataclass
+        class OptimizerConfig:
+            name: str
+            model: nn.Module | None
+            lr: float
+            min_lr: float
+            warmup_epochs: int
 
-        encoder_optimizer = torch.optim.Adam(
-            self.eeg_encoder.parameters(),
-            lr=self.config.encoder_lr,
-            betas=self.config.betas,
-        ) if self.eeg_encoder is not None else None
+        optimizer_configs = [
+            OptimizerConfig(
+                name="eeg_encoder",
+                model=self.eeg_encoder,
+                lr=self.config.encoder_lr,
+                min_lr=self.config.encoder_min_lr,
+                warmup_epochs=self.config.encoder_warmup_epochs,
+            ),
+            OptimizerConfig(
+                name="eeg_projector",
+                model=self.eeg_projector,
+                lr=self.config.projector_lr,
+                min_lr=self.config.projector_min_lr,
+                warmup_epochs=self.config.projector_warmup_epochs,
+            ),
+            OptimizerConfig(
+                name="align_img_projector",
+                model=self.align_img_projector,
+                lr=self.config.projector_lr,
+                min_lr=self.config.projector_min_lr,
+                warmup_epochs=self.config.projector_warmup_epochs,
+            ),
+            OptimizerConfig(
+                name="prior",
+                model=self.prior,
+                lr=self.config.prior_lr,
+                min_lr=self.config.prior_min_lr,
+                warmup_epochs=self.config.prior_warmup_epochs,
+            ),
+            OptimizerConfig(
+                name="embed_adapter",
+                model=self.embed_adapter,
+                lr=self.config.embed_adapter_lr,
+                min_lr=self.config.embed_adapter_min_lr,
+                warmup_epochs=self.config.embed_adapter_warmup_epochs,
+            ),
+            OptimizerConfig(
+                name="prior_adapter",
+                model=self.prior_adapter,
+                lr=self.config.prior_adapter_lr,
+                min_lr=self.config.prior_adapter_min_lr,
+                warmup_epochs=self.config.prior_adapter_warmup_epochs,
+            ),
+        ]
+        optimizer_configs = [x for x in optimizer_configs if x.model is not None]
 
-        projector_params = []
-
-        if self.eeg_projector is not None:
-            projector_params.append(
-                {"params": self.eeg_projector.parameters(), "lr": self.config.projector_lr}
+        optimizer_options = []
+        for optimizer_config in optimizer_configs:
+            optimizer = torch.optim.Adam(
+                (
+                    optimizer_config.model.parameters()
+                    if optimizer_config.model is not None
+                    else []
+                ),
+                lr=optimizer_config.lr,
+                betas=self.config.betas,
             )
-        if self.temperature is not None:
-            projector_params.append({"params": [self.temperature], "lr": self.config.projector_lr})
+            schedulers = []
+            milestones = []
 
-        if self.align_img_projector is not None:
-            projector_params.append(
+            if optimizer_config.warmup_epochs > 0:
+                schedulers.append(
+                    torch.optim.lr_scheduler.LinearLR(
+                        optimizer,
+                        start_factor=self.config.warmup_start_frac,
+                        total_iters=optimizer_config.warmup_epochs,
+                    )
+                )
+                milestones.append(optimizer_config.warmup_epochs)
+
+            if self.config.lr_scheduler == "cosine_anneal":
+                schedulers.append(
+                    torch.optim.lr_scheduler.CosineAnnealingLR(
+                        optimizer,
+                        T_max=self.config.max_epochs,
+                        eta_min=optimizer_config.min_lr,
+                    )
+                )
+            elif self.config.lr_scheduler == "none":
+                schedulers.append(
+                    torch.optim.lr_scheduler.ConstantLR(
+                        optimizer,
+                        factor=1.0,
+                    )
+                )
+            else:
+                raise ValueError(f"Unknown lr_scheduler: {self.config.lr_scheduler}")
+
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer,
+                schedulers=schedulers,
+                milestones=milestones,
+            )
+
+            optimizer_options.append(
                 {
-                    "params": self.align_img_projector.parameters(),
-                    "lr": self.config.projector_lr,
+                    "name": optimizer_config.name,
+                    "optimizer": optimizer,
+                    "lr_scheduler": scheduler,
+                    "interval": "step",
+                    "frequency": 1,
                 }
             )
 
-        if projector_params:
-            projector_optimizer = torch.optim.Adam(
-                projector_params,
-                betas=self.config.betas,
-            )
-        else:
-            projector_optimizer = None
-
-        if self.prior is not None:
-            prior_optimizer = torch.optim.Adam(
-                self.prior.parameters(),
-                lr=self.config.prior_lr,
-            betas=self.config.betas,
-        )
-        else:
-            prior_optimizer = None
-
-        encoder_schedulers = []
-        projector_schedulers = []
-        prior_schedulers = []
-
-        projector_milestones = []
-        encoder_milestones = []
-        prior_milestones = []
-
-        if self.config.encoder_warmup_epochs > 0 and encoder_optimizer is not None:
-            encoder_schedulers.append(
-                torch.optim.lr_scheduler.LinearLR(
-                    encoder_optimizer,
-                    start_factor=self.config.warmup_start_frac,
-                    total_iters=self.config.encoder_warmup_epochs,
-                )
-            )
-            encoder_milestones.append(self.config.encoder_warmup_epochs)
-
-        if self.config.projector_warmup_epochs > 0 and projector_optimizer is not None:
-            projector_schedulers.append(
-                torch.optim.lr_scheduler.LinearLR(
-                    projector_optimizer,
-                    start_factor=self.config.warmup_start_frac,
-                    total_iters=self.config.projector_warmup_epochs,
-                )
-            )
-            projector_milestones.append(self.config.projector_warmup_epochs)
-
-        if self.config.prior_warmup_epochs > 0 and self.prior is not None:
-            assert prior_optimizer is not None, "Prior optimizer is not initialized"
-            prior_schedulers.append(
-                torch.optim.lr_scheduler.LinearLR(
-                    prior_optimizer,
-                    start_factor=self.config.warmup_start_frac,
-                    total_iters=self.config.prior_warmup_epochs,
-                )
-            )
-            prior_milestones.append(self.config.prior_warmup_epochs)
-
-        match self.config.lr_scheduler:
-            case "none":
-                if encoder_optimizer is not None:
-                    encoder_schedulers.append(
-                        torch.optim.lr_scheduler.ConstantLR(
-                            encoder_optimizer,
-                            factor=1.0,
-                        )
-                    )
-                if projector_optimizer is not None:
-                    projector_schedulers.append(
-                        torch.optim.lr_scheduler.ConstantLR(
-                            projector_optimizer,
-                            factor=1.0,
-                        )
-                    )
-                if prior_optimizer is not None:
-                    prior_schedulers.append(
-                        torch.optim.lr_scheduler.ConstantLR(
-                            prior_optimizer,
-                            factor=1.0,
-                        )
-                    )
-            case "cosine_anneal":
-                if encoder_optimizer is not None:
-                    encoder_schedulers.append(
-                        torch.optim.lr_scheduler.CosineAnnealingLR(
-                            encoder_optimizer,
-                            T_max=self.config.max_epochs,
-                            eta_min=self.config.encoder_min_lr,
-                        )
-                    )
-                if projector_optimizer is not None:
-                    projector_schedulers.append(
-                        torch.optim.lr_scheduler.CosineAnnealingLR(
-                            projector_optimizer,
-                            T_max=self.config.max_epochs,
-                            eta_min=self.config.projector_min_lr,
-                        )
-                    )
-                if prior_optimizer is not None:
-                    prior_schedulers.append(
-                        torch.optim.lr_scheduler.CosineAnnealingLR(
-                            prior_optimizer,
-                            T_max=self.config.max_epochs,
-                            eta_min=self.config.prior_min_lr,
-                        )
-                    )
-            case _:
-                raise ValueError(f"Unknown lr_scheduler: {self.config.lr_scheduler}")
-
-        if encoder_optimizer is not None:
-            encoder_scheduler = torch.optim.lr_scheduler.SequentialLR(
-                encoder_optimizer,
-                schedulers=encoder_schedulers,
-                milestones=encoder_milestones,
-            )
-        else:
-            encoder_scheduler = None
-
-        if projector_optimizer is not None:
-            projector_scheduler = torch.optim.lr_scheduler.SequentialLR(
-                projector_optimizer,
-                schedulers=projector_schedulers,
-                milestones=projector_milestones,
-            )
-        else:
-            projector_scheduler = None
-
-        if prior_optimizer is not None:
-            prior_scheduler = (
-                torch.optim.lr_scheduler.SequentialLR(
-                    prior_optimizer,
-                    schedulers=prior_schedulers,
-                    milestones=prior_milestones,
-                )
-            )
-        else:
-            prior_scheduler = None
-
-        optimizer_configs = []
-        
-        if encoder_optimizer is not None:
-            optimizer_configs.append({
-                "optimizer": encoder_optimizer,
-                "lr_scheduler": encoder_scheduler,
-                "interval": "step",
-                "frequency": 1,
-            })
-            
-        if projector_optimizer is not None:
-            optimizer_configs.append({
-                "optimizer": projector_optimizer,
-                "lr_scheduler": projector_scheduler,
-                "interval": "step",
-                "frequency": 1,
-            })
-            
-        if prior_optimizer is not None:
-            optimizer_configs.append({
-                "optimizer": prior_optimizer,
-                "lr_scheduler": prior_scheduler,
-                "interval": "step",
-                "frequency": 1,
-            })
-
-        return optimizer_configs
+        self.learning_rate_options = optimizer_options
+        return optimizer_options
 
     def get_similarity(
         self, img_latent: torch.Tensor, eeg_data: torch.Tensor

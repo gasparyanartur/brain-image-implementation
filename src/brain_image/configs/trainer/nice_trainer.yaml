@@ -14,7 +14,7 @@ dtype: "float32"
 log_dir: logs
 checkpoint_dir: null
 enable_barebones: false
-checkpoint_monitor: "val_loss"
+checkpoint_monitor: "VAL__loss"
 checkpoint_monitor_mode: "min"
 checkpoint_monitor_early_stop: 10
 

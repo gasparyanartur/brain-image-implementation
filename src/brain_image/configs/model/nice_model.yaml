@@ -16,22 +16,31 @@ img_latent_dim: 768
 project_image: false
 
 # Learning rate settings
-encoder_lr: 1e-3
-projector_lr: 1e-3
-prior_lr: 1e-3
-
+encoder_lr: 5e-4
 encoder_min_lr: 1e-5
+encoder_warmup_epochs: 1
+
+projector_lr: 5e-4
 projector_min_lr: 1e-5
-prior_min_lr: 1e-5
+projector_warmup_epochs: 1
+
+prior_lr: 5e-5
+prior_min_lr: 1e-6
+prior_warmup_epochs: 2
+
+embed_adapter_lr: 5e-4
+embed_adapter_min_lr: 1e-5
+embed_adapter_warmup_epochs: 1
+
+prior_adapter_lr: 5e-4
+prior_adapter_min_lr: 1e-5
+prior_adapter_warmup_epochs: 1
 
 lr_scheduler: "cosine_anneal"
 betas: [0.9, 0.999]
 
 # Training schedule
-projector_warmup_epochs: 1
-encoder_warmup_epochs: 1
-prior_warmup_epochs: 1
-warmup_start_frac: 0.1
+warmup_start_frac: 0.35
 max_epochs: 100
 
 # Model parameters
