@@ -362,7 +362,8 @@ class EEGAlignmentConfig(BaseConfig):
 
     align_loss_factor: float = 1.0
     prior_loss_factor: float = 1.0
-    recon_loss_factor: float = 10.0
+    recon_sim_loss_factor: float = 10
+    prior_norm_loss_factor: float = 0.02
     project_image: bool = False
 
     eeg_latent_dim: int = 1440
@@ -425,9 +426,13 @@ class NICEConfig(EEGAlignmentConfig):
 class AffineTransformLayer(nn.Module):
     def __init__(self, scale: float = 1.0, shift: float = 0.0):
         super().__init__()
-        self.scale = nn.Parameter(torch.tensor(scale, dtype=torch.float32), requires_grad=True)
-        self.shift = nn.Parameter(torch.tensor(shift, dtype=torch.float32), requires_grad=True)
-    
+        self.scale = nn.Parameter(
+            torch.tensor(scale, dtype=torch.float32), requires_grad=True
+        )
+        self.shift = nn.Parameter(
+            torch.tensor(shift, dtype=torch.float32), requires_grad=True
+        )
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x * self.scale + self.shift
 
@@ -484,11 +489,10 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         self.prior: BrainDiffusionPrior | None = None
         self.embed_adapter: nn.Sequential | None = (
             nn.Sequential(
-                #nn.LayerNorm(self.config.img_latent_dim),
+                nn.LayerNorm(self.config.img_latent_dim),
                 nn.Linear(self.config.img_latent_dim, self.config.img_latent_dim * 2),
                 nn.GELU(),
                 nn.Linear(self.config.img_latent_dim * 2, self.config.img_latent_dim),
-                #nn.LayerNorm(self.config.img_latent_dim),
                 AffineTransformLayer(),
             )
             if self.config.do_high_recon
@@ -501,7 +505,6 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                 nn.Linear(self.config.img_latent_dim, self.config.img_latent_dim * 2),
                 nn.GELU(),
                 nn.Linear(self.config.img_latent_dim * 2, self.config.img_latent_dim),
-                #nn.LayerNorm(self.config.img_latent_dim),
                 AffineTransformLayer(scale=20.0),
             )
             if self.config.do_high_recon
@@ -804,7 +807,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             else:
                 proj_eeg_latent = None
 
-            loss = torch.zeros((1,), device=device, requires_grad=stage == "train")
+            losses: dict[str, torch.Tensor] = {}
             metrics = {}
             outputs = {}
 
@@ -828,9 +831,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                         align_image_latent, proj_eeg_latent
                     )
                     align_loss = align_loss * self.config.align_loss_factor
-                    loss = loss + align_loss
-
-                    metrics.update({"align_loss": align_loss})
+                    losses.update({"align_loss": align_loss})
 
                     outputs.update(
                         {
@@ -854,33 +855,10 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
                         metrics.update(
                             {
-                                "align_loss": align_loss,
                                 "top1_acc": top1_acc,
                                 "top3_acc": top3_acc,
                                 "top5_acc": top5_acc,
                             }
-                        )
-
-                        self.log(
-                            f"{stage_prefix}top1_acc",
-                            top1_acc,
-                            prog_bar=True,
-                            on_step=on_step,
-                            on_epoch=not on_step,
-                        )
-                        self.log(
-                            f"{stage_prefix}top3_acc",
-                            top3_acc,
-                            prog_bar=False,
-                            on_step=on_step,
-                            on_epoch=not on_step,
-                        )
-                        self.log(
-                            f"{stage_prefix}top5_acc",
-                            top5_acc,
-                            prog_bar=False,
-                            on_step=on_step,
-                            on_epoch=not on_step,
                         )
 
                 if self.config.do_high_recon:
@@ -901,43 +879,44 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                         proj_eeg_latent = self.embed_adapter(proj_eeg_latent)
 
                     # Note: We use the projected EEG latent here because the original latent is not same dim as images
-                    #prior_loss, prior_pred = self.prior(
+                    # prior_loss, prior_pred = self.prior(
                     #    brain_embedding=proj_eeg_latent,
                     #    image_embedding=high_recon_image_latent / high_recon_image_latent.norm(dim=-1, keepdim=True),
-                    #)
+                    # )
                     prior_pred = proj_eeg_latent
-                    
+
                     prior_pred = prior_pred / self.prior.image_embed_scale
-                    
+
                     if self.prior_adapter is not None:
                         prior_pred = self.prior_adapter(prior_pred)
 
-                    #prior_loss = torch.nn.functional.mse_loss(
+                    # prior_loss = torch.nn.functional.mse_loss(
                     #    prior_pred, high_recon_image_latent
-                    #)
+                    # )
 
                     prior_loss = (
-                        (
-                            #prior_loss
-                            torch.nn.functional.l1_loss(
-                                prior_pred, high_recon_image_latent
-                            ) + torch.nn.functional.mse_loss(
-                                prior_pred.norm(dim=-1), high_recon_image_latent.norm(dim=-1)
-                            ) * 0.02
+                        # prior_loss
+                        torch.nn.functional.l1_loss(prior_pred, high_recon_image_latent)
+                    ) * self.config.prior_loss_factor
+                    prior_norm_loss = (
+                        torch.nn.functional.mse_loss(
+                            prior_pred.norm(dim=-1),
+                            high_recon_image_latent.norm(dim=-1),
                         )
-                        * self.config.prior_loss_factor
+                        * self.config.prior_norm_loss_factor
                     )
-                    loss = loss + prior_loss
 
                     recon_sim_loss = (
-                        torch.nn.functional.cosine_similarity(
-                            high_recon_image_latent, prior_pred, dim=-1
+                        (
+                            1
+                            - torch.nn.functional.cosine_similarity(
+                                high_recon_image_latent, prior_pred, dim=-1
+                            )
                         )
                         .abs()
                         .mean()
                     )
-                    recon_sim_loss = recon_sim_loss * self.config.recon_loss_factor
-                    loss = loss + recon_sim_loss
+                    recon_sim_loss = recon_sim_loss * self.config.recon_sim_loss_factor
 
                     with torch.no_grad():
                         prior_pred_norm = prior_pred.norm(dim=-1).mean()
@@ -945,7 +924,6 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
                     metrics.update(
                         {
-                            "prior_loss": prior_loss,
                             "prior_pred_norm": prior_pred_norm,
                             "target_latent_norm": target_latent_norm,
                         }
@@ -953,42 +931,33 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
                     outputs.update({"prior_pred": prior_pred})
 
-                    self.log(
-                        f"{stage_prefix}prior_loss",
-                        prior_loss,
-                        prog_bar=False,
-                        on_step=on_step,
-                        on_epoch=not on_step,
-                    )
-                    self.log(
-                        f"{stage_prefix}recon_sim_loss",
-                        recon_sim_loss,
-                        prog_bar=False,
-                        on_step=on_step,
-                        on_epoch=not on_step,
-                    )
-                    self.log(
-                        f"{stage_prefix}prior_pred_norm",
-                        prior_pred_norm,
-                        prog_bar=False,
-                        on_step=on_step,
-                        on_epoch=not on_step,
-                    )
-                    self.log(
-                        f"{stage_prefix}target_latent_norm",
-                        target_latent_norm,
-                        prog_bar=False,
-                        on_step=on_step,
-                        on_epoch=not on_step,
+                    losses.update(
+                        {
+                            "prior_loss": prior_loss,
+                            "prior_norm_loss": prior_norm_loss,
+                            "recon_sim_loss": recon_sim_loss,
+                        }
                     )
 
+            for loss_name, loss_value in losses.items():
+                self.log(
+                    f"{stage_prefix}{loss_name}",
+                    loss_value,
+                    prog_bar=False,
+                    on_step=on_step,
+                    on_epoch=not on_step,
+                )
+
+            loss = torch.stack(list(losses.values())).sum()
             self.log(
-                f"{stage_prefix}loss", loss, prog_bar=False, on_step=on_step, on_epoch=not on_step
+                f"{stage_prefix}loss",
+                loss,
+                prog_bar=True,
+                on_step=on_step,
+                on_epoch=not on_step,
             )
 
         return loss, outputs, metrics
-
-
 
     @torch.no_grad()
     def evaluate_reconstructions(
@@ -1011,9 +980,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                 if recon_imgs is not None:
                     wandb_logger.log_image(
                         key=f"{stage_prefix}recon",
-                        images=[
-                            recon.detach().cpu().float() for recon in recon_imgs
-                        ],
+                        images=[recon.detach().cpu().float() for recon in recon_imgs],
                     )
                 if recon_target is not None:
                     wandb_logger.log_image(
@@ -1040,7 +1007,11 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             on_epoch=True,
         )
         self.log(
-            f"{stage_prefix}recon_l2", recon_l2, prog_bar=False, on_step=False, on_epoch=True
+            f"{stage_prefix}recon_l2",
+            recon_l2,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
         )
 
     @torch.no_grad()
@@ -1104,26 +1075,24 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         if self.embed_adapter is not None:
             eeg_proj = self.embed_adapter(eeg_proj)
 
-        target_latent = batch["high_recon_image_latent"][:batch_size].to(
-            device, dtype=dtype
-        )
         prior_cond = eeg_proj
 
-        #prior_pred = self.prior.p_sample_loop(
+        # prior_pred = self.prior.p_sample_loop(
         #    torch.Size([len(prior_cond), self.config.img_latent_dim]),
         #    brain_embedding=prior_cond,
         #    dtype=dtype,
         #    progress_bar=True,
-        #)
+        # )
         prior_pred = prior_cond / self.prior.image_embed_scale  # TODO: Remove this
-
 
         if self.prior_adapter is not None:
             prior_pred = self.prior_adapter(prior_pred)
 
+        target_latent = batch["high_recon_image_latent"][:batch_size].to(
+            device, dtype=dtype
+        )
 
         conditioning = torch.cat([prior_pred, target_latent], dim=0)
-        # conditioning = prior_pred
 
         pipe = ReconstructionPipeline.from_stable_diffusion(dtype=dtype, device=device)
         reconstruction = pipe.reconstruct_latents(conditioning, progress_bar=True)
@@ -1134,11 +1103,8 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         # target_latent = reconstruction
         # imgs_reconstructed = reconstruction
         # imgs_reconstructed, target_latent = torch.chunk(reconstruction, 2, dim=0)
-        recon_imgs, recon_target = torch.chunk(
-            reconstruction, 2, dim=0
-        )
+        recon_imgs, recon_target = torch.chunk(reconstruction, 2, dim=0)
         return recon_imgs, recon_target
-
 
     def _get_image_latent_from_cache(
         self, img_path: Path, *model_config: str
@@ -1309,6 +1275,7 @@ class NICEModel(EEGAlignmentModel):
             lr: float
             min_lr: float
             warmup_epochs: int
+
         optimizer_configs = [
             OptimizerConfig(
                 name="eeg_encoder",
