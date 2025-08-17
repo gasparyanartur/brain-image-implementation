@@ -360,11 +360,16 @@ class EEGAlignmentConfig(BaseConfig):
     do_low_recon: bool = False
     do_high_recon: bool = False
 
+    use_embed_adapter: bool = True
+    use_prior_adapter: bool = True
+
     align_loss_factor: float = 1.0
     prior_loss_factor: float = 1.0
     recon_sim_loss_factor: float = 10
     prior_norm_loss_factor: float = 0.02
     project_image: bool = False
+
+    recon_every_epochs: int = 1
 
     eeg_latent_dim: int = 1440
     img_latent_dim: int = 768
@@ -382,7 +387,7 @@ class NICEConfig(EEGAlignmentConfig):
 
     encoder_lr: float = 1e-3
     projector_lr: float = 1e-3
-    prior_lr: float = 5e-5
+    prior_lr: float = 3e-4
     embed_adapter_lr: float = 1e-3
     prior_adapter_lr: float = 1e-3
 
@@ -490,24 +495,20 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         self.embed_adapter: nn.Sequential | None = (
             nn.Sequential(
                 nn.LayerNorm(self.config.img_latent_dim),
-                nn.Linear(self.config.img_latent_dim, self.config.img_latent_dim * 2),
-                nn.GELU(),
-                nn.Linear(self.config.img_latent_dim * 2, self.config.img_latent_dim),
+                nn.Linear(self.config.img_latent_dim, self.config.img_latent_dim),
                 AffineTransformLayer(),
             )
-            if self.config.do_high_recon
+            if self.config.do_high_recon and self.config.use_embed_adapter
             else None
         )
 
         self.prior_adapter: nn.Sequential | None = (
             nn.Sequential(
                 nn.LayerNorm(self.config.img_latent_dim),
-                nn.Linear(self.config.img_latent_dim, self.config.img_latent_dim * 2),
-                nn.GELU(),
-                nn.Linear(self.config.img_latent_dim * 2, self.config.img_latent_dim),
+                nn.Linear(self.config.img_latent_dim, self.config.img_latent_dim),
                 AffineTransformLayer(scale=20.0),
             )
-            if self.config.do_high_recon
+            if self.config.do_high_recon and self.config.use_prior_adapter
             else None
         )
 
@@ -524,6 +525,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             self._preload_latents()
 
         self.learning_rate_options: list[dict[str, Any]] = []
+        self.epoch = 0
 
     def _preload_latents(self, parallel: bool = True):
         def preload_latent(path: Path, split: Literal["train", "val", "test"]):
@@ -760,7 +762,10 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             loss, outputs, metrics = self._run_step(batch, batch_idx, "val")
 
         if batch_idx == self.num_val_batches - 1:
-            self.evaluate_reconstructions(batch, batch_idx, "val")
+            if self.epoch % self.config.recon_every_epochs == 0:
+                self.evaluate_reconstructions(batch, batch_idx, "val")
+
+            self.epoch += 1
 
         return loss, outputs, metrics
 
@@ -879,11 +884,11 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                         proj_eeg_latent = self.embed_adapter(proj_eeg_latent)
 
                     # Note: We use the projected EEG latent here because the original latent is not same dim as images
-                    # prior_loss, prior_pred = self.prior(
-                    #    brain_embedding=proj_eeg_latent,
-                    #    image_embedding=high_recon_image_latent / high_recon_image_latent.norm(dim=-1, keepdim=True),
-                    # )
-                    prior_pred = proj_eeg_latent
+                    prior_loss, prior_pred = self.prior(
+                        brain_embedding=proj_eeg_latent,
+                        image_embedding=high_recon_image_latent / high_recon_image_latent.norm(dim=-1, keepdim=True),
+                    )
+                    #prior_pred = proj_eeg_latent
 
                     prior_pred = prior_pred / self.prior.image_embed_scale
 
@@ -894,10 +899,12 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                     #    prior_pred, high_recon_image_latent
                     # )
 
-                    prior_loss = (
-                        # prior_loss
+                    prior_loss = prior_loss * self.config.prior_loss_factor
+
+                    prior_l1_loss = (
                         torch.nn.functional.l1_loss(prior_pred, high_recon_image_latent)
                     ) * self.config.prior_loss_factor
+
                     prior_norm_loss = (
                         torch.nn.functional.mse_loss(
                             prior_pred.norm(dim=-1),
@@ -934,6 +941,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                     losses.update(
                         {
                             "prior_loss": prior_loss,
+                            "prior_l1_loss": prior_l1_loss,
                             "prior_norm_loss": prior_norm_loss,
                             "recon_sim_loss": recon_sim_loss,
                         }
@@ -966,7 +974,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         batch_idx,
         stage: Literal["val", "test"],
         log_images: bool = True,
-        num_reconstructions: int = 3,
+        num_reconstructions: int = 5,
     ):
         recon_imgs, recon_target = self.get_reconstructions(
             batch, batch_idx, stage, num_reconstructions=num_reconstructions
@@ -1045,7 +1053,7 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         batch,
         batch_idx,
         stage: Literal["val", "test"],
-        num_reconstructions: int = 3,
+        num_reconstructions: int = 5,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         # Imgs Reconstructed: Conditioning on Aligned Brain Latent, Predicting Target Latent with Prior
         # Target Latent: Conditioning on Target Latent, Predicting Target Latent with Prior (Does prior do anything with target?)
@@ -1077,13 +1085,13 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
         prior_cond = eeg_proj
 
-        # prior_pred = self.prior.p_sample_loop(
-        #    torch.Size([len(prior_cond), self.config.img_latent_dim]),
-        #    brain_embedding=prior_cond,
-        #    dtype=dtype,
-        #    progress_bar=True,
-        # )
-        prior_pred = prior_cond / self.prior.image_embed_scale  # TODO: Remove this
+        prior_pred = self.prior.p_sample_loop(
+            torch.Size([len(prior_cond), self.config.img_latent_dim]),
+            brain_embedding=prior_cond,
+            dtype=dtype,
+            progress_bar=True,
+        )
+        #prior_pred = prior_cond / self.prior.image_embed_scale  # TODO: Remove this
 
         if self.prior_adapter is not None:
             prior_pred = self.prior_adapter(prior_pred)
