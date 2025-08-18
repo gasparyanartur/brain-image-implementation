@@ -15,6 +15,8 @@ eeg_latent_dim: 1440
 img_latent_dim: 768
 project_image: false
 
+skip_recon_first_epoch: false
+
 # Learning rate settings
 encoder_lr: 5e-4
 encoder_min_lr: 1e-5
@@ -24,15 +26,15 @@ projector_lr: 5e-4
 projector_min_lr: 1e-5
 projector_warmup_epochs: 1
 
-prior_lr: 3e-4
+prior_lr: 2e-5
 prior_min_lr: 1e-6
-prior_warmup_epochs: 2
+prior_warmup_epochs: 20
 
-embed_adapter_lr: 1e-3
+embed_adapter_lr: 3e-4
 embed_adapter_min_lr: 1e-5
 embed_adapter_warmup_epochs: 1
 
-prior_adapter_lr: 1e-3
+prior_adapter_lr: 3e-4
 prior_adapter_min_lr: 1e-5
 prior_adapter_warmup_epochs: 1
 
@@ -50,3 +52,5 @@ temperature_init: 2.659260  # log(1/0.07)
 data_seed: 42
 
 prior_debug_mode: false
+
+log_gradients: false

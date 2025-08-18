@@ -149,3 +149,10 @@ def setup():
     logging.info(f"Using dtype: {DTYPE}")
     logging.info(f"Using directory: {os.getcwd()}")
     login(token=tok)
+
+
+def get_mean_gradients(model: torch.nn.Module) -> torch.Tensor | None:
+    grads = [p.grad.norm(dim=-1).mean() for p in model.parameters() if p.grad is not None]
+    if len(grads) == 0:
+        return None
+    return torch.stack(grads).mean()

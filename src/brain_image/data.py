@@ -247,48 +247,18 @@ class EEGDataset(Dataset):
     ):
         self.config = config
         self.split = split
-        self.imgs_per_concepts = (
-            self.config.train_imgs_per_concept
-            if split == "train"
-            else self.config.test_imgs_per_concept
-        )
-
-        if split == "train":
-            eeg_name = "preprocessed_eeg_training"
-
-        else:
-            eeg_name = "preprocessed_eeg_test"
-
-        self.img_paths = get_image_paths(
-            self.config.data_path / self.config.imgs_dir,
-            split=split,
-        )
-
-        self.eeg_data_paths = [
-            self.config.data_path
-            / self.config.eeg_dir
-            / f"sub-{sub:02}"
-            / f"{eeg_name}.npy"
-            for sub in self.config.subs
-        ]
-        self.eeg_data, self.times, self.ch_names = load_all_eeg_data(
-            self.eeg_data_paths
-        )
+        
+        self.prepared_data = torch.load(self.config.data_path / "prepared" / f"{split}.pt")
 
     def __len__(self):
-        return len(self.eeg_data)
+        return len(self.prepared_data)
 
     def __getitem__(self, idx: int):
-        img_idx = idx % (
-            len(self.img_paths)
-        )  # EEG has stacked over subs, so we need to find the right sample within the sub
-
-        img_path = self.img_paths[img_idx]
-        eeg_data = self.eeg_data[idx]
+        item = self.prepared_data[idx]
 
         return {
-            "img_path": str(img_path),
-            "eeg_data": eeg_data,
+            "img_path": str(item["img_path"]),
+            "eeg_data": item["eeg"],
             "idx": idx,
         }
 
@@ -435,4 +405,4 @@ def load_all_eeg_data(
     if all_times is None:
         all_times = torch.tensor([])
 
-    return torch.concat(all_eeg_data), all_times, all_ch_names
+    return torch.stack(all_eeg_data), all_times, all_ch_names

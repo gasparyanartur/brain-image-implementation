@@ -233,7 +233,7 @@ class DiffusionPriorNetwork(nn.Module):
         # get learned query, which should predict the image embedding (per DDPM timestep)
 
         # Use the CLS token to predict the image embedding
-        pred_image_embed = tokens[..., 0, :]
+        pred_image_embed = tokens[..., -1, :]
 
         return pred_image_embed
 
@@ -392,15 +392,16 @@ class BrainDiffusionPrior(DiffusionPrior):
         cond_scale: float = 1.0,
         generator: torch.Generator | None = None,
         progress_bar: bool = False,
-        dtype: torch.dtype = torch.float32,
+        *args,
+        **kwargs
     ):
         batch = shape[0]
         device = cast(torch.device, self.device)
 
         if brain_embedding is not None:
-            text_cond = {**text_cond, "text_embed": brain_embedding.to(dtype)}
+            text_cond = {**text_cond, "text_embed": brain_embedding}
 
-        image_embed = torch.randn(shape, device=device, dtype=dtype, generator=generator)
+        image_embed = torch.randn(shape, device=device, generator=generator)
 
         x_start = None  # for self-conditioning
 
@@ -424,12 +425,11 @@ class BrainDiffusionPrior(DiffusionPrior):
                 cond_scale=cond_scale,
                 generator=generator,
             )
-            image_embed = image_embed.to(dtype)
 
         if self.sampling_final_clamp_l2norm and self.predict_x_start:
             image_embed = self.l2norm_clamp_embed(image_embed)
 
-        return image_embed.to(dtype)
+        return image_embed
 
     def p_losses(
         self,
@@ -438,7 +438,7 @@ class BrainDiffusionPrior(DiffusionPrior):
         text_cond: dict,
         noise: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        noise = noise or torch.randn_like(image_embed)
+        noise = noise if noise is not None else torch.randn_like(image_embed)
 
         image_embed_noisy = self.noise_scheduler.q_sample(
             x_start=image_embed, t=times, noise=noise
@@ -482,6 +482,7 @@ class BrainDiffusionPrior(DiffusionPrior):
         ) = None,  # allow for training on preprocessed CLIP text and image embeddings
         image_embedding: torch.Tensor | None = None,
         text_encodings: torch.Tensor | None = None,  # as well as CLIP text encodings
+        times: torch.Tensor | None = None,
         *args,
         **kwargs,
     ):
@@ -540,7 +541,7 @@ class BrainDiffusionPrior(DiffusionPrior):
         # timestep conditioning from ddpm
 
         batch, device = image_embedding.shape[0], image_embedding.device
-        times = self.noise_scheduler.sample_random_times(batch)
+        times = times if times is not None else self.noise_scheduler.sample_random_times(batch)
 
         image_embedding = image_embedding * cast(float, self.image_embed_scale)
 
