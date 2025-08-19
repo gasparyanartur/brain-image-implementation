@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 import logging
 from typing import Callable, Literal, cast
 

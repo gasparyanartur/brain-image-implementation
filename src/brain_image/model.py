@@ -507,9 +507,36 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         )
 
         if self.config.do_high_recon:
-            self.prior = BrainDiffusionPrior.from_pretrained(
-                dtype=dtype,
+            net = DiffusionPriorNetwork(
+                dim=self.config.img_latent_dim,
+                num_timesteps=250,
+                num_time_embeds=1,
+                num_image_embeds=1,
+                num_text_embeds=1,
+                max_text_len=0,
+                self_cond=False,
+                depth=3,
+                num_output_tokens=1,
+                rotary_emb=True,
+                normformer=True,
+                norm_out=True,
+                dim_head=64,
+                attn_dropout=0.0
             )
+            self.prior = BrainDiffusionPrior(
+                net=net,
+                image_embed_dim=self.config.img_latent_dim,
+                loss_type="l2",
+                cond_drop_prob=0.0,
+                image_cond_drop_prob=0.0,
+                condition_on_text_encodings=False,
+                image_size=224,
+                predict_x_start=True,
+                sample_timesteps=32,
+                beta_schedule="cosine",
+                clip=None,
+                timesteps=net.num_timesteps or 500,
+            ).to(dtype)
         elif self.config.do_low_recon:
             raise ValueError(
                 "Cannot do low level reconstruction in without high level reconstruction"
@@ -1129,11 +1156,6 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         reconstruction = pipe.reconstruct_latents(conditioning, progress_bar=True)
         del pipe
 
-        # imgs_reconstructed = None
-        # target_imgs = None
-        # target_latent = reconstruction
-        # imgs_reconstructed = reconstruction
-        # imgs_reconstructed, target_latent = torch.chunk(reconstruction, 2, dim=0)
         recon_imgs, recon_target = torch.chunk(reconstruction, 2, dim=0)
         return recon_imgs, recon_target
 

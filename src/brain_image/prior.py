@@ -137,6 +137,9 @@ class DiffusionPriorNetwork(nn.Module):
         text_cond_drop_prob: float = 0.0,
         image_cond_drop_prob=0.0,
     ):
+        if text_encodings is not None:
+            raise NotImplementedError("text_encodings are not supported in the prior network")
+
         batch, dim, device, dtype = (
             *image_embed.shape,
             image_embed.device,
@@ -169,32 +172,6 @@ class DiffusionPriorNetwork(nn.Module):
         # make text encodings optional
         # although the paper seems to suggest it is present <--
 
-        if text_encodings is None:
-            text_encodings = torch.empty((batch, 0, dim), device=device, dtype=dtype)
-
-        mask = torch.any(text_encodings != 0.0, dim=-1)
-
-        # replace any padding in the text encodings with learned padding tokens unique across position
-
-        text_encodings = text_encodings[:, : self.max_text_len]
-        mask = mask[:, : self.max_text_len]
-
-        text_len = text_encodings.shape[-2]
-        remainder = self.max_text_len - text_len
-
-        if remainder > 0:
-            text_encodings = F.pad(text_encodings, (0, 0, 0, remainder), value=0.0)
-            mask = F.pad(mask, (0, remainder), value=False)
-
-        # mask out text encodings with null encodings
-
-        null_text_encodings = self.null_text_encodings.to(text_encodings.dtype)
-
-        text_encodings = torch.where(
-            rearrange(mask, "b n -> b n 1").clone() & text_keep_mask,
-            text_encodings,
-            null_text_encodings,
-        )
 
         # mask out text embeddings with null text embeddings
 
@@ -221,10 +198,11 @@ class DiffusionPriorNetwork(nn.Module):
         if self.self_cond:
             learned_queries = torch.cat((self_cond, learned_queries), dim=-2)
 
-        tokens = torch.cat(
-            (text_encodings, text_embed, time_embed, image_embed, learned_queries),
-            dim=-2,
-        )
+        input_stack = [text_embed, time_embed, image_embed, learned_queries]
+        if text_encodings is not None:
+            input_stack.insert(0, text_encodings)
+
+        tokens = torch.cat(input_stack, dim=-2)
 
         # attend
 
