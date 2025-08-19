@@ -235,6 +235,8 @@ class EEGEncoderConfig(BaseConfig):
     kernel2: int = 17
     dropout: float = 0.5
     embed_dim: int = 40
+    patch_out_dim: int = 1440   # Computed as the flattened layer after patch embeddings
+    output_dim: int = 768
 
 
 class DebugLayer(nn.Module):
@@ -315,19 +317,28 @@ class EEGEncoder(nn.Module):
                 ]
             ),
         )
-        # self.patch_embedding = WrapDebugSequential(self.patch_embedding)
+        self.proj = nn.Sequential(
+            nn.Flatten(),
+            nn.LayerNorm(config.patch_out_dim),
+            nn.Linear(config.patch_out_dim, config.output_dim),
+            nn.Dropout(config.dropout),
+            nn.GELU(),
+            nn.Linear(config.output_dim, config.output_dim)
+        )
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = einops.rearrange(x, "b s t -> b 1 s t")
         x = self.patch_embedding(x)
         x = einops.rearrange(x, "b e (s) (t) -> b (s t e)")
+        x = self.proj(x)
         return x
 
 
 class LatentProjector(nn.Module):
     def __init__(
         self,
-        embed_dim: int = 1440,
+        embed_dim: int = 768,
         proj_dim: int = 768,
         hidden_dim: int = 768,
         dropout: float = 0.5,
@@ -358,13 +369,13 @@ class EEGAlignmentConfig(BaseConfig):
     high_recon_model: str = "sd_highlevel"
     do_align: bool = True
     do_low_recon: bool = False
-    do_high_recon: bool = False
+    do_high_recon: bool = True
 
     use_embed_adapter: bool = False
     use_prior_adapter: bool = False
     skip_recon_first_epoch: bool = False
 
-    align_loss_factor: float = 1.0
+    align_loss_factor: float = 0.2
     prior_loss_factor: float = 0.0
     prior_sim_loss_factor: float = 1.0
     prior_len_loss_factor: float = 0.5
@@ -866,8 +877,10 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
         with torch.autocast(device_type=device.type):
             if self.eeg_encoder is not None:
                 eeg_data = batch["eeg_data"].to(device)
-                eeg_latent = self.get_brain_encoder()(eeg_data)
-                proj_eeg_latent = self.get_brain_projector()(eeg_latent)
+                proj_eeg_latent = self.get_brain_encoder()(eeg_data)
+                if brain_projector := self.get_brain_projector():
+                    proj_eeg_latent = brain_projector(proj_eeg_latent)
+                    
             else:
                 proj_eeg_latent = None
 
@@ -927,10 +940,6 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
 
                     assert self.prior is not None, "Prior is not initialized"
 
-                    high_recon_image_latent = cast(
-                        torch.Tensor, batch["high_recon_image_latent"].to(device)
-                    )
-
                     cond_latent = proj_eeg_latent / (
                         proj_eeg_latent.norm(dim=-1, keepdim=True) + eps
                     )
@@ -938,7 +947,9 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                     if self.embed_adapter is not None:
                         cond_latent = self.embed_adapter(cond_latent)
 
-                    target_latent = high_recon_image_latent
+                    target_latent = cast(
+                        torch.Tensor, batch["high_recon_image_latent"].to(device)
+                    )
 
                     target_latent_dir = target_latent / (
                         target_latent.norm(dim=-1, keepdim=True) + eps
@@ -1131,8 +1142,9 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             eeg_proj = batch["align_image_latent"][:batch_size].to(device, dtype=dtype)
         else:
             eeg_data = batch["eeg_data"][:batch_size].to(device, dtype=dtype)
-            eeg_embed = self.get_brain_encoder()(eeg_data)
-            eeg_proj = self.get_brain_projector()(eeg_embed)
+            eeg_proj = self.get_brain_encoder()(eeg_data)
+            if brain_projector := self.get_brain_projector():
+                eeg_proj = brain_projector(eeg_proj)
 
         cond_latent = eeg_proj / (eeg_proj.norm(dim=-1, keepdim=True) + eps)
 
@@ -1258,15 +1270,7 @@ class NICEModel(EEGAlignmentModel):
         self.eeg_encoder: EEGEncoder | None = (
             EEGEncoder(config.eeg_config) if not config.prior_debug_mode else None
         )
-        self.eeg_projector: LatentProjector | None = (
-            LatentProjector(
-                embed_dim=config.eeg_latent_dim,
-                proj_dim=config.project_dim,
-            )
-            if not config.prior_debug_mode
-            else None
-        )
-
+        self.eeg_projector: LatentProjector | None = None
         self.align_img_projector: LatentProjector | None = (
             LatentProjector(
                 embed_dim=config.img_latent_dim,
