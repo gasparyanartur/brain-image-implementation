@@ -360,8 +360,8 @@ class EEGAlignmentConfig(BaseConfig):
     do_low_recon: bool = False
     do_high_recon: bool = False
 
-    use_embed_adapter: bool = True
-    use_prior_adapter: bool = True
+    use_embed_adapter: bool = False
+    use_prior_adapter: bool = False
     skip_recon_first_epoch: bool = False
 
     align_loss_factor: float = 1.0
@@ -369,6 +369,8 @@ class EEGAlignmentConfig(BaseConfig):
     prior_sim_loss_factor: float = 1.0
     prior_len_loss_factor: float = 0.5
     project_image: bool = False
+
+    diffusion_dropout: float = 0.2
 
     recon_every_epochs: int = 1
 
@@ -519,9 +521,10 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
                 num_output_tokens=1,
                 rotary_emb=True,
                 normformer=True,
-                norm_out=True,
+                norm_out=False,
                 dim_head=64,
-                attn_dropout=0.0
+                attn_dropout=self.config.diffusion_dropout,
+                ff_dropout=self.config.diffusion_dropout
             )
             self.prior = BrainDiffusionPrior(
                 net=net,
