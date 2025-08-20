@@ -6,7 +6,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from brain_image.configs import BaseConfig
 from brain_image.trainer import NICETrainer, NICETrainerConfig
-from brain_image.model import EEGEncoderConfig, NICEConfig
+from brain_image.model import EEGAlignmentConfig, EEGEncoderConfig
 from brain_image.data import EEGDatasetConfig
 
 import torch
@@ -39,7 +39,7 @@ class TrainNICEConfig(BaseConfig):
 
     # Component composition - these will be populated by Hydra
     dataset: EEGDatasetConfig = EEGDatasetConfig()
-    model: NICEConfig = NICEConfig(align_target_model="aligned_synclr")
+    model: EEGAlignmentConfig = EEGAlignmentConfig()
     trainer: NICETrainerConfig = NICETrainerConfig()
     encoder: EEGEncoderConfig = EEGEncoderConfig()
 
@@ -55,9 +55,12 @@ def train_nice(trainer: NICETrainer, checkpoint_path: Path | None = None):
     for key, value in trainer.config.model_dump(mode="json").items():
         logging.info(f"  {key}: {value}")
 
-    logging.info(f"Model Config:")
-    for key, value in trainer.model.config.model_dump(mode="json").items():
-        logging.info(f"  {key}: {value}")
+    if hasattr(trainer, "model") and hasattr(trainer.model, "config") and isinstance(
+        trainer.model.config, BaseConfig
+    ):
+        logging.info(f"Model Config:")
+        for key, value in trainer.model.config.model_dump(mode="json").items():
+            logging.info(f"  {key}: {value}")
 
     # Load checkpoint if provided
     if checkpoint_path and checkpoint_path.exists():

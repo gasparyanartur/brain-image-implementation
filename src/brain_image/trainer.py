@@ -11,7 +11,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
-from brain_image.model import NICEModel, NICEConfig
+from brain_image.model import EEGAlignmentConfig, EEGAlignmentModel
 from brain_image.utils import get_dtype
 
 
@@ -78,7 +78,7 @@ class NICETrainerConfig(TrainConfig):
 class Trainer:
     def __init__(self, config: TrainConfig, model: pl.LightningModule):
         self.config = config
-        self.model = model
+        self.model: pl.LightningModule = model
         self.pl_trainer = self.create_pl_trainer()
 
     def create_pl_trainer(self) -> pl.Trainer:
@@ -255,17 +255,19 @@ class NICETrainer(Trainer):
     def __init__(
         self,
         config: NICETrainerConfig,
-        model_config: NICEConfig,
+        model_config: EEGAlignmentConfig,
         dataset_config: EEGDatasetConfig,
     ):
         if isinstance(config, dict):
             config = NICETrainerConfig.model_validate(config)
+
         if isinstance(model_config, dict):
-            model_config = NICEConfig.model_validate(model_config)
+            model_config = EEGAlignmentConfig.model_validate(model_config)
+
         if isinstance(dataset_config, dict):
             dataset_config = EEGDatasetConfig.model_validate(dataset_config)
 
-        model = NICEModel(
+        model = EEGAlignmentModel(
             config=model_config,
             dataset_config=dataset_config,
             compile=config.compile_model,
@@ -274,7 +276,7 @@ class NICETrainer(Trainer):
             preload_latents=config.preload_latents,
             cache_dir=config.cache_dir,
         )
-        self.model_config: NICEConfig = model_config
+        self.model_config: EEGAlignmentConfig = model_config
         super().__init__(config, model)
 
     def get_train_title_components(self) -> list[str]:

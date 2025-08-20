@@ -18,7 +18,7 @@ project_image: false
 skip_recon_first_epoch: false
 
 # Learning rate settings
-encoder_lr: 5e-4
+encoder_lr: 1e-3
 encoder_min_lr: 1e-5
 encoder_warmup_epochs: 1
 
@@ -48,7 +48,7 @@ max_epochs: 100
 recon_every_epochs: 1
 
 # Model parameters
-temperature_init: 2.659260  # log(1/0.07)
+temperature_init: 0.04
 data_seed: 42
 
 prior_debug_mode: false
