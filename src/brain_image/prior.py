@@ -37,7 +37,6 @@ class BrainDiffusionPriorConfig(BaseConfig):
     dim_head: int = 64
     attn_dropout: float = 0.2
     ff_dropout: float = 0.2
-    timesteps: int = 500
     cond_drop_prob: float = 0.0
     image_cond_drop_prob: float = 0.0
     num_timesteps: int = 250
@@ -265,7 +264,7 @@ class BrainDiffusionPrior(DiffusionPrior):
             self_cond=config.self_cond, 
             depth=config.depth,
             num_output_tokens=config.num_output_tokens,
-            rotaty_emb=config.rotary_emb,
+            rotary_emb=config.rotary_emb,
             normformer=config.normformer,
             norm_out=config.norm_out,
             dim_head=config.dim_head,
@@ -285,7 +284,7 @@ class BrainDiffusionPrior(DiffusionPrior):
             sample_timesteps=config.sample_timesteps,
             beta_schedule=config.beta_schedule,
             clip=None,
-            timesteps=config.timesteps,
+            timesteps=config.num_timesteps,
             *args,
             **kwargs
         )

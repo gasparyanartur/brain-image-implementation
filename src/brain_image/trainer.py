@@ -11,8 +11,8 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
-from brain_image.model import EEGAlignmentConfig, EEGAlignmentModel
-from brain_image.utils import get_dtype
+from brain_image.model import EEGAlignmentConfig, EEGAlignmentModel, EEGEncoder, EEGEncoderConfig
+from brain_image.utils import find_module_content_in_state_dict, get_dtype
 
 
 class TrainConfig(BaseConfig):
@@ -71,6 +71,8 @@ class NICETrainerConfig(TrainConfig):
 
     checkpoint_monitor: str = "val_loss"
     checkpoint_monitor_mode: Literal["min", "max"] = "min"
+
+    eeg_encoder_path: Path | None = None
 
     wandb_tags: list[str] = ["nice"]
 
@@ -251,6 +253,19 @@ class Trainer:
 
         logging.info(f"Loaded checkpoint from {filepath}")
 
+
+def load_eeg_encoder_from_checkpoint(config: EEGEncoderConfig, checkpoint_path: Path) -> EEGEncoder:
+    checkpoint = torch.load(checkpoint_path)
+    
+    eeg_encoder_state_dict = find_module_content_in_state_dict("state_dict", checkpoint, module_name="eeg_encoder")
+    if not eeg_encoder_state_dict:
+        raise ValueError("Could not find EEG encoder in checkpoint")
+
+    encoder = EEGEncoder(config)
+    encoder.load_state_dict(eeg_encoder_state_dict)
+    return encoder
+
+
 class NICETrainer(Trainer):
     def __init__(
         self,
@@ -267,6 +282,10 @@ class NICETrainer(Trainer):
         if isinstance(dataset_config, dict):
             dataset_config = EEGDatasetConfig.model_validate(dataset_config)
 
+        if config.eeg_encoder_path is not None:
+            eeg_encoder = load_eeg_encoder_from_checkpoint(model_config.eeg_config, config.eeg_encoder_path)
+        else:
+            eeg_encoder = None
 
         model = EEGAlignmentModel(
             config=model_config,
@@ -276,6 +295,7 @@ class NICETrainer(Trainer):
             dtype=get_dtype(config.dtype),
             preload_latents=config.preload_latents,
             cache_dir=config.cache_dir,
+            eeg_encoder=eeg_encoder,
         )
         self.model_config: EEGAlignmentConfig = model_config
         super().__init__(config, model)

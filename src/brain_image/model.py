@@ -442,8 +442,15 @@ class EEGAlignmentConfig(BaseConfig):
     embed_adapter_warmup_epochs: int = 1
     prior_adapter_warmup_epochs: int = 1
 
+    encoder_delay_epochs: int = 0
+    projector_delay_epochs: int = 0
+    prior_delay_epochs: int = 0
+    embed_adapter_delay_epochs: int = 0
+    prior_adapter_delay_epochs: int = 0
+
     lr_scheduler: Literal["none", "cosine_anneal"] = "cosine_anneal"
     betas: tuple[float, float] = (0.9, 0.95)
+    weight_decay: float = 0.005
 
     max_epochs: int = 100
 
@@ -490,6 +497,7 @@ class EEGAlignmentModel(pl.LightningModule):
             "prior_adapter",
         ],
         cache_dir: Path = Path("cache/tensorcache"),
+        eeg_encoder: EEGEncoder | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -568,7 +576,7 @@ class EEGAlignmentModel(pl.LightningModule):
             )
 
         self.eeg_encoder: EEGEncoder | None = (
-            EEGEncoder(self.config.eeg_config)
+            (eeg_encoder or EEGEncoder(self.config.eeg_config))
             if not self.config.prior_debug_mode
             else None
         )
@@ -635,6 +643,7 @@ class EEGAlignmentModel(pl.LightningModule):
             lr: float
             min_lr: float
             warmup_epochs: int
+            delay_epochs: int
 
         optimizer_configs = [
             OptimizerConfig(
@@ -643,6 +652,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 lr=self.config.encoder_lr,
                 min_lr=self.config.encoder_min_lr,
                 warmup_epochs=self.config.encoder_warmup_epochs,
+                delay_epochs=self.config.encoder_delay_epochs
             ),
             OptimizerConfig(
                 name="eeg_projector",
@@ -650,6 +660,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 lr=self.config.projector_lr,
                 min_lr=self.config.projector_min_lr,
                 warmup_epochs=self.config.projector_warmup_epochs,
+                delay_epochs=self.config.projector_delay_epochs
             ),
             OptimizerConfig(
                 name="align_img_projector",
@@ -657,6 +668,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 lr=self.config.projector_lr,
                 min_lr=self.config.projector_min_lr,
                 warmup_epochs=self.config.projector_warmup_epochs,
+                delay_epochs=self.config.projector_delay_epochs
             ),
             OptimizerConfig(
                 name="prior",
@@ -664,6 +676,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 lr=self.config.prior_lr,
                 min_lr=self.config.prior_min_lr,
                 warmup_epochs=self.config.prior_warmup_epochs,
+                delay_epochs=self.config.prior_delay_epochs
             ),
             OptimizerConfig(
                 name="embed_adapter",
@@ -671,6 +684,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 lr=self.config.embed_adapter_lr,
                 min_lr=self.config.embed_adapter_min_lr,
                 warmup_epochs=self.config.embed_adapter_warmup_epochs,
+                delay_epochs=self.config.embed_adapter_delay_epochs
             ),
             OptimizerConfig(
                 name="prior_adapter",
@@ -678,6 +692,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 lr=self.config.prior_adapter_lr,
                 min_lr=self.config.prior_adapter_min_lr,
                 warmup_epochs=self.config.prior_adapter_warmup_epochs,
+                delay_epochs=self.config.prior_adapter_delay_epochs
             ),
         ]
         optimizer_configs = [x for x in optimizer_configs if x.model is not None]
@@ -685,9 +700,10 @@ class EEGAlignmentModel(pl.LightningModule):
         optimizer_options = []
         for optimizer_config in optimizer_configs:
             warmup_steps = optimizer_config.warmup_epochs * self.num_train_batches
+            delay_steps = optimizer_config.delay_epochs * self.num_train_batches
             total_steps = self.config.max_epochs * self.num_train_batches
 
-            optimizer = torch.optim.Adam(
+            optimizer = torch.optim.AdamW(
                 (
                     optimizer_config.model.parameters()
                     if optimizer_config.model is not None
@@ -695,11 +711,21 @@ class EEGAlignmentModel(pl.LightningModule):
                 ),
                 lr=optimizer_config.lr,
                 betas=self.config.betas,
+                weight_decay=self.config.weight_decay,
             )
             schedulers = []
             milestones = []
 
-            if optimizer_config.warmup_epochs > 0:
+            if delay_steps > 0:
+                schedulers.append(
+                    torch.optim.lr_scheduler.LambdaLR(
+                        optimizer,
+                        lr_lambda=lambda _: 0
+                    )
+                )
+                milestones.append(delay_steps + max(milestones or [0]))
+
+            if warmup_steps > 0:
                 schedulers.append(
                     torch.optim.lr_scheduler.LinearLR(
                         optimizer,
@@ -707,7 +733,7 @@ class EEGAlignmentModel(pl.LightningModule):
                         total_iters=warmup_steps,
                     )
                 )
-                milestones.append(warmup_steps)
+                milestones.append(warmup_steps + max(milestones or [0]))
 
             if self.config.lr_scheduler == "cosine_anneal":
                 schedulers.append(

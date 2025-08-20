@@ -5,14 +5,10 @@ import shutil
 from pathlib import Path
 
 from brain_image.model import (
-    NICEModel, 
-    NICEConfig, 
     EEGEncoderConfig, 
     EEGEncoder, 
     LatentProjector,
     EEGAlignmentModel,
-    compute_cross_entropy_loss,
-    compute_similarity
 )
 from brain_image.data import EEGDatasetConfig
 

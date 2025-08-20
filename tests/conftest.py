@@ -3,7 +3,6 @@
 import pytest
 import torch
 import numpy as np
-from brain_image.model import NICEConfig
 from brain_image.data import EEGDatasetConfig
 from brain_image.trainer import NICETrainerConfig
 

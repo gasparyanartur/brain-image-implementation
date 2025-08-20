@@ -156,3 +156,29 @@ def get_mean_gradients(model: torch.nn.Module) -> torch.Tensor | None:
     if len(grads) == 0:
         return None
     return torch.stack(grads).mean()
+
+
+def state_dict_equal(state_dict1, state_dict2):
+    if len(state_dict1) != len(state_dict2):
+        return False
+    for key in state_dict1:
+        if not torch.equal(state_dict1[key], state_dict2[key]):
+            return False
+    return True
+
+
+def find_module_content_in_state_dict(key: str, state_dict: dict[str, Any], module_name: str):
+    if f"{module_name}." in key:
+        return state_dict
+
+    pure_dict = {}
+    for key, value in state_dict.items():
+        if isinstance(value, dict):
+            result = find_module_content_in_state_dict(key, value, module_name=module_name)
+            if result is not None:
+                pure_dict.update(result)
+
+        elif f"{module_name}." in key:
+            pure_dict[key.replace(f"{module_name}.", "")] = value
+
+    return pure_dict
