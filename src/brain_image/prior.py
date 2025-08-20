@@ -26,7 +26,36 @@ from dalle2_pytorch import DiffusionPrior
 from dalle2_pytorch.train_configs import DiffusionPriorNetworkConfig
 from dalle2_pytorch.dalle2_pytorch import CausalTransformer, SinusoidalPosEmb, MLP
 
+from brain_image.configs import BaseConfig
 from brain_image.utils import DEVICE, DTYPE
+
+
+class BrainDiffusionPriorConfig(BaseConfig):
+    dim: int = 768
+    image_embed_dim: int = 768
+    depth: int = 3
+    dim_head: int = 64
+    attn_dropout: float = 0.2
+    ff_dropout: float = 0.2
+    timesteps: int = 500
+    cond_drop_prob: float = 0.0
+    image_cond_drop_prob: float = 0.0
+    num_timesteps: int = 250
+    num_time_embeds: int = 1
+    num_image_embeds: int = 1
+    num_text_embeds: int = 1
+    max_text_len: int = 0
+    self_cond: bool = False
+    num_output_tokens: int = 1
+    rotary_emb: bool = True
+    normformer: bool = True
+    norm_out: bool = False
+    loss_type: Literal["l2", "l1", "huber"] = "l2"
+    condition_on_text_encodings: bool = False
+    image_size: int = 224
+    predict_x_start: bool = True
+    sample_timesteps: int = 32
+    beta_schedule: Literal["cosine", "linear", "quadratic", "sigmoid"] = "cosine"
 
 
 class DiffusionPriorNetwork(nn.Module):
@@ -85,9 +114,7 @@ class DiffusionPriorNetwork(nn.Module):
         )
 
         self.learned_query = nn.Parameter(torch.randn(dim))
-        self.causal_transformer = CausalTransformer(
-            dim=dim, depth=depth, **kwargs
-        )
+        self.causal_transformer = CausalTransformer(dim=dim, depth=depth, **kwargs)
 
         # dalle1 learned padding strategy
 
@@ -138,7 +165,9 @@ class DiffusionPriorNetwork(nn.Module):
         image_cond_drop_prob=0.0,
     ):
         if text_encodings is not None:
-            raise NotImplementedError("text_encodings are not supported in the prior network")
+            raise NotImplementedError(
+                "text_encodings are not supported in the prior network"
+            )
 
         batch, dim, device, dtype = (
             *image_embed.shape,
@@ -171,7 +200,6 @@ class DiffusionPriorNetwork(nn.Module):
 
         # make text encodings optional
         # although the paper seems to suggest it is present <--
-
 
         # mask out text embeddings with null text embeddings
 
@@ -221,117 +249,47 @@ class BrainDiffusionPrior(DiffusionPrior):
 
     def __init__(
         self,
-        net: DiffusionPriorNetwork,
-        image_embed_dim: int,
-        timesteps: int = 1000,
-        cond_drop_prob: float = 0.0,
-        text_cond_drop_prob: float | None = None,
-        image_cond_drop_prob: float | None = None,
-        loss_type: Literal["l1", "l2", "huber"] = "l2",
-        predict_x_start: bool = True,
-        predict_v: bool = False,
-        beta_schedule: Literal["cosine", "linear", "quadratic", "jsd", "sigmoid"] = "cosine",
-        condition_on_text_encodings: bool = False,
+        config: BrainDiffusionPriorConfig,
         *args,
         **kwargs,
     ):
+
+        self.config = config
+        net = DiffusionPriorNetwork(
+            dim=config.dim,
+            num_timesteps=config.num_timesteps,
+            num_time_embeds=config.num_time_embeds,
+            num_image_embeds=config.num_image_embeds,
+            num_text_embeds=config.num_text_embeds,
+            max_text_len=config.max_text_len,
+            self_cond=config.self_cond, 
+            depth=config.depth,
+            num_output_tokens=config.num_output_tokens,
+            rotaty_emb=config.rotary_emb,
+            normformer=config.normformer,
+            norm_out=config.norm_out,
+            dim_head=config.dim_head,
+            attn_dropout=config.attn_dropout,
+            ff_dropout=config.ff_dropout,
+        )
+
         super().__init__(
             net=net,
-            timesteps=timesteps,
-            condition_on_text_encodings=condition_on_text_encodings,
-            cond_drop_prob=cond_drop_prob,
-            text_cond_drop_prob=text_cond_drop_prob,
-            image_cond_drop_prob=image_cond_drop_prob,
-            loss_type=loss_type,
-            predict_x_start=predict_x_start,
-            predict_v=predict_v,
-            beta_schedule=beta_schedule,
-            image_embed_dim=image_embed_dim,
+            image_embed_dim=config.image_embed_dim,
+            loss_type=config.loss_type,
+            cond_drop_prob=config.cond_drop_prob,
+            image_cond_drop_prob=config.image_cond_drop_prob,
+            condition_on_text_encodings=config.condition_on_text_encodings,
+            image_size=config.image_size,
+            predict_x_start=config.predict_x_start,
+            sample_timesteps=config.sample_timesteps,
+            beta_schedule=config.beta_schedule,
+            clip=None,
+            timesteps=config.timesteps,
             *args,
-            **kwargs,
+            **kwargs
         )
         self.net = net
-        self.image_embed_dim = image_embed_dim
-
-    @staticmethod
-    def from_pretrained(
-        prior_config_path: str | Path = Path("models/prior_config.json"),
-        prior_checkpoint_path: str | Path = Path("models/prior_checkpoint.pt"),
-        device: torch.device = DEVICE,
-        dtype: torch.dtype = DTYPE,
-        download_if_missing: bool = True,
-        prior_config_url: str = "https://huggingface.co/nousr/conditioned-prior/raw/main/vit-l-14/aesthetic/prior_config.json",
-        prior_checkpoint_url: str = "https://huggingface.co/nousr/conditioned-prior/resolve/main/vit-l-14/aesthetic/best.pth",
-        net_kwargs: dict = {},
-        prior_kwargs: dict = {},
-        max_text_len: int = 256,
-        **kwargs,
-    ):
-        prior_config_path = Path(prior_config_path)
-        prior_checkpoint_path = Path(prior_checkpoint_path)
-
-        logging.info(f"Loading prior network config from {prior_config_path}")
-
-        if download_if_missing and not prior_config_path.exists():
-            logging.info(f"Could not find prior network config at {prior_config_path}. Downloading from {prior_config_url}...")
-            prior_config_path.parent.mkdir(parents=True, exist_ok=True)
-            response = requests.get(
-                prior_config_url,
-                allow_redirects=True,
-            )
-            response.raise_for_status()
-
-            logging.info(f"Saving downloaded config to {prior_config_path}")
-            with open(prior_config_path, "w") as f:
-                json.dump(response.json(), f)
-
-        if download_if_missing and not prior_checkpoint_path.exists():
-            logging.info(f"Could not find prior network checkpoint at {prior_checkpoint_path}. Downloading from {prior_checkpoint_url}...")
-            prior_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-
-            response = requests.get(
-                prior_checkpoint_url,
-                allow_redirects=True,
-                stream=True,
-            )
-            response.raise_for_status()
-            with open(prior_checkpoint_path, "wb") as f, tqdm.tqdm(
-                desc="Downloading prior network checkpoint",
-                total=int(response.headers.get("content-length", 0)),
-                unit="iB",
-                unit_scale=True,
-                unit_divisor=1024,
-            ) as pbar:
-                for chunk in response.iter_content(chunk_size=1024):
-                    size = f.write(chunk)
-                    pbar.update(size)
-
-        with open(prior_config_path, "r") as f:
-            config = json.load(f)
-
-        prior_config = config.pop("prior")
-        prior_config["condition_on_text_encodings"] = False
-
-        net_config = prior_config.pop("net")
-        prior_config.pop("clip")
-
-        prior_config.update(prior_kwargs)
-        net_config["max_text_len"] = max_text_len
-        net_config.update(net_kwargs)
-    
-        net_config = DiffusionPriorNetworkConfig(**net_config).model_dump()  # Validate configs
-        net = DiffusionPriorNetwork(**net_config)
-
-        # From https://github.com/MedARC-AI/fMRI-reconstruction-NSD/blob/main/src/models.py#L390:
-        #   Note these keys will be missing (maybe due to an update to the code since training)
-        #   "net.null_text_encodings", "net.null_text_embeds", "net.null_image_embed"
-        #   I don't think these get used if `cond_drop_prob = 0` though (which is the default here)
-        prior =  BrainDiffusionPrior(net=net, clip=None, **prior_config).to(device, dtype)
-
-        prior_checkpoint = torch.load(prior_checkpoint_path, map_location=device)
-        prior.load_state_dict(prior_checkpoint, strict=False)
-
-        return prior
 
     @torch.no_grad()
     def p_sample(
@@ -371,7 +329,7 @@ class BrainDiffusionPrior(DiffusionPrior):
         generator: torch.Generator | None = None,
         progress_bar: bool = False,
         *args,
-        **kwargs
+        **kwargs,
     ):
         batch = shape[0]
         device = cast(torch.device, self.device)
@@ -519,7 +477,11 @@ class BrainDiffusionPrior(DiffusionPrior):
         # timestep conditioning from ddpm
 
         batch, device = image_embedding.shape[0], image_embedding.device
-        times = times if times is not None else self.noise_scheduler.sample_random_times(batch)
+        times = (
+            times
+            if times is not None
+            else self.noise_scheduler.sample_random_times(batch)
+        )
 
         image_embedding = image_embedding * cast(float, self.image_embed_scale)
 

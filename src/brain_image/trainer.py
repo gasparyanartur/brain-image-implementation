@@ -267,6 +267,7 @@ class NICETrainer(Trainer):
         if isinstance(dataset_config, dict):
             dataset_config = EEGDatasetConfig.model_validate(dataset_config)
 
+
         model = EEGAlignmentModel(
             config=model_config,
             dataset_config=dataset_config,

@@ -1,5 +1,5 @@
-f1: 128
-f2: 128
+f1: 32
+f2: 32
 pool1: 2
 stride1: 2
 pool2: 1
@@ -7,4 +7,4 @@ stride2: 1
 kernel1: 29
 kernel2: 17
 dropout: 0.5
-embed_dim: 256
+embed_dim: 32

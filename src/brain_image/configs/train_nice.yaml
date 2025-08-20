@@ -6,6 +6,7 @@ defaults:
   - model: nice_model
   - trainer: nice_trainer
   - encoder: eeg_encoder
+  - prior: diffusion_prior
   - _self_
 
 # Script-specific settings

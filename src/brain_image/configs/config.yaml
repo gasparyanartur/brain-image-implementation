@@ -11,6 +11,7 @@ defaults:
   - trainer: nice_trainer
   # Encoder configuration - can be swapped with: encoder=other_encoder
   - encoder: eeg_encoder
+  - prior: diffusion_prior
   # Override with local settings
   - _self_
 

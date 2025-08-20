@@ -42,7 +42,7 @@ from dreamsim.model import PerceptualModel
 
 from brain_image.reconstruction import ReconstructionPipeline
 from brain_image.utils import DTYPE, get_dtype, get_mean_gradients
-from brain_image.prior import BrainDiffusionPrior, DiffusionPriorNetwork
+from brain_image.prior import BrainDiffusionPrior, BrainDiffusionPriorConfig, DiffusionPriorNetwork
 
 task_type_options = ["align", "recon"]
 model_name_options = ["synclr", "clip"]
@@ -408,8 +408,6 @@ class EEGAlignmentConfig(BaseConfig):
     prior_len_loss_factor: float = 0.5
     project_image: bool = False
 
-    diffusion_dropout: float = 0.2
-
     recon_every_epochs: int = 1
 
     eeg_latent_dim: int = 1440
@@ -424,6 +422,7 @@ class EEGAlignmentConfig(BaseConfig):
     log_gradients: bool = False
 
     eeg_config: EEGEncoderConfig = EEGEncoderConfig()
+    prior_config: BrainDiffusionPriorConfig | None = BrainDiffusionPriorConfig()
 
     encoder_lr: float = 1e-3
     projector_lr: float = 1e-3
@@ -454,7 +453,7 @@ class EEGAlignmentConfig(BaseConfig):
     prog_bar_metrics: list[str] = [
         "TRAIN__loss",
         "VAL__loss",
-        "VAL__top1_acc",
+        "VAL__align_acc_top1",
         "VAL__prior_pred_cos",
     ]
 
@@ -472,7 +471,6 @@ class ResidualAdapter(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.layers(x) + x
-
 
 class EEGAlignmentModel(pl.LightningModule):
     def __init__(
@@ -549,36 +547,9 @@ class EEGAlignmentModel(pl.LightningModule):
         )
 
         if self.config.do_high_recon:
-            net = DiffusionPriorNetwork(
-                dim=self.config.img_latent_dim,
-                num_timesteps=250,
-                num_time_embeds=1,
-                num_image_embeds=1,
-                num_text_embeds=1,
-                max_text_len=0,
-                self_cond=False,
-                depth=3,
-                num_output_tokens=1,
-                rotary_emb=True,
-                normformer=True,
-                norm_out=False,
-                dim_head=64,
-                attn_dropout=self.config.diffusion_dropout,
-                ff_dropout=self.config.diffusion_dropout,
-            )
+            assert self.config.prior_config, "Prior config must be provided"
             self.prior = BrainDiffusionPrior(
-                net=net,
-                image_embed_dim=self.config.img_latent_dim,
-                loss_type="l2",
-                cond_drop_prob=0.0,
-                image_cond_drop_prob=0.0,
-                condition_on_text_encodings=False,
-                image_size=224,
-                predict_x_start=True,
-                sample_timesteps=32,
-                beta_schedule="cosine",
-                clip=None,
-                timesteps=net.num_timesteps or 500,
+                self.config.prior_config
             ).to(dtype)
 
         elif self.config.do_low_recon:
@@ -879,15 +850,27 @@ class EEGAlignmentModel(pl.LightningModule):
     def forward(self, img_latent: torch.Tensor, eeg_data: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 
-    def get_top_n_accuracy(self, sim: torch.Tensor, n: int = 1) -> float:
+    def get_top_n_accuracy(self, sim: torch.Tensor, ns: list[int] = [1, 3, 5], labels: torch.Tensor | None = None) -> list[float]:
         """Compute top-n accuracy."""
-        labels = torch.arange(sim.size(0), device=sim.device)
-        # Ensure n doesn't exceed batch size
-        n = min(n, sim.size(0))
-        top_n = sim.topk(n, dim=-1).indices
+        B = sim.size(0)
+        labels = torch.arange(sim.size(0), device=sim.device) if labels is None else labels.to(sim.device)
+        ns = sorted(ns)
+        max_n = min(max(ns), B) # Largest top-n cannot exceed batch size
+        top_n = sim.topk(max_n, dim=-1).indices # <B, n>
 
-        correct = top_n == labels.unsqueeze(1)
-        return (correct.any(dim=-1).float().sum() / correct.size(0)).item()
+        accuracies = []
+
+        for n in ns:
+            if n > max_n:
+                break
+
+            label_in_top_n = top_n[:, :n] == labels.unsqueeze(1)
+            num_labels_found = label_in_top_n.any(dim=-1).sum()
+            accuracy = num_labels_found / B
+            accuracies.append(accuracy.item())
+            
+        return accuracies
+
 
     @abstractmethod
     def get_brain_encoder(self) -> nn.Module:
@@ -1165,15 +1148,15 @@ class EEGAlignmentModel(pl.LightningModule):
 
                     if stage == "val" or stage == "test":
                         align_diag_sim = align_sim.diag().mean()
-                        top1_acc = self.get_top_n_accuracy(align_sim, n=1)
-                        top3_acc = self.get_top_n_accuracy(align_sim, n=3)
-                        top5_acc = self.get_top_n_accuracy(align_sim, n=5)
+                        top_ns = [1, 3, 5]
+                        top_n_accs = self.get_top_n_accuracy(
+                            align_sim, ns=top_ns
+                        )
+                        top_n_values = {f"align_acc_top{n}": acc for n, acc in zip(top_ns, top_n_accs)}
 
                         metrics.update(
                             {
-                                "top1_acc": top1_acc,
-                                "top3_acc": top3_acc,
-                                "top5_acc": top5_acc,
+                                **top_n_values,
                                 "align_diag_sim": align_diag_sim,
                             }
                         )
@@ -1252,32 +1235,18 @@ class EEGAlignmentModel(pl.LightningModule):
                         }
                     )
 
-            for loss_name, loss_value in losses.items():
-                self.log(
-                    f"{stage_prefix}{loss_name}",
-                    loss_value,
-                    prog_bar=loss_name in self.config.prog_bar_metrics,
-                    on_step=on_step,
-                    on_epoch=not on_step,
-                )
-
-            for metric_name, metric_value in metrics.items():
-                self.log(
-                    f"{stage_prefix}{metric_name}",
-                    metric_value,
-                    prog_bar=metric_name in self.config.prog_bar_metrics,
-                    on_step=on_step,
-                    on_epoch=not on_step,
-                )
-
             loss = torch.stack(list(losses.values())).sum()
-            self.log(
-                f"{stage_prefix}loss",
-                loss,
-                prog_bar=True,
-                on_step=on_step,
-                on_epoch=not on_step,
-            )
+            losses["loss"] = torch.stack(list(losses.values())).sum()
+
+            for metric_name, metric_value in it.chain(losses.items(), metrics.items()):
+                name = f"{stage_prefix}{metric_name}"
+                self.log(
+                    name,
+                    metric_value,
+                    prog_bar=name in self.config.prog_bar_metrics,
+                    on_step=on_step,
+                    on_epoch=not on_step,
+                )
 
         return loss, outputs, metrics
 
