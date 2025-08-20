@@ -825,11 +825,12 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             loss, outputs, metrics = self._run_step(batch, batch_idx, "val")
 
         if batch_idx == self.num_val_batches - 1:
-            if self.epoch % self.config.recon_every_epochs == 0:
-                if self.epoch == 0 and self.config.skip_recon_first_epoch:
-                    pass
-                else:
-                    self.evaluate_reconstructions(batch, batch_idx, "val")
+            if self.config.do_high_recon:
+                if self.epoch % self.config.recon_every_epochs == 0:
+                    if self.epoch == 0 and self.config.skip_recon_first_epoch:
+                        pass
+                    else:
+                        self.evaluate_reconstructions(batch, batch_idx, "val")
 
             self.epoch += 1
 
@@ -853,7 +854,8 @@ class EEGAlignmentModel(ABC, pl.LightningModule):
             loss, outputs, metrics = self._run_step(batch, batch_idx, "test")
 
         if batch_idx == self.num_test_batches - 1:
-            self.evaluate_reconstructions(batch, batch_idx, "test")
+            if self.config.do_high_recon:
+                self.evaluate_reconstructions(batch, batch_idx, "test")
 
         return loss, outputs, metrics
 
