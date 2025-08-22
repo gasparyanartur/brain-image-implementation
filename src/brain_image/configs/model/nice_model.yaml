@@ -47,7 +47,7 @@ lr_scheduler: "cosine_anneal"
 betas: [0.9, 0.999]
 
 # Training schedule
-warmup_start_frac: 0.35
+warmup_start_frac: 0.2
 max_epochs: 100
 
 recon_every_epochs: 1

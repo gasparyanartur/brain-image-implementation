@@ -248,9 +248,13 @@ class EEGEncoderConfig(BaseConfig):
     kernel1: int = 29
     kernel2: int = 17
     dropout: float = 0.5
-    embed_dim: int = 40
+    embed_dim: int = 64
     patch_out_size: int = 36  # Size of the output, divided by embed_dim
     output_dim: int = 768
+    noise_augment: float = 0.01
+    temporal_zero_prob: float = 0.05
+    spatial_zero_prob: float = 0.10
+
 
 
 class DebugLayer(nn.Module):
@@ -292,9 +296,18 @@ class EEGEncoder(nn.Module):
     def __init__(
         self,
         config: EEGEncoderConfig = EEGEncoderConfig(),
+        norm_func: type[nn.Module] = nn.BatchNorm2d,
+        act_func: type[nn.Module] = nn.GELU
     ):
         # Adapted from https://github.com/eeyhsong/NICE-EEG
         super(EEGEncoder, self).__init__()
+
+        self.noise_augment: float = config.noise_augment
+        self.temporal_zero_prob: float = config.temporal_zero_prob
+        self.spatial_zero_prob: float = config.spatial_zero_prob
+
+
+        norm = lambda c: nn.GroupNorm(num_groups=min(8, c), num_channels=c)  # drop-in
 
         self.patch_embedding = nn.Sequential(
             OrderedDict(
@@ -305,12 +318,13 @@ class EEGEncoder(nn.Module):
                             1,
                             config.f1,
                             kernel_size=(1, config.kernel1),
-                            stride=(1, config.pool1),
+                            stride=1,
+                            padding="same",
                             bias=False,
                         ),
                     ),
-                    ("norm1", nn.InstanceNorm2d(config.f1)),
-                    ("act1", nn.GELU()),
+                    ("norm1", norm(config.f1)),
+                    ("act1", act_func()),
                     ("dropout1", nn.Dropout(config.dropout, inplace=True)),
                     (
                         "conv2",
@@ -318,35 +332,60 @@ class EEGEncoder(nn.Module):
                             config.f1,
                             config.f2,
                             kernel_size=(config.kernel2, 1),
-                            stride=(1, config.stride2),
+                            stride=1,
+                            padding="same",
                             bias=False,
                         ),
                     ),
-                    ("norm2", nn.InstanceNorm2d(config.f2)),
-                    ("act2", nn.GELU()),
+                    ("norm2", norm(config.f2)),
+                    ("act2", act_func()),
                     ("dropout2", nn.Dropout(config.dropout, inplace=True)),
+                    ("pool", nn.AdaptiveAvgPool2d((1, config.patch_out_size))),
                     (
                         "projection",
-                        nn.Conv2d(config.f2, config.embed_dim, kernel_size=(1, 1)),
+                        nn.Conv2d(config.f2, config.embed_dim, kernel_size=1),
                     ),
                 ]
             ),
         )
+        
+        #self.patch_embedding = WrapDebugSequential(self.patch_embedding, "patch_embedding")
         self.proj = nn.Sequential(
             nn.Flatten(),
+            nn.LayerNorm(config.embed_dim * config.patch_out_size),
             nn.Linear(config.patch_out_size * config.embed_dim, config.output_dim),
+            nn.GELU(),
+            nn.Dropout(config.dropout),
             ResidualAdd(
                 nn.Sequential(
-                    nn.GELU(),
+                    nn.LayerNorm(config.output_dim),
                     nn.Linear(config.output_dim, config.output_dim),
+                    nn.GELU(),
                     nn.Dropout(config.dropout),
                 )
             ),
             nn.LayerNorm(config.output_dim),
-            nn.Linear(config.output_dim, config.output_dim),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, S, T = x.shape
+
+        if self.training:
+            if self.noise_augment > 0:
+                x += torch.randn_like(x) * self.noise_augment
+
+            if self.temporal_zero_prob > 0:
+                num_temporal = x.shape[-1]
+                zero_mask = torch.rand(num_temporal) < self.temporal_zero_prob
+                zero_mask = zero_mask[None, None, :].repeat(B, S, 1).to(x.device)
+                x[zero_mask] = 0.0
+
+            if self.spatial_zero_prob > 0:
+                num_spatial = x.shape[-2]
+                zero_mask = torch.rand(num_spatial) < self.spatial_zero_prob
+                zero_mask = zero_mask[None, :, None].repeat(B, 1, T).to(x.device)
+                x[zero_mask] = 0.0
+
         x = einops.rearrange(x, "b s t -> b 1 s t")
         x = self.patch_embedding(x)
         x = einops.rearrange(x, "b e (s) (t) -> b (s t e)")
@@ -465,8 +504,8 @@ class EEGAlignmentConfig(BaseConfig):
     prior_adapter_delay_epochs: int = 0
 
     lr_scheduler: Literal["none", "cosine_anneal"] = "cosine_anneal"
-    betas: tuple[float, float] = (0.9, 0.95)
-    weight_decay: float = 0.005
+    betas: tuple[float, float] = (0.9, 0.999)
+    weight_decay: float = 0.01
 
     max_epochs: int = 100
 

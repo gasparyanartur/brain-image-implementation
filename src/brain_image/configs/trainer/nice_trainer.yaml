@@ -16,7 +16,7 @@ checkpoint_dir: null
 enable_barebones: false
 checkpoint_monitor: "VAL__loss"
 checkpoint_monitor_mode: "min"
-checkpoint_monitor_early_stop: 10
+checkpoint_monitor_early_stop: 20
 
 overfit_batches: 0
 
