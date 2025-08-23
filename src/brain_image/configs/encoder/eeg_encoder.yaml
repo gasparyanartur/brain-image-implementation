@@ -1,7 +1,7 @@
 f1: 64
 f2: 64
-pool1: 2
-stride1: 2
+pool1: 10
+stride1: 5
 pool2: 1
 stride2: 1
 kernel1: 29

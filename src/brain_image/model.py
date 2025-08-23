@@ -250,11 +250,12 @@ class EEGEncoderConfig(BaseConfig):
     dropout: float = 0.5
     embed_dim: int = 64
     patch_out_size: int = 36  # Size of the output, divided by embed_dim
+    hidden_dim: int = 512
     output_dim: int = 768
-    noise_augment: float = 0.01
-    temporal_zero_prob: float = 0.05
-    spatial_zero_prob: float = 0.10
-
+    # noise_augment: float = 0.005
+    noise_augment: float = 0.0
+    temporal_zero_prob: float = 0.0
+    spatial_zero_prob: float = 0.0
 
 
 class DebugLayer(nn.Module):
@@ -297,7 +298,7 @@ class EEGEncoder(nn.Module):
         self,
         config: EEGEncoderConfig = EEGEncoderConfig(),
         norm_func: type[nn.Module] = nn.BatchNorm2d,
-        act_func: type[nn.Module] = nn.GELU
+        act_func: type[nn.Module] = nn.ELU,
     ):
         # Adapted from https://github.com/eeyhsong/NICE-EEG
         super(EEGEncoder, self).__init__()
@@ -306,65 +307,53 @@ class EEGEncoder(nn.Module):
         self.temporal_zero_prob: float = config.temporal_zero_prob
         self.spatial_zero_prob: float = config.spatial_zero_prob
 
-
-        norm = lambda c: nn.GroupNorm(num_groups=min(8, c), num_channels=c)  # drop-in
+        # norm = lambda c: nn.GroupNorm(num_groups=min(8, c), num_channels=c)  # drop-in
+        norm = norm_func
 
         self.patch_embedding = nn.Sequential(
-            OrderedDict(
-                [
-                    (
-                        "conv1",
-                        nn.Conv2d(
-                            1,
-                            config.f1,
-                            kernel_size=(1, config.kernel1),
-                            stride=1,
-                            padding="same",
-                            bias=False,
-                        ),
-                    ),
-                    ("norm1", norm(config.f1)),
-                    ("act1", act_func()),
-                    ("dropout1", nn.Dropout(config.dropout, inplace=True)),
-                    (
-                        "conv2",
-                        nn.Conv2d(
-                            config.f1,
-                            config.f2,
-                            kernel_size=(config.kernel2, 1),
-                            stride=1,
-                            padding="same",
-                            bias=False,
-                        ),
-                    ),
-                    ("norm2", norm(config.f2)),
-                    ("act2", act_func()),
-                    ("dropout2", nn.Dropout(config.dropout, inplace=True)),
-                    ("pool", nn.AdaptiveAvgPool2d((1, config.patch_out_size))),
-                    (
-                        "projection",
-                        nn.Conv2d(config.f2, config.embed_dim, kernel_size=1),
-                    ),
-                ]
+            nn.Conv2d(
+                1,
+                config.f1,
+                kernel_size=(1, config.kernel1),
+                bias=False,
             ),
+            nn.AvgPool2d(kernel_size=(1, config.pool1), stride=(1, config.stride1)),
+            norm(config.f1),
+            act_func(),
+            nn.Conv2d(
+                config.f1,
+                config.f2,
+                kernel_size=(config.kernel2, 1),
+                bias=False,
+            ),
+            norm(config.f2),
+            act_func(),
+            nn.AdaptiveAvgPool2d((1, config.patch_out_size)),
+            nn.Dropout(config.dropout, inplace=True),
+            nn.Conv2d(config.f2, config.embed_dim, kernel_size=1),
         )
-        
-        #self.patch_embedding = WrapDebugSequential(self.patch_embedding, "patch_embedding")
+
+        if os.getenv("DEBUG_EEG_LAYERS"):
+            self.patch_embedding = WrapDebugSequential(
+                self.patch_embedding, "patch_embedding"
+            )
+
         self.proj = nn.Sequential(
             nn.Flatten(),
             nn.LayerNorm(config.embed_dim * config.patch_out_size),
-            nn.Linear(config.patch_out_size * config.embed_dim, config.output_dim),
+            nn.Linear(config.patch_out_size * config.embed_dim, config.hidden_dim),
             nn.GELU(),
             nn.Dropout(config.dropout),
             ResidualAdd(
                 nn.Sequential(
-                    nn.LayerNorm(config.output_dim),
-                    nn.Linear(config.output_dim, config.output_dim),
+                    nn.LayerNorm(config.hidden_dim),
+                    nn.Linear(config.hidden_dim, config.hidden_dim),
                     nn.GELU(),
                     nn.Dropout(config.dropout),
                 )
             ),
-            nn.LayerNorm(config.output_dim),
+            nn.LayerNorm(config.hidden_dim),
+            nn.Linear(config.hidden_dim, config.output_dim),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -687,7 +676,7 @@ class EEGAlignmentModel(pl.LightningModule):
         self.modules_to_compile: list[str] = modules_to_compile
 
         self.learning_rate_options: list[dict[str, Any]] = []
-        self.epoch = -1 # Incremented once at the data loader
+        self.epoch = -1  # Incremented once at the data loader
 
     def configure_optimizers(self):
         @dataclass
@@ -1036,8 +1025,9 @@ class EEGAlignmentModel(pl.LightningModule):
             scheduler.step()  # type: ignore
 
         scheduler_step = scheduler.last_epoch if scheduler is not None else -1
-        self.log("LR__STEP", scheduler_step, prog_bar=False, on_step=True, on_epoch=False)
-
+        self.log(
+            "LR__STEP", scheduler_step, prog_bar=False, on_step=True, on_epoch=False
+        )
 
         for opt_option in self.learning_rate_options:
             name = opt_option["name"]
@@ -1129,7 +1119,9 @@ class EEGAlignmentModel(pl.LightningModule):
                         self.evaluate_reconstructions(batch, batch_idx, "val")
 
             self.epoch += 1
-            logging.info(f"Epoch: {self.epoch-1} -> {self.epoch}, Training step: {self.global_step}")
+            logging.info(
+                f"Epoch: {self.epoch-1} -> {self.epoch}, Training step: {self.global_step}"
+            )
 
         return loss, outputs, metrics
 
