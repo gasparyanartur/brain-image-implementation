@@ -239,18 +239,18 @@ def normalize_projection(
 
 
 class EEGEncoderConfig(BaseConfig):
-    f1: int = 64
-    f2: int = 64
-    pool1: int = 2
-    stride1: int = 2
-    pool2: int = 1
+    f1: int = 128
+    f2: int = 128
+    pool1: int = 4
+    stride1: int = 4
+    pool2: int = 4
     stride2: int = 1
-    kernel1: int = 29
+    kernel1: int = 15
     kernel2: int = 17
     dropout: float = 0.5
-    embed_dim: int = 64
-    patch_out_size: int = 36  # Size of the output, divided by embed_dim
-    hidden_dim: int = 512
+    embed_dim: int = 128
+    patch_out_size: int = 21  # Size of the output, divided by embed_dim
+    hidden_dim: int = 1024
     output_dim: int = 768
     # noise_augment: float = 0.005
     noise_augment: float = 0.0
@@ -292,6 +292,22 @@ class ResidualAdd(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.module(x)
 
+def is_debug_layer_active(layer_name: str) -> bool:
+    query = "DEBUG_" + layer_name.upper().strip()
+    result = os.getenv(query)
+    if result is None:
+        result = os.getenv(query.lower())
+        if result is None:
+            return False
+
+    result = result.lower().strip()
+    if result in {"1", "true", "yes"}:
+        return True
+    elif result in {"0", "false", "no"}:
+        return False
+    else:
+        raise ValueError(f"Invalid value for {layer_name}: {result}")
+
 
 class EEGEncoder(nn.Module):
     def __init__(
@@ -317,9 +333,9 @@ class EEGEncoder(nn.Module):
                 kernel_size=(1, config.kernel1),
                 bias=False,
             ),
-            nn.AvgPool2d(kernel_size=(1, config.pool1), stride=(1, config.stride1)),
             norm(config.f1),
             act_func(),
+            nn.AvgPool2d(kernel_size=(1, config.pool1), stride=(1, config.stride1)),
             nn.Conv2d(
                 config.f1,
                 config.f2,
@@ -328,12 +344,11 @@ class EEGEncoder(nn.Module):
             ),
             norm(config.f2),
             act_func(),
-            nn.AdaptiveAvgPool2d((1, config.patch_out_size)),
             nn.Dropout(config.dropout, inplace=True),
             nn.Conv2d(config.f2, config.embed_dim, kernel_size=1),
         )
 
-        if os.getenv("DEBUG_EEG_LAYERS"):
+        if is_debug_layer_active("eeg_layers"):
             self.patch_embedding = WrapDebugSequential(
                 self.patch_embedding, "patch_embedding"
             )
@@ -342,14 +357,11 @@ class EEGEncoder(nn.Module):
             nn.Flatten(),
             nn.LayerNorm(config.embed_dim * config.patch_out_size),
             nn.Linear(config.patch_out_size * config.embed_dim, config.hidden_dim),
-            nn.GELU(),
             nn.Dropout(config.dropout),
             ResidualAdd(
                 nn.Sequential(
-                    nn.LayerNorm(config.hidden_dim),
-                    nn.Linear(config.hidden_dim, config.hidden_dim),
                     nn.GELU(),
-                    nn.Dropout(config.dropout),
+                    nn.Linear(config.hidden_dim, config.hidden_dim),
                 )
             ),
             nn.LayerNorm(config.hidden_dim),
@@ -366,18 +378,22 @@ class EEGEncoder(nn.Module):
             if self.temporal_zero_prob > 0:
                 num_temporal = x.shape[-1]
                 zero_mask = torch.rand(num_temporal) < self.temporal_zero_prob
-                zero_mask = zero_mask[None, None, :].repeat(B, S, 1).to(x.device)
-                x[zero_mask] = 0.0
+                zero_mask = (
+                    zero_mask[None, None, :].repeat(B, S, 1).to(x.device, dtype=x.dtype)
+                )
+                x = x * (1 - zero_mask)
 
             if self.spatial_zero_prob > 0:
                 num_spatial = x.shape[-2]
                 zero_mask = torch.rand(num_spatial) < self.spatial_zero_prob
-                zero_mask = zero_mask[None, :, None].repeat(B, 1, T).to(x.device)
-                x[zero_mask] = 0.0
+                zero_mask = (
+                    zero_mask[None, :, None].repeat(B, 1, T).to(x.device, dtype=x.dtype)
+                )
+                x = x * (1 - zero_mask)
 
         x = einops.rearrange(x, "b s t -> b 1 s t")
         x = self.patch_embedding(x)
-        x = einops.rearrange(x, "b e (s) (t) -> b (s t e)")
+        x = einops.rearrange(x, "b e s t -> b (s t e)")
         x = self.proj(x)
         return x
 
@@ -779,7 +795,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 schedulers.append(
                     torch.optim.lr_scheduler.CosineAnnealingLR(
                         optimizer,
-                        T_max=total_steps,
+                        T_max=total_steps - max(milestones or [0]),
                         eta_min=optimizer_config.min_lr,
                     )
                 )
@@ -1244,7 +1260,10 @@ class EEGAlignmentModel(pl.LightningModule):
                         )
 
                 if self.config.do_high_recon and (
-                    self.epoch >= self.config.prior_delay_epochs
+                    (self.epoch >= self.config.prior_delay_epochs)
+                    or (
+                        stage != "train"
+                    )  # On training step, no need to run this if it's not time
                 ):
                     if self.config.prior_debug_mode:
                         proj_eeg_latent = batch["align_image_latent"].to(device)
