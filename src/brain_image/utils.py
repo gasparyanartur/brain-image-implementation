@@ -10,6 +10,31 @@ import os
 import matplotlib.pyplot as plt
 
 
+def investigate_tensor(name: str, v: torch.Tensor) -> None:
+    items = {
+        "shape": tuple(v.shape),
+        "dtype": v.dtype,
+    }
+
+    if v.ndim > 0:
+        if v.dtype in {torch.float16, torch.float32, torch.float64}:
+            items["norm"] = v.norm(dim=-1).mean().item()
+            items["min"] = v.min(dim=-1).values.mean().item()
+            items["max"] = v.max(dim=-1).values.mean().item()
+            items["mean"] = v.mean(dim=-1).mean().item()
+            items["std"] = v.std(dim=-1).mean().item()
+
+    else:
+        items["value"] = v.item()
+
+    print(f"Name: {name}")
+    for k, v in items.items():
+        if isinstance(v, float):
+            print(f"* {k}: {v:.3f}")
+        else:
+            print(f"* {k}: {v}")
+
+
 def get_dtype(dtype: str) -> torch.dtype:
     """Convert a string to a torch dtype."""
     match dtype:

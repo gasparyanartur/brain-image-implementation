@@ -460,6 +460,7 @@ class EEGAlignmentConfig(BaseConfig):
     use_embed_adapter: bool = False
     use_prior_adapter: bool = False
     skip_recon_first_epoch: bool = False
+    plot_tsne: bool = True
 
     align_loss_factor: float = 0.2
     prior_loss_factor: float = 0.0
@@ -1126,14 +1127,9 @@ class EEGAlignmentModel(pl.LightningModule):
         with torch.autocast(device_type=device.type, dtype=dtype):
             loss, outputs, metrics = self._run_step(batch, batch_idx, "val")
 
-        if batch_idx == 0:
-            if self.config.do_high_recon:
-                if self.epoch % self.config.recon_every_epochs == 0:
-                    if self.epoch == 0 and self.config.skip_recon_first_epoch:
-                        pass
-                    else:
-                        self.evaluate_reconstructions(batch, batch_idx, "val")
-
+        if batch_idx == self.num_val_batches - 1:
+            self._run_full_validation(split="val")
+            
             self.epoch += 1
             logging.info(
                 f"Epoch: {self.epoch-1} -> {self.epoch}, Training step: {self.global_step}"
@@ -1159,10 +1155,25 @@ class EEGAlignmentModel(pl.LightningModule):
             loss, outputs, metrics = self._run_step(batch, batch_idx, "test")
 
         if batch_idx == self.num_test_batches - 1:
-            if self.config.do_high_recon:
-                self.evaluate_reconstructions(batch, batch_idx, "test")
+            self._run_full_validation(split="test")
 
         return loss, outputs, metrics
+
+    @torch.no_grad()
+    def _run_full_validation(self, split: Literal["val", "test"]):
+        all_samples = []        # TODO
+
+        if self.config.do_high_recon:
+            if split == "test" or (self.epoch % self.config.recon_every_epochs == 0):
+                if self.epoch == 0 and self.config.skip_recon_first_epoch:
+                    pass
+                else:
+                    recon_batch = next(iter(self.data_module.val_dataloader() if split == "val" else self.data_module.test_dataloader()))
+                    self.evaluate_reconstructions(recon_batch, split)
+
+        if self.config.plot_tsne:
+            # TODO
+            ...
 
     def _run_step(
         self,
@@ -1265,6 +1276,11 @@ class EEGAlignmentModel(pl.LightningModule):
                         stage != "train"
                     )  # On training step, no need to run this if it's not time
                 ):
+                    # TODO: Plot latents L2
+                    # TODO: Plot TSNE
+                    # TODO: Try using top-1 synclr embeddings as conditioning
+                    # TODO: Get prior loss working somehow
+
                     if self.config.prior_debug_mode:
                         proj_eeg_latent = batch["align_image_latent"].to(device)
 
@@ -1288,7 +1304,7 @@ class EEGAlignmentModel(pl.LightningModule):
                     target_latent_dir = target_latent / (
                         target_latent.norm(dim=-1, keepdim=True) + eps
                     )
-                    target_latent_len = target_latent.norm(dim=-1)
+                    target_latent_len = target_latent.norm(p=2, dim=-1)
 
                     # Note: We use the projected EEG latent here because the original latent is not same dim as images
                     prior_loss, prior_pred = self.prior(
@@ -1356,13 +1372,12 @@ class EEGAlignmentModel(pl.LightningModule):
     def evaluate_reconstructions(
         self,
         batch,
-        batch_idx,
         stage: Literal["val", "test"],
         log_images: bool = True,
         num_reconstructions: int = 5,
     ):
         recon_imgs, recon_target = self.get_reconstructions(
-            batch, batch_idx, stage, num_reconstructions=num_reconstructions
+            batch, stage, num_reconstructions=num_reconstructions
         )
 
         stage_prefix = f"{stage.upper()}__"
@@ -1436,7 +1451,6 @@ class EEGAlignmentModel(pl.LightningModule):
     def get_reconstructions(
         self,
         batch,
-        batch_idx,
         stage: Literal["val", "test"],
         num_reconstructions: int = 5,
         eps: float = 1e-8,
