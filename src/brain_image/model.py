@@ -30,6 +30,8 @@ import lightning as pl
 import tqdm
 from lightning.pytorch.loggers import WandbLogger
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from PIL import Image
+import wandb
 
 from brain_image.configs import BaseConfig, get_device, get_device_str
 from brain_image.data import (
@@ -242,26 +244,6 @@ def normalize_projection(
     return nn.functional.normalize(x, dim=-1, p=2)
 
 
-class EEGEncoderConfig(BaseConfig):
-    f1: int = 128
-    f2: int = 128
-    pool1: int = 4
-    stride1: int = 4
-    pool2: int = 4
-    stride2: int = 1
-    kernel1: int = 15
-    kernel2: int = 17
-    dropout: float = 0.5
-    embed_dim: int = 128
-    patch_out_size: int = 21  # Size of the output, divided by embed_dim
-    hidden_dim: int = 1024
-    output_dim: int = 768
-    # noise_augment: float = 0.005
-    noise_augment: float = 0.0
-    temporal_zero_prob: float = 0.0
-    spatial_zero_prob: float = 0.0
-
-
 class DebugLayer(nn.Module):
     def __init__(self, note: str = ""):
         super(DebugLayer, self).__init__()
@@ -314,6 +296,26 @@ def is_debug_layer_active(layer_name: str) -> bool:
         raise ValueError(f"Invalid value for {layer_name}: {result}")
 
 
+class EEGEncoderConfig(BaseConfig):
+    f1: int = 64
+    f2: int = 128
+    pool1: int = 8
+    stride1: int = 5
+    pool2: int = 4
+    stride2: int = 1
+    kernel1: int = 25
+    kernel2: int = 17
+    dropout: float = 0.5
+    embed_dim: int = 128
+    patch_out_size: int = 16  
+    hidden_dim: int = 768
+    output_dim: int = 768
+    # noise_augment: float = 0.005
+    noise_augment: float = 0.0
+    temporal_zero_prob: float = 0.0
+    spatial_zero_prob: float = 0.0
+
+
 class EEGEncoder(nn.Module):
     def __init__(
         self,
@@ -337,14 +339,16 @@ class EEGEncoder(nn.Module):
                 config.f1,
                 kernel_size=(1, config.kernel1),
                 bias=False,
+                stride=(1, config.stride1),
             ),
             norm(config.f1),
             act_func(),
-            nn.AvgPool2d(kernel_size=(1, config.pool1), stride=(1, config.stride1)),
+            # nn.AvgPool2d(kernel_size=(1, config.pool1), stride=(1, config.stride1), ceil_mode=True),
             nn.Conv2d(
                 config.f1,
                 config.f2,
                 kernel_size=(config.kernel2, 1),
+                #kernel_size=(1, 16),  # Pro Gamer Move
                 bias=False,
             ),
             norm(config.f2),
@@ -359,14 +363,13 @@ class EEGEncoder(nn.Module):
             )
 
         self.proj = nn.Sequential(
-            nn.Flatten(),
             nn.LayerNorm(config.embed_dim * config.patch_out_size),
             nn.Linear(config.patch_out_size * config.embed_dim, config.hidden_dim),
-            nn.Dropout(config.dropout),
             ResidualAdd(
                 nn.Sequential(
                     nn.GELU(),
                     nn.Linear(config.hidden_dim, config.hidden_dim),
+                    nn.Dropout(config.dropout),
                 )
             ),
             nn.LayerNorm(config.hidden_dim),
@@ -441,17 +444,38 @@ class CLIPLoss(nn.Module):
         self.cross_entropy = nn.CrossEntropyLoss()
 
     def forward(
-        self, z_i: torch.Tensor, z_j: torch.Tensor
+        self, z_i: torch.Tensor, z_j: torch.Tensor, labels: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         sim = z_j @ z_i.T
-        labels = torch.arange(sim.shape[0], device=sim.device)
+        if labels is None:
+            labels = torch.zeros((z_j.size(0), z_j.size(0)), device=z_i.device)
+            for i in range(labels.shape[0]):
+                labels[i, i] = 1
+
+        labels = labels if labels is not None else torch.arange(sim.shape[0], device=sim.device)
         sim_scaled = sim * self.logit_scale.exp()
 
-        loss_e = torch.nn.functional.cross_entropy(sim_scaled, labels)
-        loss_i = torch.nn.functional.cross_entropy(sim_scaled.T, labels)
+        loss_e = torch.nn.functional.binary_cross_entropy_with_logits(sim_scaled, labels)
+        loss_i = torch.nn.functional.binary_cross_entropy_with_logits(sim_scaled.T, labels)
         loss = (loss_e + loss_i) / 2
 
         return loss, sim
+
+
+def get_belong_group(img_path: list[Path]) -> torch.Tensor:
+    unique_ids = {v: k for k, v in enumerate(img_path)}
+            
+    belonings = [[] for _ in range(len(img_path))]
+    for i, p in enumerate(img_path):
+        belonings[unique_ids[p]].append(i)
+
+    path_groups = torch.zeros((len(img_path), len(img_path)), dtype=torch.long)
+    for i, p in enumerate(img_path):
+        path_groups[i, i] = 1
+        for op in belonings[i]:
+            path_groups[i, op] = 1
+
+    return path_groups.float()
 
 
 class EEGAlignmentConfig(BaseConfig):
@@ -461,6 +485,8 @@ class EEGAlignmentConfig(BaseConfig):
     do_align: bool = True
     do_low_recon: bool = False
     do_high_recon: bool = True
+
+    align_input_noise: float = 0.01
 
     use_embed_adapter: bool = False
     use_prior_adapter: bool = False
@@ -528,7 +554,7 @@ class EEGAlignmentConfig(BaseConfig):
     prog_bar_metrics: list[str] = [
         "TRAIN__loss",
         "VAL__loss",
-        "VAL__align_acc_top1",
+        "VAL__align_top1_acc",
         "VAL__prior_pred_cos",
     ]
 
@@ -884,31 +910,25 @@ class EEGAlignmentModel(pl.LightningModule):
                 nn.init.normal_(m.weight, mean=1.0, std=0.02)
                 nn.init.zeros_(m.bias)
 
-    def train_dataloader(self) -> torch.utils.data.DataLoader:
-        """Return the training dataloader."""
-        return self.data_module.train_dataloader()
+    def train_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
+        return self.data_module.train_dataloader(**kwargs)
 
-    def val_dataloader(self) -> torch.utils.data.DataLoader:
-        """Return the validation dataloader."""
-        return self.data_module.val_dataloader()
+    def val_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
+        return self.data_module.val_dataloader(**kwargs)
 
-    def test_dataloader(self) -> torch.utils.data.DataLoader:
-        """Return the test dataloader."""
-        return self.data_module.test_dataloader()
+    def test_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
+        return self.data_module.test_dataloader(**kwargs)
 
     @cached_property
     def num_train_batches(self) -> int:
-        """Return the length of the training dataloader."""
         return len(self.data_module.train_dataloader())
 
     @cached_property
     def num_val_batches(self) -> int:
-        """Return the length of the validation dataloader."""
         return len(self.data_module.val_dataloader())
 
     @cached_property
     def num_test_batches(self) -> int:
-        """Return the length of the test dataloader."""
         return len(self.data_module.test_dataloader())
 
     @classmethod
@@ -945,7 +965,6 @@ class EEGAlignmentModel(pl.LightningModule):
         ns: list[int] = [1, 3, 5],
         labels: torch.Tensor | None = None,
     ) -> list[float]:
-        """Compute top-n accuracy."""
         B = sim.size(0)
         labels = (
             torch.arange(sim.size(0), device=sim.device)
@@ -1033,8 +1052,7 @@ class EEGAlignmentModel(pl.LightningModule):
             else get_device(self.device)
         )
 
-        with torch.autocast(device_type=device.type, dtype=dtype):
-            loss, outputs, metrics = self._run_step(batch, batch_idx, "train")
+        loss, outputs, metrics = self._run_step(batch, batch_idx, "train")
 
         self.manual_backward(loss)
 
@@ -1121,17 +1139,7 @@ class EEGAlignmentModel(pl.LightningModule):
     ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
         self.set_mode("val")
 
-        dtype = (
-            self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
-        )
-        device = (
-            self.device
-            if isinstance(self.device, torch.device)
-            else get_device(self.device)
-        )
-
-        with torch.autocast(device_type=device.type, dtype=dtype):
-            loss, outputs, metrics = self._run_step(batch, batch_idx, "val")
+        loss, outputs, metrics = self._run_step(batch, batch_idx, "val")
 
         if batch_idx == self.num_val_batches - 1:
             self._run_full_validation(split="val")
@@ -1151,17 +1159,7 @@ class EEGAlignmentModel(pl.LightningModule):
     ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
         self.set_mode("test")
 
-        dtype = (
-            self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
-        )
-        device = (
-            self.device
-            if isinstance(self.device, torch.device)
-            else get_device(self.device)
-        )
-
-        with torch.autocast(device_type=device.type, dtype=dtype):
-            loss, outputs, metrics = self._run_step(batch, batch_idx, "test")
+        loss, outputs, metrics = self._run_step(batch, batch_idx, "test")
 
         if batch_idx == self.num_test_batches - 1:
             self._run_full_validation(split="test")
@@ -1251,6 +1249,22 @@ class EEGAlignmentModel(pl.LightningModule):
         return torch.cat(all_prior_preds_, dim=0)
 
     @torch.no_grad()
+    def get_all_eeg_latents(
+        self,
+        all_data: dict,
+        batch_size: int = 512,
+        progress_bar: bool = True,
+        eps: float = 1e-8,
+    ) -> torch.Tensor | None:
+        if self.eeg_encoder is None:
+            return None
+
+        device, dtype = self._get_device_dtype()
+        proj_eeg_latent = self._get_proj_eeg_latent(all_data, device, dtype, eps=eps)
+
+        return proj_eeg_latent.detach().cpu()
+
+    @torch.no_grad()
     def _plot_lowdim_projection(
         self, all_data: dict, show_plot: bool = False
     ) -> dict[str, Any]:
@@ -1309,10 +1323,12 @@ class EEGAlignmentModel(pl.LightningModule):
 
         logging.info(f"Finished projecting latents in {t2 - t1:.3f} seconds")
 
-        return {"lowdim_proj": fig}
+        return {"VAL__lowdim_proj": fig}
 
     @torch.no_grad()
     def _run_full_validation(self, split: Literal["val", "test"]) -> None:
+        stage_prefix = f"{split.upper()}__"
+
         is_not_first_or_flag_set = (self.epoch > 0) or (
             not self.config.skip_eval_first_epoch
         )
@@ -1323,28 +1339,74 @@ class EEGAlignmentModel(pl.LightningModule):
             return
 
         outputs = {}
+        img_outputs = {}
 
+        data_generator = torch.Generator().manual_seed(42)
         data_loader = (
-            self.val_dataloader() if split == "val" else self.test_dataloader()
+            self.val_dataloader(generator=data_generator)
+            if split == "val"
+            else self.test_dataloader(generator=data_generator)
         )
+        
         all_data = gather_dataloader(
             data_loader, lambda b: self.prepare_batch(b, stage=split)
         )
-
         device, dtype = self._get_device_dtype()
 
-        gen = torch.Generator(device).manual_seed(42)
-        all_prior_preds = self.get_all_prior_preds(
-            all_data,
-            progress_bar=True,
-            generator=gen,
-            batch_size=self.data_module.config.val_batch_size,
-        )
-        if all_prior_preds is not None:
+        if self.config.do_align:
+            target_img_paths = all_data["img_path"]
+            eeg_latents = self.get_all_eeg_latents(
+                {"eeg_data": all_data["eeg_data"]}
+            )
+            align_image_latent = all_data["align_image_latent"]
+
+            assert isinstance(
+                align_image_latent, torch.Tensor
+            ), "Align image latent is not a tensor"
+            assert eeg_latents is not None, "EEG latents are not initialized"
+
+            if self.config.project_image:
+                assert (
+                    self.align_img_projector is not None
+                ), "Image projector is not initialized"
+                align_image_latent = self.align_img_projector(align_image_latent)
+
+            align_image_latent_normed = nn.functional.normalize(
+                align_image_latent - align_image_latent.mean(dim=-1, keepdim=True),
+                p=2,
+                dim=-1,
+            )
+
+            sim = eeg_latents @ align_image_latent_normed.T
+            top_sim = sim.topk(1, dim=-1).indices.flatten()  # <B, 1>
+
+            chosen_img_paths = [all_data["img_path"][i] for i in top_sim]
+            num_correct = sum([x == y for x, y in zip(chosen_img_paths, target_img_paths)])
+            top1_acc = num_correct / len(target_img_paths)
+
+            img_outputs.update(
+                {
+                    f"align_test_target": [wandb.Image(x) for x in target_img_paths[:3]],  # type: ignore
+                    f"align_test_chosen": [wandb.Image(x) for x in chosen_img_paths[:3]],  # type: ignore
+                }
+            )
+            outputs.update({
+                "align_top1_acc": top1_acc,
+            })
+
+        if self.config.do_high_recon:
+            gen = torch.Generator(device).manual_seed(42)
+            all_prior_preds = self.get_all_prior_preds(
+                all_data,
+                progress_bar=True,
+                generator=gen,
+                batch_size=self.data_module.config.val_batch_size,
+            )
+            assert all_prior_preds is not None
+
             all_prior_preds = all_prior_preds.detach().cpu()
             all_data["prior_pred"] = all_prior_preds
 
-        if self.config.do_high_recon:
             if self.epoch == 0 and self.config.skip_eval_first_epoch:
                 pass
             else:
@@ -1354,12 +1416,19 @@ class EEGAlignmentModel(pl.LightningModule):
                     num_reconstructions=self.config.num_reconstructions,
                 )
 
-        if self.config.plot_lowdim_proj:
-            outputs.update(self._plot_lowdim_projection(all_data))
+            if self.config.plot_lowdim_proj:
+                outputs.update(self._plot_lowdim_projection(all_data))
 
-        wandb_logger = self.get_wandb_logger()
-        if wandb_logger is not None:
-            wandb_logger.log_metrics(outputs)
+        if (wandb_logger := self.get_wandb_logger()) is not None:
+            if outputs:
+                wandb_logger.log_metrics(
+                    {stage_prefix + k: v for k, v in outputs.items()}
+                )
+            if img_outputs:
+                for k, v in img_outputs.items():
+                    wandb_logger.log_image(key=stage_prefix + k, images=v)
+
+
 
     def _run_step(
         self,
@@ -1378,170 +1447,159 @@ class EEGAlignmentModel(pl.LightningModule):
             else get_device(self.device)
         )
 
-        with torch.autocast(device_type=device.type):
-            if self.eeg_encoder is not None:
-                proj_eeg_latent = self._get_proj_eeg_latent(
-                    batch, device, self.dtype, eps=eps, use_align_if_debug=False
-                )
+        if self.eeg_encoder is not None:
+            proj_eeg_latent = self._get_proj_eeg_latent(
+                batch, device, self.dtype, eps=eps, use_align_if_debug=False
+            )
 
-            else:
-                proj_eeg_latent = None
+        else:
+            proj_eeg_latent = None
 
-            losses: dict[str, torch.Tensor] = {}
-            metrics = {}
-            outputs = {}
+        losses: dict[str, torch.Tensor] = {}
+        metrics = {}
+        outputs = {}
 
-            on_step = stage == "train"
+        on_step = stage == "train"
 
-            with (
-                torch.no_grad()
-                if (stage == "val" or stage == "test")
-                else nullcontext()
-            ):
-                if self.config.do_align:
-                    assert proj_eeg_latent is not None, "EEG latent is not initialized"
-                    assert self.align_loss is not None, "Align loss is not initialized"
+        with (
+            torch.no_grad()
+            if (stage == "val" or stage == "test")
+            else nullcontext()
+        ):
+            if self.config.do_align:
+                assert proj_eeg_latent is not None, "EEG latent is not initialized"
+                assert self.align_loss is not None, "Align loss is not initialized"
 
-                    align_image_latent = batch["align_image_latent"].to(device)
+                align_image_latent = batch["align_image_latent"].to(device)
 
-                    if self.config.project_image:
-                        assert (
-                            self.align_img_projector is not None
-                        ), "Image projector is not initialized"
-                        align_image_latent = self.align_img_projector(
-                            align_image_latent
-                        )
-
-                    align_image_latent_normed = nn.functional.normalize(
+                if self.config.project_image:
+                    assert (
+                        self.align_img_projector is not None
+                    ), "Image projector is not initialized"
+                    align_image_latent = self.align_img_projector(
                         align_image_latent
-                        - align_image_latent.mean(dim=-1, keepdim=True),
-                        p=2,
-                        dim=-1,
-                        eps=eps,
                     )
 
-                    align_loss, align_sim = self.align_loss(
-                        align_image_latent_normed, proj_eeg_latent
-                    )
-                    align_loss = align_loss * self.config.align_loss_factor
-                    losses.update({"align_loss": align_loss})
-
-                    outputs.update(
-                        {
-                            "align_sim": align_sim,
-                            "align_image_latent": align_image_latent,
-                        }
-                    )
-
-                    if stage == "val" or stage == "test":
-                        align_diag_sim = align_sim.diag().mean()
-                        top_ns = [1, 3, 5]
-                        top_n_accs = self.get_top_n_accuracy(align_sim, ns=top_ns)
-                        top_n_values = {
-                            f"align_acc_top{n}": acc
-                            for n, acc in zip(top_ns, top_n_accs)
-                        }
-
-                        metrics.update(
-                            {
-                                **top_n_values,
-                                "align_diag_sim": align_diag_sim,
-                            }
-                        )
-
-                if self.config.do_high_recon and (
-                    (self.epoch >= self.config.prior_delay_epochs)
-                    or (
-                        stage != "train"
-                    )  # On training step, no need to run this if it's not time
-                ):
-                    # TODO: Try using top-1 synclr embeddings as conditioning
-                    # TODO: Get prior loss working somehow
-
-                    if self.config.prior_debug_mode:
-                        proj_eeg_latent = self._get_proj_eeg_latent(
-                            batch, device, self.dtype, eps=eps, use_align_if_debug=True
-                        )
-                    else:
-                        assert (
-                            proj_eeg_latent is not None
-                        ), "EEG latent is not initialized"
-
-                    assert self.prior is not None, "Prior is not initialized"
-
-                    target_latent = cast(
-                        torch.Tensor, batch["high_recon_image_latent"].to(device)
-                    )
-
-                    target_latent_dir = target_latent / (
-                        target_latent.norm(dim=-1, keepdim=True) + eps
-                    )
-                    target_latent_len = target_latent.norm(p=2, dim=-1)
-
-                    # Note: We use the projected EEG latent here because the original latent is not same dim as images
-                    prior_loss, prior_pred = self.prior(
-                        brain_embedding=proj_eeg_latent,
-                        image_embedding=target_latent,  
-                    )
-                    prior_pred = prior_pred / self.prior.image_embed_scale
-                    raw_prior_loss = prior_loss.detach().cpu()
-                    prior_loss = prior_loss * self.config.prior_loss_factor
-
-                    if self.prior_adapter is not None:
-                        prior_pred = self.prior_adapter(prior_pred)
-
-                    prior_pred_dir = prior_pred / (
-                        prior_pred.norm(dim=-1, keepdim=True) + eps
-                    )
-                    prior_pred_len = prior_pred.norm(dim=-1)
-
-                    prior_len_loss = (
-                        torch.log(prior_pred_len + eps)
-                        - torch.log(target_latent_len + eps)
-                    ).pow(2).mean() * self.config.prior_len_loss_factor
-                    prior_sim_loss = (
-                        1
-                        - (
-                            torch.einsum("ij,ij->i", prior_pred_dir, target_latent_dir)
-                        ).mean()
-                    ) * self.config.prior_sim_loss_factor
-
-                    losses.update(
-                        {
-                            "prior_loss": prior_loss,
-                            "prior_len_loss": prior_len_loss,
-                            "prior_sim_loss": prior_sim_loss,
-                        }
-                    )
-                    with torch.no_grad():
-                        metrics.update(
-                            {
-                                "target_latent_len": target_latent_len.mean(),
-                                "prior_pred_len": prior_pred_len.mean(),
-                                "prior_l2": torch.norm(
-                                    prior_pred - target_latent, p=2, dim=-1
-                                ).mean(),
-                                "prior_pred_cos": torch.nn.functional.cosine_similarity(
-                                    prior_pred_dir, target_latent_dir, dim=-1
-                                ).mean(),
-                                "raw_prior_loss": raw_prior_loss
-                            }
-                        )
-
-                        outputs.update({"prior_pred": prior_pred})
-
-            loss = torch.stack(list(losses.values())).sum()
-            losses["loss"] = loss
-
-            for metric_name, metric_value in it.chain(losses.items(), metrics.items()):
-                name = f"{stage_prefix}{metric_name}"
-                self.log(
-                    name,
-                    metric_value,
-                    prog_bar=name in self.config.prog_bar_metrics,
-                    on_step=on_step,
-                    on_epoch=not on_step,
+                align_image_latent_normed = nn.functional.normalize(
+                    align_image_latent
+                    - align_image_latent.mean(dim=-1, keepdim=True),
+                    p=2,
+                    dim=-1,
+                    eps=eps,
                 )
+
+                align_image_latent_normed = align_image_latent_normed + torch.randn_like(align_image_latent_normed) * self.config.align_input_noise
+                proj_eeg_latent = proj_eeg_latent + torch.randn_like(proj_eeg_latent) * self.config.align_input_noise
+
+                with torch.no_grad():
+                    # There might be duplicates, we will look at the img_path to make sure
+                    labels = get_belong_group(batch["img_path"]).to(align_image_latent.device)
+
+                align_loss, align_sim = self.align_loss(
+                    align_image_latent_normed, proj_eeg_latent, labels=labels
+                )
+                align_loss = align_loss * self.config.align_loss_factor
+                losses.update({"align_loss": align_loss})
+
+                outputs.update(
+                    {
+                        "align_sim": align_sim,
+                        "align_image_latent": align_image_latent,
+                    }
+                )
+
+            if self.config.do_high_recon and (
+                (self.epoch >= self.config.prior_delay_epochs)
+                or (
+                    stage != "train"
+                )  # On training step, no need to run this if it's not time
+            ):
+                # TODO: Try using top-1 synclr embeddings as conditioning
+
+                if self.config.prior_debug_mode:
+                    proj_eeg_latent = self._get_proj_eeg_latent(
+                        batch, device, self.dtype, eps=eps, use_align_if_debug=True
+                    )
+                else:
+                    assert (
+                        proj_eeg_latent is not None
+                    ), "EEG latent is not initialized"
+
+                assert self.prior is not None, "Prior is not initialized"
+
+                target_latent = cast(
+                    torch.Tensor, batch["high_recon_image_latent"].to(device)
+                )
+
+                target_latent_dir = target_latent / (
+                    target_latent.norm(dim=-1, keepdim=True) + eps
+                )
+                target_latent_len = target_latent.norm(p=2, dim=-1)
+
+                # Note: We use the projected EEG latent here because the original latent is not same dim as images
+                prior_loss, prior_pred = self.prior(
+                    brain_embedding=proj_eeg_latent,
+                    image_embedding=target_latent,
+                )
+                prior_pred = prior_pred / self.prior.image_embed_scale
+                raw_prior_loss = prior_loss.detach().cpu()
+                prior_loss = prior_loss * self.config.prior_loss_factor
+
+                if self.prior_adapter is not None:
+                    prior_pred = self.prior_adapter(prior_pred)
+
+                prior_pred_dir = prior_pred / (
+                    prior_pred.norm(dim=-1, keepdim=True) + eps
+                )
+                prior_pred_len = prior_pred.norm(dim=-1)
+
+                prior_len_loss = (
+                    torch.log(prior_pred_len + eps)
+                    - torch.log(target_latent_len + eps)
+                ).pow(2).mean() * self.config.prior_len_loss_factor
+                prior_sim_loss = (
+                    1
+                    - (
+                        torch.einsum("ij,ij->i", prior_pred_dir, target_latent_dir)
+                    ).mean()
+                ) * self.config.prior_sim_loss_factor
+
+                losses.update(
+                    {
+                        "prior_loss": prior_loss,
+                        "prior_len_loss": prior_len_loss,
+                        "prior_sim_loss": prior_sim_loss,
+                    }
+                )
+                with torch.no_grad():
+                    metrics.update(
+                        {
+                            "target_latent_len": target_latent_len.mean(),
+                            "prior_pred_len": prior_pred_len.mean(),
+                            "prior_l2": torch.norm(
+                                prior_pred - target_latent, p=2, dim=-1
+                            ).mean(),
+                            "prior_pred_cos": torch.nn.functional.cosine_similarity(
+                                prior_pred_dir, target_latent_dir, dim=-1
+                            ).mean(),
+                            "raw_prior_loss": raw_prior_loss,
+                        }
+                    )
+
+                    outputs.update({"prior_pred": prior_pred})
+
+        loss = torch.stack(list(losses.values())).sum()
+        losses["loss"] = loss
+
+        for metric_name, metric_value in it.chain(losses.items(), metrics.items()):
+            name = f"{stage_prefix}{metric_name}"
+            self.log(
+                name,
+                metric_value,
+                prog_bar=name in self.config.prog_bar_metrics,
+                on_step=on_step,
+                on_epoch=not on_step,
+            )
 
         return loss, outputs, metrics
 

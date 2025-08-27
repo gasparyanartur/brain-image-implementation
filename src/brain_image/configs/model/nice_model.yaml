@@ -19,7 +19,7 @@ project_image: false
 skip_eval_first_epoch: true
 full_eval_every_epochs: 1
 
-encoder_lr: 1e-3
+encoder_lr: 4e-4
 encoder_min_lr: 1e-5
 encoder_warmup_epochs: 1
 encoder_delay_epochs: 0
@@ -29,8 +29,8 @@ projector_min_lr: 1e-5
 projector_warmup_epochs: 1
 projector_delay_epochs: 0
 
-prior_lr: 5e-4
-prior_min_lr: 1e-5
+prior_lr: 4e-4
+prior_min_lr: 1e-6
 prior_warmup_epochs: 1
 prior_delay_epochs: 0
 

@@ -204,27 +204,29 @@ class EEGDataModule(DataModule):
 
         return dataset
 
-    def train_dataloader(self) -> torch.utils.data.DataLoader:
+    def train_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
         return self._create_dataloader(
             self.get_train_dataset(),
             batch_size=self.config.batch_size,
             shuffle=self.config.shuffle_train,
+            **kwargs
         )
 
-    def val_dataloader(self) -> torch.utils.data.DataLoader:
+    def val_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
         return self._create_dataloader(
-            self.get_val_dataset(), batch_size=self.config.val_batch_size, shuffle=False
+            self.get_val_dataset(), batch_size=self.config.val_batch_size, shuffle=False, **kwargs
         )
 
-    def test_dataloader(self) -> torch.utils.data.DataLoader:
+    def test_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
         return self._create_dataloader(
             self.get_test_dataset(),
             batch_size=self.config.val_batch_size,
             shuffle=False,
+            **kwargs
         )
 
     def _create_dataloader(
-        self, dataset: EEGDataset, shuffle=True, batch_size=None
+        self, dataset: EEGDataset, shuffle=True, batch_size=None, generator=None
     ) -> torch.utils.data.DataLoader:
         if batch_size is None:
             batch_size = self.config.batch_size
@@ -236,6 +238,7 @@ class EEGDataModule(DataModule):
             num_workers=self.config.num_workers,
             pin_memory=True,
             persistent_workers=self.config.num_workers > 0,
+            generator=generator
         )
 
 
