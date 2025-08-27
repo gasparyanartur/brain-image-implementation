@@ -27,16 +27,15 @@ from dalle2_pytorch.train_configs import DiffusionPriorNetworkConfig
 from dalle2_pytorch.dalle2_pytorch import CausalTransformer, SinusoidalPosEmb, MLP
 
 from brain_image.configs import BaseConfig
-from brain_image.utils import DEVICE, DTYPE
 
 
 class BrainDiffusionPriorConfig(BaseConfig):
     dim: int = 768
     image_embed_dim: int = 768
-    depth: int = 3
+    depth: int = 4
     dim_head: int = 64
-    attn_dropout: float = 0.2
-    ff_dropout: float = 0.2
+    attn_dropout: float = 0.4
+    ff_dropout: float = 0.4
     cond_drop_prob: float = 0.0
     image_cond_drop_prob: float = 0.0
     num_timesteps: int = 250
@@ -48,13 +47,15 @@ class BrainDiffusionPriorConfig(BaseConfig):
     num_output_tokens: int = 1
     rotary_emb: bool = True
     normformer: bool = True
-    norm_out: bool = False
+    norm_out: bool = True
     loss_type: Literal["l2", "l1", "huber"] = "l2"
     condition_on_text_encodings: bool = False
     image_size: int = 224
     predict_x_start: bool = True
     sample_timesteps: int = 32
     beta_schedule: Literal["cosine", "linear", "quadratic", "sigmoid"] = "cosine"
+    image_embed_scale: float | None = None
+    init_image_embed_l2norm: bool = False
 
 
 class DiffusionPriorNetwork(nn.Module):
@@ -285,6 +286,8 @@ class BrainDiffusionPrior(DiffusionPrior):
             beta_schedule=config.beta_schedule,
             clip=None,
             timesteps=config.num_timesteps,
+            image_embed_scale=config.image_embed_scale,
+            init_image_embed_l2norm=config.init_image_embed_l2norm,
             *args,
             **kwargs
         )
@@ -482,7 +485,7 @@ class BrainDiffusionPrior(DiffusionPrior):
             else self.noise_scheduler.sample_random_times(batch)
         )
 
-        #image_embedding = image_embedding * cast(float, self.image_embed_scale)
+        image_embedding = image_embedding * cast(float, self.image_embed_scale)
 
         # calculate forward loss
 

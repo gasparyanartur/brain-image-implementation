@@ -52,15 +52,14 @@
                 "model.do_align=false",
                 "model.do_low_recon=false",
                 "model.do_high_recon=true",
+                "model.full_eval_every_epochs=10",
+                "model.log_gradients=true",
                 "dataset.batch_size=32",
                 "dataset.limit_train_size=0.01",
                 "dataset.limit_val_size=0.2",
                 "trainer.compile_model=false",
                 "dataset.num_workers=12",
                 "trainer.log_every_n_steps=5",
-                "model.recon_every_epochs=10",
-                "model.skip_recon_first_epoch=true",
-                "model.log_gradients=true"
             ]
         }
     ]

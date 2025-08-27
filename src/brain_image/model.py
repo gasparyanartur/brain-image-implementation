@@ -464,18 +464,18 @@ class EEGAlignmentConfig(BaseConfig):
 
     use_embed_adapter: bool = False
     use_prior_adapter: bool = False
-    skip_recon_first_epoch: bool = False
     plot_lowdim_proj: bool = True
     low_dim_proj_pca: int = 50
 
     align_loss_factor: float = 0.2
-    prior_loss_factor: float = 0.0
+    prior_loss_factor: float = 0.01
     prior_sim_loss_factor: float = 1.0
     prior_len_loss_factor: float = 0.5
     project_image: bool = False
     rescale_proj_by_mean: bool = True
 
-    recon_every_epochs: int = 1
+    full_eval_every_epochs: int = 1
+    skip_eval_first_epoch: bool = True
 
     eeg_latent_dim: int = 1440
     img_latent_dim: int = 768
@@ -700,7 +700,6 @@ class EEGAlignmentModel(pl.LightningModule):
         self.modules_to_compile: list[str] = modules_to_compile
 
         self.learning_rate_options: list[dict[str, Any]] = []
-        self.epoch = -1  # Incremented once at the data loader
 
     def configure_optimizers(self):
         @dataclass
@@ -1137,12 +1136,15 @@ class EEGAlignmentModel(pl.LightningModule):
         if batch_idx == self.num_val_batches - 1:
             self._run_full_validation(split="val")
 
-            self.epoch += 1
             logging.info(
                 f"Epoch: {self.epoch-1} -> {self.epoch}, Training step: {self.global_step}"
             )
 
         return loss, outputs, metrics
+
+    @property
+    def epoch(self) -> int:
+        return self.current_epoch
 
     def test_step(
         self, batch, batch_idx
@@ -1166,8 +1168,14 @@ class EEGAlignmentModel(pl.LightningModule):
 
         return loss, outputs, metrics
 
-
-    def _get_proj_eeg_latent(self, batch: dict[str, torch.Tensor], device, dtype, eps: float = 1e-8, use_align_if_debug: bool = True) -> torch.Tensor:
+    def _get_proj_eeg_latent(
+        self,
+        batch: dict[str, torch.Tensor],
+        device,
+        dtype,
+        eps: float = 1e-8,
+        use_align_if_debug: bool = True,
+    ) -> torch.Tensor:
         if use_align_if_debug and self.config.prior_debug_mode:
             proj_eeg_latent = batch["align_image_latent"].to(device, dtype=dtype)
 
@@ -1178,7 +1186,7 @@ class EEGAlignmentModel(pl.LightningModule):
             proj_eeg_latent = self.eeg_encoder(eeg_data)
 
             if self.eeg_projector is not None:
-                proj_eeg_latent = self.eeg_projector(proj_eeg_latent) 
+                proj_eeg_latent = self.eeg_projector(proj_eeg_latent)
 
         proj_eeg_latent_normed = normalize_projection(
             proj_eeg_latent, self.config.rescale_proj_by_mean, eps
@@ -1199,7 +1207,6 @@ class EEGAlignmentModel(pl.LightningModule):
             else get_device(self.device)
         )
         return device, dtype
-
 
     @torch.no_grad()
     def get_all_prior_preds(
@@ -1232,9 +1239,8 @@ class EEGAlignmentModel(pl.LightningModule):
                     progress_bar=False,
                     generator=generator,
                     cond_scale=1.0,
-                    **prior_kwargs
+                    **prior_kwargs,
                 )
-
                 if self.prior_adapter:
                     prior_pred = self.prior_adapter(prior_pred)
 
@@ -1245,7 +1251,9 @@ class EEGAlignmentModel(pl.LightningModule):
         return torch.cat(all_prior_preds_, dim=0)
 
     @torch.no_grad()
-    def _plot_lowdim_projection(self, all_data: dict, show_plot: bool = False) -> dict[str, Any]:
+    def _plot_lowdim_projection(
+        self, all_data: dict, show_plot: bool = False
+    ) -> dict[str, Any]:
 
         device, dtype = self._get_device_dtype()
         eeg_latent = self._get_proj_eeg_latent(all_data, device, dtype).detach().cpu()
@@ -1254,7 +1262,9 @@ class EEGAlignmentModel(pl.LightningModule):
             assert "prior_pred" in all_data, "Prior pred is not in all data"
             prior_pred = all_data["prior_pred"].detach().cpu()
 
-        logging.info(f"Projecting latents from dim {all_data['high_recon_image_latent'].size(1)} to 2 dimensions")
+        logging.info(
+            f"Projecting latents from dim {all_data['high_recon_image_latent'].size(1)} to 2 dimensions"
+        )
 
         n = len(high_recon_latent)
 
@@ -1262,7 +1272,9 @@ class EEGAlignmentModel(pl.LightningModule):
         tsne = TSNE(n_components=2)
 
         if self.config.do_high_recon:
-            latents_highdim = torch.cat([eeg_latent, high_recon_latent, prior_pred], dim=0).numpy()
+            latents_highdim = torch.cat(
+                [eeg_latent, high_recon_latent, prior_pred], dim=0
+            ).numpy()
         else:
             latents_highdim = torch.cat([eeg_latent, high_recon_latent], dim=0).numpy()
 
@@ -1273,10 +1285,22 @@ class EEGAlignmentModel(pl.LightningModule):
         latents_lowdim = tsne.fit_transform(latents_middim)
         t2 = time.time()
 
-        plt.scatter(latents_lowdim[:n, 0], latents_lowdim[:n, 1], c="blue", label="conditioning")
-        plt.scatter(latents_lowdim[n:2*n, 0], latents_lowdim[n:2*n, 1], c="red", label="clip_target")
+        plt.scatter(
+            latents_lowdim[:n, 0], latents_lowdim[:n, 1], c="blue", label="conditioning"
+        )
+        plt.scatter(
+            latents_lowdim[n : 2 * n, 0],
+            latents_lowdim[n : 2 * n, 1],
+            c="red",
+            label="clip_target",
+        )
         if self.config.do_high_recon:
-            plt.scatter(latents_lowdim[2*n:3*n, 0], latents_lowdim[2*n:3*n, 1], c="green", label="prior_pred")
+            plt.scatter(
+                latents_lowdim[2 * n : 3 * n, 0],
+                latents_lowdim[2 * n : 3 * n, 1],
+                c="green",
+                label="prior_pred",
+            )
         plt.legend()
 
         fig = plt.gcf()
@@ -1285,13 +1309,19 @@ class EEGAlignmentModel(pl.LightningModule):
 
         logging.info(f"Finished projecting latents in {t2 - t1:.3f} seconds")
 
-        return {
-            "lowdim_proj": fig
-        }
-        
+        return {"lowdim_proj": fig}
 
     @torch.no_grad()
-    def _run_full_validation(self, split: Literal["val", "test"]):
+    def _run_full_validation(self, split: Literal["val", "test"]) -> None:
+        is_not_first_or_flag_set = (self.epoch > 0) or (
+            not self.config.skip_eval_first_epoch
+        )
+        is_right_mod = self.epoch % self.config.full_eval_every_epochs == 0
+        is_right_val_epoch = is_not_first_or_flag_set and is_right_mod
+
+        if not (is_right_val_epoch or split == "test"):
+            return
+
         outputs = {}
 
         data_loader = (
@@ -1308,21 +1338,21 @@ class EEGAlignmentModel(pl.LightningModule):
             all_data,
             progress_bar=True,
             generator=gen,
-            batch_size=self.data_module.config.val_batch_size
+            batch_size=self.data_module.config.val_batch_size,
         )
         if all_prior_preds is not None:
+            all_prior_preds = all_prior_preds.detach().cpu()
             all_data["prior_pred"] = all_prior_preds
 
         if self.config.do_high_recon:
-            if split == "test" or (self.epoch % self.config.recon_every_epochs == 0):
-                if self.epoch == 0 and self.config.skip_recon_first_epoch:
-                    pass
-                else:
-                    self.evaluate_reconstructions(
-                        all_data,
-                        split,
-                        num_reconstructions=self.config.num_reconstructions,
-                    )
+            if self.epoch == 0 and self.config.skip_eval_first_epoch:
+                pass
+            else:
+                self.evaluate_reconstructions(
+                    all_data,
+                    split,
+                    num_reconstructions=self.config.num_reconstructions,
+                )
 
         if self.config.plot_lowdim_proj:
             outputs.update(self._plot_lowdim_projection(all_data))
@@ -1330,7 +1360,6 @@ class EEGAlignmentModel(pl.LightningModule):
         wandb_logger = self.get_wandb_logger()
         if wandb_logger is not None:
             wandb_logger.log_metrics(outputs)
-
 
     def _run_step(
         self,
@@ -1426,8 +1455,6 @@ class EEGAlignmentModel(pl.LightningModule):
                         stage != "train"
                     )  # On training step, no need to run this if it's not time
                 ):
-                    # TODO: Plot latents L2
-                    # TODO: Plot TSNE
                     # TODO: Try using top-1 synclr embeddings as conditioning
                     # TODO: Get prior loss working somehow
 
@@ -1454,9 +1481,10 @@ class EEGAlignmentModel(pl.LightningModule):
                     # Note: We use the projected EEG latent here because the original latent is not same dim as images
                     prior_loss, prior_pred = self.prior(
                         brain_embedding=proj_eeg_latent,
-                        image_embedding=target_latent_dir,
+                        image_embedding=target_latent,  
                     )
-                    #prior_pred = prior_pred / self.prior.image_embed_scale
+                    prior_pred = prior_pred / self.prior.image_embed_scale
+                    raw_prior_loss = prior_loss.detach().cpu()
                     prior_loss = prior_loss * self.config.prior_loss_factor
 
                     if self.prior_adapter is not None:
@@ -1478,18 +1506,6 @@ class EEGAlignmentModel(pl.LightningModule):
                         ).mean()
                     ) * self.config.prior_sim_loss_factor
 
-                    metrics.update(
-                        {
-                            "target_latent_len": target_latent_len.mean(),
-                            "prior_pred_len": prior_pred_len.mean(),
-                            "prior_pred_cos": torch.nn.functional.cosine_similarity(
-                                prior_pred_dir, target_latent_dir, dim=-1
-                            ).mean(),
-                        }
-                    )
-
-                    outputs.update({"prior_pred": prior_pred})
-
                     losses.update(
                         {
                             "prior_loss": prior_loss,
@@ -1497,6 +1513,22 @@ class EEGAlignmentModel(pl.LightningModule):
                             "prior_sim_loss": prior_sim_loss,
                         }
                     )
+                    with torch.no_grad():
+                        metrics.update(
+                            {
+                                "target_latent_len": target_latent_len.mean(),
+                                "prior_pred_len": prior_pred_len.mean(),
+                                "prior_l2": torch.norm(
+                                    prior_pred - target_latent, p=2, dim=-1
+                                ).mean(),
+                                "prior_pred_cos": torch.nn.functional.cosine_similarity(
+                                    prior_pred_dir, target_latent_dir, dim=-1
+                                ).mean(),
+                                "raw_prior_loss": raw_prior_loss
+                            }
+                        )
+
+                        outputs.update({"prior_pred": prior_pred})
 
             loss = torch.stack(list(losses.values())).sum()
             losses["loss"] = loss
@@ -1610,23 +1642,11 @@ class EEGAlignmentModel(pl.LightningModule):
         batch_size = num_reconstructions
 
         device, dtype = self._get_device_dtype()
-        proj_eeg_latent = self._get_proj_eeg_latent(batch, device, dtype, eps=eps)
-
-        prior_pred = self.prior.p_sample_loop(
-            torch.Size([proj_eeg_latent.size(0), self.config.img_latent_dim]),
-            brain_embedding=proj_eeg_latent,
-            dtype=dtype,
-            progress_bar=True,
-            cond_scale=1.0,
-        )
-
-        if self.prior_adapter is not None:
-            prior_pred = self.prior_adapter(prior_pred)
 
         target_latent = batch["high_recon_image_latent"][:batch_size].to(
             device, dtype=dtype
         )
-
+        prior_pred = batch["prior_pred"][:batch_size].to(device, dtype=dtype)
         conditioning = torch.cat([prior_pred, target_latent], dim=0)
 
         pipe = ReconstructionPipeline.from_stable_diffusion(dtype=dtype, device=device)
