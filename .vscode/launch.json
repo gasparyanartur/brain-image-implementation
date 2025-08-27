@@ -55,7 +55,7 @@
                 "dataset.batch_size=32",
                 "dataset.limit_train_size=0.01",
                 "dataset.limit_val_size=0.2",
-                "trainer.compile_model=true",
+                "trainer.compile_model=false",
                 "dataset.num_workers=12",
                 "trainer.log_every_n_steps=5",
                 "model.recon_every_epochs=10",

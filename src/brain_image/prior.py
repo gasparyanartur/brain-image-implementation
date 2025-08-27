@@ -482,7 +482,7 @@ class BrainDiffusionPrior(DiffusionPrior):
             else self.noise_scheduler.sample_random_times(batch)
         )
 
-        image_embedding = image_embedding * cast(float, self.image_embed_scale)
+        #image_embedding = image_embedding * cast(float, self.image_embed_scale)
 
         # calculate forward loss
 

@@ -26,6 +26,7 @@ dependencies = [
     "Pillow",
     "jupyter",
     "ipykernel",
+    "plotly",
 
     "pytest",
     "tqdm",

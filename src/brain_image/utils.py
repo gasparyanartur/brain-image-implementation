@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import logging
 from pathlib import Path
 from typing import Any
@@ -8,6 +8,33 @@ import torch
 import os
 
 import matplotlib.pyplot as plt
+
+
+def gather_dataloader(
+    loader: torch.utils.data.DataLoader,
+    batch_process_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> dict[str, torch.Tensor | list]:
+    all_samples = {}
+    tensor_keys = set()
+
+    for batch in loader:
+        if batch_process_fn is not None:
+            batch = batch_process_fn(batch)
+
+        for k, v in batch.items():
+            if k not in all_samples:
+                all_samples[k] = []
+
+            if isinstance(v, torch.Tensor):
+                tensor_keys.add(k)
+                v = v.detach().cpu()
+
+            all_samples[k].extend(v)
+
+    for k in tensor_keys:
+        all_samples[k] = torch.stack(all_samples[k])
+
+    return all_samples
 
 
 def investigate_tensor(name: str, v: torch.Tensor) -> None:
@@ -161,10 +188,12 @@ def show_image(
 
 
 def setup():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
     dotenv.load_dotenv()
 
-    torch.set_float32_matmul_precision('high')
+    torch.set_float32_matmul_precision("high")
 
     tok = os.environ.get("HF_API_TOKEN")
     if not tok:
@@ -177,7 +206,9 @@ def setup():
 
 
 def get_mean_gradients(model: torch.nn.Module) -> torch.Tensor | None:
-    grads = [p.grad.norm(dim=-1).mean() for p in model.parameters() if p.grad is not None]
+    grads = [
+        p.grad.norm(dim=-1).mean() for p in model.parameters() if p.grad is not None
+    ]
     if len(grads) == 0:
         return None
     return torch.stack(grads).mean()
@@ -192,14 +223,18 @@ def state_dict_equal(state_dict1, state_dict2):
     return True
 
 
-def find_module_content_in_state_dict(key: str, state_dict: dict[str, Any], module_name: str):
+def find_module_content_in_state_dict(
+    key: str, state_dict: dict[str, Any], module_name: str
+):
     if f"{module_name}." in key:
         return state_dict
 
     pure_dict = {}
     for key, value in state_dict.items():
         if isinstance(value, dict):
-            result = find_module_content_in_state_dict(key, value, module_name=module_name)
+            result = find_module_content_in_state_dict(
+                key, value, module_name=module_name
+            )
             if result is not None:
                 pure_dict.update(result)
 
