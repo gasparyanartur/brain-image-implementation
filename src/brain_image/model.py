@@ -1342,10 +1342,15 @@ class EEGAlignmentModel(pl.LightningModule):
         img_outputs = {}
 
         data_generator = torch.Generator().manual_seed(42)
+        loader_kwargs = {
+            "generator": data_generator,
+            "persistent_workers": False,
+            "pin_memory": False
+        }
         data_loader = (
-            self.val_dataloader(generator=data_generator)
+            self.val_dataloader(**loader_kwargs)
             if split == "val"
-            else self.test_dataloader(generator=data_generator)
+            else self.test_dataloader(**loader_kwargs)
         )
         
         all_data = gather_dataloader(
