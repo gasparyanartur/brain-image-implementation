@@ -10,6 +10,8 @@ init_weights: true
 
 dtype: "float32"
 
+eeg_encoder_path: null
+
 # Logging and checkpointing
 log_dir: logs
 checkpoint_dir: null

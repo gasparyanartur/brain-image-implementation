@@ -256,6 +256,9 @@ class EEGDataset(Dataset):
         self.split = split
         
         self.prepared_data = torch.load(self.config.data_path / "prepared" / f"{split}.pt")
+        self.prepared_data = [
+            sample for sample in self.prepared_data if sample["sub"] in self.config.subs
+        ]
 
     def __len__(self):
         return len(self.prepared_data)
