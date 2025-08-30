@@ -562,9 +562,9 @@ class EEGAlignmentConfig(BaseConfig):
 
     align_loss_type: Literal["clip", "infonce"] = "infonce"
     align_loss_epoch: int = 0
-    align_loss_factor: float = 0.2
-    align_mse_loss_factor: float = 0.
-    align_cos_loss_factor: float = 0.
+    align_loss_factor: float = 1.
+    align_mse_loss_factor: float = 0.5
+    align_cos_loss_factor: float = 0.05
     prior_loss_factor: float = 0.01
     prior_sim_loss_factor: float = 1.0
     prior_len_loss_factor: float = 0.5
@@ -572,7 +572,6 @@ class EEGAlignmentConfig(BaseConfig):
     project_image: bool = False
     rescale_proj_by_mean: bool = False
     norm_eeg_latent: bool = True
-
 
     full_eval_every_epochs: int = 1
     skip_eval_first_epoch: bool = True

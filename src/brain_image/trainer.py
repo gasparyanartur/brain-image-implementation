@@ -20,7 +20,7 @@ class TrainConfig(BaseConfig):
 
     # Training parameters
     run_name: str
-    num_epochs: int
+    num_epochs: int | None = None
 
     # Model compilation and initialization
     compile_model: bool = True
@@ -78,9 +78,9 @@ class NICETrainerConfig(TrainConfig):
 
 
 class Trainer:
-    def __init__(self, config: TrainConfig, model: pl.LightningModule):
+    def __init__(self, config: TrainConfig, model: EEGAlignmentModel):
         self.config = config
-        self.model: pl.LightningModule = model
+        self.model: EEGAlignmentModel = model
         self.pl_trainer = self.create_pl_trainer()
 
     def create_pl_trainer(self) -> pl.Trainer:
@@ -145,8 +145,13 @@ class Trainer:
         precision = "bf16-mixed" if self.config.dtype == "float16" else "32-true"
         accelerator = self.config.accelerator or "auto"
 
+        if self.config.num_epochs is not None:
+            logging.warning(
+                "num_epochs is deprecated. Please use model.max_epochs instead."
+            )
+
         return pl.Trainer(
-            max_epochs=self.config.num_epochs,
+            max_epochs=self.model.config.max_epochs,
             callbacks=callbacks if not self.config.enable_barebones else None,
             logger=loggers if not self.config.enable_barebones else [],
             enable_checkpointing=(not self.config.enable_barebones)

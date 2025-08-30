@@ -2,7 +2,6 @@
 
 # Training settings
 run_name: "nice"
-num_epochs: 100
 
 # Model compilation and initialization
 compile_model: true

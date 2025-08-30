@@ -48,8 +48,8 @@ lr_scheduler: "cosine_anneal"
 betas: [0.9, 0.999]
 
 warmup_start_frac: 0.2
-max_epochs: 100
+max_epochs: 50
 
-temperature_init: 0.02
+temperature_init: 0.01
 data_seed: 42
 
