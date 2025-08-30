@@ -553,7 +553,7 @@ class EEGAlignmentConfig(BaseConfig):
     do_low_recon: bool = False
     do_high_recon: bool = True
 
-    align_input_noise: float = 0.005
+    align_input_noise: float = 0.002
 
     use_embed_adapter: bool = False
     use_prior_adapter: bool = False
@@ -563,8 +563,8 @@ class EEGAlignmentConfig(BaseConfig):
     align_loss_type: Literal["clip", "infonce"] = "infonce"
     align_loss_epoch: int = 0
     align_loss_factor: float = 0.2
-    align_mse_loss_factor: float = 0.4
-    align_cos_loss_factor: float = 0.05
+    align_mse_loss_factor: float = 0.
+    align_cos_loss_factor: float = 0.
     prior_loss_factor: float = 0.01
     prior_sim_loss_factor: float = 1.0
     prior_len_loss_factor: float = 0.5
