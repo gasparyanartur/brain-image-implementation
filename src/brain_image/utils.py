@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 def gather_dataloader(
     loader: torch.utils.data.DataLoader,
-    batch_process_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    batch_process_fn: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
 ) -> dict[str, torch.Tensor | list]:
     all_samples = {}
     tensor_keys = set()

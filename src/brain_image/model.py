@@ -1327,14 +1327,11 @@ class EEGAlignmentModel(pl.LightningModule):
         progress_bar: bool = True,
         eps: float = 1e-8,
     ) -> torch.Tensor | None:
-        if self.eeg_encoder is None:
-            return None
-
-        assert "eeg_data" in all_data and all_data["eeg_data"] is not None, "EEG data is not in batch"
+        assert "idx" in all_data and all_data["idx"] is not None, "Index is not in batch"
 
         device, dtype = self._get_device_dtype()
         all_latents = []
-        num_samples = len(all_data["eeg_data"])
+        num_samples = len(all_data["idx"])
 
         with tqdm.tqdm(
             total=num_samples, desc="EEG encoding", disable=not progress_bar
@@ -1455,11 +1452,7 @@ class EEGAlignmentModel(pl.LightningModule):
         all_data = cast(DataBatchT, all_data)
 
         align_image_latent = cast(torch.Tensor, all_data["align_image_latent"])
-        if self.config.prior_debug_mode:
-            eeg_latents = align_image_latent
-        else:
-            eeg_latents = self.get_all_eeg_latents(all_data, batch_size=self.data_module.config.val_batch_size, progress_bar=False)
-        eeg_latents = cast(torch.Tensor, eeg_latents)
+        eeg_latents = self.get_all_eeg_latents(all_data, batch_size=self.data_module.config.val_batch_size, progress_bar=False)
 
         all_data["eeg_latent"] = eeg_latents
         img_paths = all_data["img_path"]
@@ -1628,14 +1621,6 @@ class EEGAlignmentModel(pl.LightningModule):
                         torch.rand_like(align_image_latent_normed)
                         * self.config.align_input_noise
                     )
-                    #proj_eeg_latent_normed = proj_eeg_latent_normed + (
-                    #    torch.rand_like(proj_eeg_latent_normed)
-                    #    * self.config.align_input_noise
-                    #)
-                    #proj_eeg_latent = proj_eeg_latent + (
-                    #    torch.rand_like(proj_eeg_latent)
-                    #    * self.config.align_input_noise
-                    #)
 
                 with torch.no_grad():
                     # There might be duplicates (different subjects, same image)
@@ -1696,6 +1681,7 @@ class EEGAlignmentModel(pl.LightningModule):
                     assert proj_eeg_latent_normed is not None, "EEG latent is not initialized"
 
                 assert self.prior is not None, "Prior is not initialized"
+                assert "high_recon_image_latent" in batch and batch["high_recon_image_latent"] is not None, "High recon image latent is not in batch"
 
                 target_latent = cast(
                     torch.Tensor, batch["high_recon_image_latent"].to(device)
@@ -1889,7 +1875,7 @@ class EEGAlignmentModel(pl.LightningModule):
         self,
         batch: dict[str, Any],
         stage: Literal["train", "val", "test"],
-    ) -> dict[str, Any]:
+    ) -> DataBatchT:
         img_paths = batch["img_path"]
         eeg_data = batch["eeg_data"]
         device = eeg_data.device
@@ -1920,4 +1906,4 @@ class EEGAlignmentModel(pl.LightningModule):
                 device=device, dtype=eeg_data.dtype
             )
 
-        return batch
+        return cast(DataBatchT, batch)

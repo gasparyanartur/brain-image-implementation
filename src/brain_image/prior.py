@@ -32,10 +32,10 @@ from brain_image.configs import BaseConfig
 class BrainDiffusionPriorConfig(BaseConfig):
     dim: int = 768
     image_embed_dim: int = 768
-    depth: int = 4
+    depth: int = 3
     dim_head: int = 64
-    attn_dropout: float = 0.4
-    ff_dropout: float = 0.4
+    attn_dropout: float = 0.5
+    ff_dropout: float = 0.5
     cond_drop_prob: float = 0.0
     image_cond_drop_prob: float = 0.0
     num_timesteps: int = 1000
@@ -52,7 +52,7 @@ class BrainDiffusionPriorConfig(BaseConfig):
     condition_on_text_encodings: bool = False
     image_size: int = 224
     predict_x_start: bool = True
-    sample_timesteps: int = 32
+    sample_timesteps: int = None
     beta_schedule: Literal["cosine", "linear", "quadratic", "sigmoid"] = "cosine"
     image_embed_scale: float | None = None
     init_image_embed_l2norm: bool = False
