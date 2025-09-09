@@ -30,6 +30,7 @@ import lightning as pl
 import tqdm
 from lightning.pytorch.loggers import WandbLogger
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from torchvision.models import resnet34
 from PIL import Image
 import wandb
 
@@ -280,11 +281,12 @@ class ResidualAdd(nn.Module):
 
 
 class ResidualAdapter(nn.Module):
-    def __init__(self, latent_dim: int = 768, hidden_factor: int = 2):
+    def __init__(self, latent_dim: int = 768, hidden_factor: int = 2, dropout: float = 0.5):
         super().__init__()
 
         self.layers = nn.Sequential(
             nn.LayerNorm(latent_dim),
+            nn.Dropout(dropout),
             nn.Linear(latent_dim, latent_dim * hidden_factor),
             nn.GELU(),
             nn.Linear(latent_dim * hidden_factor, latent_dim),
@@ -512,7 +514,7 @@ class EEGEncoder(nn.Module):
                     nn.Linear(config.hidden_dim, config.hidden_dim),
                 )
             ),
-            nn.Linear(config.hidden_dim, config.hidden_dim),
+            nn.Linear(config.hidden_dim, config.output_dim),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -542,6 +544,66 @@ class EEGEncoder(nn.Module):
         x = self.patch_embedding(x)
         x = einops.rearrange(x, "b e s t -> b (s t e)")
         x = self.proj(x)
+        return x
+
+
+class EEGEncoder2(nn.Module):
+    def __init__(self, config: EEGEncoderConfig = EEGEncoderConfig()):
+        super().__init__()
+        
+        self.convs = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=(5, 25), stride=(1, 5)),   # 13, 15
+            nn.GroupNorm(8, 32),
+            nn.ELU(),
+            nn.Dropout(0.5),
+            nn.Conv2d(32, 64, kernel_size=(3, 5), stride=(1, 2)),    # 11, 6
+            nn.GroupNorm(16, 64),
+            nn.ELU(),
+            nn.Dropout(0.5),
+            nn.Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1)),   # 9, 4
+            nn.GroupNorm(32, 128),
+            nn.ELU(),
+            nn.Dropout(0.5),
+            nn.Conv2d(128, 256, kernel_size=(9, 4)),
+            nn.Flatten(),
+        )
+
+        self.seq = nn.Sequential(
+            nn.Linear(256, 512),
+            nn.LayerNorm(512),
+            nn.GELU(),
+            nn.Dropout(0.5),
+            ResidualAdd(
+                nn.Sequential(
+                    nn.Linear(512, 512),
+                    nn.LayerNorm(512),
+                    nn.GELU(),
+                    )
+            ),
+            nn.Linear(512, config.output_dim)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = einops.rearrange(x, "b s t -> b 1 s t")
+        x = self.convs(x)
+        x = self.seq(x)
+        return x
+
+
+class EEGEncoder3(nn.Module):
+    def __init__(self, config: EEGEncoderConfig = EEGEncoderConfig()):
+        super().__init__()
+
+        model = resnet34(weights="DEFAULT")
+        model.conv1 = torch.nn.Conv2d(1, 64, kernel_size=(1, 25), stride=(1, 3), padding=(0, 0), bias=False)
+        model.fc = torch.nn.Linear(512, 768)
+        model.max_pool = torch.nn.MaxPool2d(kernel_size=(1, 3), stride=(1, 2), dilation=1, ceil_mode=False)
+
+        self.model = model
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = einops.rearrange(x, "b s t -> b 1 s t")
+        x = self.model(x)
         return x
 
 
@@ -633,6 +695,8 @@ class EEGAlignmentConfig(BaseConfig):
     lr_scheduler: Literal["none", "cosine_anneal"] = "cosine_anneal"
     betas: tuple[float, float] = (0.9, 0.999)
     weight_decay: float = 0.01
+
+    #freeze_eeg_encoder: bool = False
 
     max_epochs: int = 100
 
@@ -742,7 +806,7 @@ class EEGAlignmentModel(pl.LightningModule):
             )
 
         self.eeg_encoder: EEGEncoder | None = (
-            (eeg_encoder or EEGEncoder(self.config.eeg_config))
+            (eeg_encoder or EEGEncoder3(self.config.eeg_config))
             if not self.config.prior_debug_mode
             else None
         )
@@ -1580,17 +1644,12 @@ class EEGAlignmentModel(pl.LightningModule):
             else get_device(self.device)
         )
 
-        if self.eeg_encoder is not None:
-            proj_eeg_latent = self._get_proj_eeg_latent(
-                batch, device, self.dtype, eps=eps, use_align_if_debug=False, normalize=False
-            )
-            proj_eeg_latent_normed = normalize_projection(
-                proj_eeg_latent, self.config.rescale_proj_by_mean, eps
-            )
-
-        else:
-            proj_eeg_latent = None
-            proj_eeg_latent_normed = None
+        proj_eeg_latent = self._get_proj_eeg_latent(
+            batch, device, self.dtype, eps=eps, use_align_if_debug=False, normalize=False
+        )
+        proj_eeg_latent_normed = normalize_projection(
+            proj_eeg_latent, self.config.rescale_proj_by_mean, eps
+        )
 
         losses: dict[str, torch.Tensor] = {}
         metrics = {}
@@ -1671,15 +1730,6 @@ class EEGAlignmentModel(pl.LightningModule):
                     stage != "train"
                 )  # On training step, no need to run this if it's not time
             ):
-                # TODO: Try using top-1 synclr embeddings as conditioning
-
-                if self.config.prior_debug_mode:
-                    proj_eeg_latent_normed = self._get_proj_eeg_latent(
-                        batch, device, self.dtype, eps=eps, use_align_if_debug=True
-                    )
-                else:
-                    assert proj_eeg_latent_normed is not None, "EEG latent is not initialized"
-
                 assert self.prior is not None, "Prior is not initialized"
                 assert "high_recon_image_latent" in batch and batch["high_recon_image_latent"] is not None, "High recon image latent is not in batch"
 
@@ -1696,7 +1746,6 @@ class EEGAlignmentModel(pl.LightningModule):
                     image_embedding=target_latent,
                 )
                 prior_pred = prior_pred / self.prior.image_embed_scale
-                raw_prior_loss = prior_loss.detach().cpu()
                 prior_loss = prior_loss * self.config.prior_loss_factor
 
                 if self.prior_adapter is not None:
@@ -1722,18 +1771,14 @@ class EEGAlignmentModel(pl.LightningModule):
                 with torch.no_grad():
                     metrics.update(
                         {
-                            "target_latent_len": target_latent_norm.mean()
-                            .detach()
-                            .cpu(),
-                            "prior_pred_len": prior_pred_norm.mean().detach().cpu(),
+                            "target_latent_len": target_latent_norm.detach().mean().cpu(),
+                            "prior_pred_len": prior_pred_norm.detach().mean().cpu(),
                             "prior_l2": torch.norm(
-                                prior_pred - target_latent, p=2, dim=-1
+                                prior_pred.detach() - target_latent.detach(), p=2, dim=-1
                             )
                             .mean()
-                            .detach()
                             .cpu(),
-                            "prior_pred_cos": prior_pred_cos.mean().detach().cpu(),
-                            "raw_prior_loss": raw_prior_loss,
+                            "prior_pred_cos": prior_pred_cos.detach().mean().cpu(),
                         }
                     )
 

@@ -29,7 +29,7 @@ projector_min_lr: 1e-5
 projector_warmup_epochs: 1
 projector_delay_epochs: 0
 
-prior_lr: 4e-4
+prior_lr: 3e-4
 prior_min_lr: 1e-6
 prior_warmup_epochs: 1
 prior_delay_epochs: 0
@@ -53,3 +53,4 @@ max_epochs: 50
 temperature_init: 0.01
 data_seed: 42
 
+use_embed_adapter: false
