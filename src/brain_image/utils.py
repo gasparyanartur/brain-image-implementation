@@ -1,7 +1,8 @@
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 import dotenv
 from huggingface_hub import login
 import torch
@@ -242,3 +243,18 @@ def find_module_content_in_state_dict(
             pure_dict[key.replace(f"{module_name}.", "")] = value
 
     return pure_dict
+
+
+def key_in_dict(key: str, d: Mapping[str, Any]) -> bool:
+    return key in d and d[key] is not None
+
+
+@dataclass(slots=True, frozen=True)
+class NormDirLen:
+    norm: torch.Tensor
+    dir: torch.Tensor
+    len: torch.Tensor
+
+def get_norm_dir_len(vec: torch.Tensor, eps: float = 1e-8) -> NormDirLen:
+    norm = vec.norm(dim=-1, keepdim=True).detach()
+    return NormDirLen(norm, vec / (norm + eps), norm.mean())

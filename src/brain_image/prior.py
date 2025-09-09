@@ -38,7 +38,7 @@ class BrainDiffusionPriorConfig(BaseConfig):
     ff_dropout: float = 0.4
     cond_drop_prob: float = 0.0
     image_cond_drop_prob: float = 0.0
-    num_timesteps: int = 250
+    num_timesteps: int = 1000
     num_time_embeds: int = 1
     num_image_embeds: int = 1
     num_text_embeds: int = 1

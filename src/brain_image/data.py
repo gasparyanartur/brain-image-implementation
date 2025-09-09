@@ -5,7 +5,7 @@ import hashlib
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Iterable, Literal, cast
+from typing import Iterable, Literal, TypedDict, cast
 
 import numpy as np
 import torch
