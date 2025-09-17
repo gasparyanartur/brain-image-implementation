@@ -299,7 +299,6 @@ def prepare_datasets(
 
 
 def load_image_from_path(path: Path) -> Tensor:
-    """Load an image from a given path."""
     if not path.exists():
         raise FileNotFoundError(f"Image not found: {path}")
 
@@ -308,7 +307,6 @@ def load_image_from_path(path: Path) -> Tensor:
 
 
 def batch_load_images(paths: Iterable[Path]) -> Tensor:
-    """Load a batch of images from a list of paths."""
     imgs = [load_image_from_path(path) for path in paths]
     imgs = torch.stack(imgs, dim=0)
     return imgs
@@ -317,7 +315,6 @@ def batch_load_images(paths: Iterable[Path]) -> Tensor:
 def load_eeg_data(
     eeg_path: Path,
 ) -> tuple[Tensor, Tensor, list[str]]:
-    """Load EEG data from a given path."""
     if not eeg_path.exists():
         raise FileNotFoundError(f"EEG data not found: {eeg_path}")
 

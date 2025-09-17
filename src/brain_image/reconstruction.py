@@ -16,6 +16,7 @@ from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.image_processor import VaeImageProcessor
+from transformers import CLIPVisionModelWithProjection
 import tqdm
 from transformers import CLIPImageProcessor
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_image_variation import (
@@ -23,6 +24,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_image_variat
 )
 
 from brain_image.configs import get_device
+from brain_image.img_encoder import CLIPImageEncoder, VAEImageEncoder
 from brain_image.utils import DTYPE
 
 
@@ -32,44 +34,15 @@ class ReconstructionPipeline:
         unet: UNet2DConditionModel,
         vae: AutoencoderKL,
         noise_scheduler: DDIMScheduler,
-        image_encoder: CLIPImageProcessor,
-        image_processor: VaeImageProcessor | None = None,
-        cond_image_preprocessor: Callable | None = None,
-        low_level_image_preprocessor: Callable | None = None,
-        dtype: torch.dtype = DTYPE,
+        clip_encoder: CLIPImageEncoder,
+        vae_encoder: VAEImageEncoder,
         **kwargs: dict,
     ):
         self.unet = unet
         self.vae = vae
         self.noise_scheduler = noise_scheduler
-        self.image_encoder = image_encoder
-        self.conditioning_image_preprocessor = cond_image_preprocessor or Compose(
-            [
-                ToImage(),
-                ToDtype(dtype, scale=True),
-                Resize(
-                    (224, 224),
-                    interpolation=InterpolationMode.BICUBIC,
-                    antialias=False,
-                ),
-                Normalize(
-                    [0.48145466, 0.4578275, 0.40821073],
-                    [0.26862954, 0.26130258, 0.27577711],
-                ),
-            ]
-        )
-        self.low_level_image_preprocessor = low_level_image_preprocessor or Compose(
-            [
-                ToImage(),
-                ToDtype(dtype, scale=True),
-                Resize(
-                    (512, 512),
-                    interpolation=InterpolationMode.BICUBIC,
-                    antialias=True,
-                ),
-            ]
-        )
-        self.image_processor = image_processor
+        self.clip_encoder = clip_encoder
+        self.vae_encoder = vae_encoder
 
 
     @classmethod
@@ -78,32 +51,26 @@ class ReconstructionPipeline:
         model_id: str = "lambdalabs/sd-image-variations-diffusers",
         device: torch.device = get_device(),
         dtype: torch.dtype = DTYPE,
-        revision: str = "v2.0",
-        cond_image_preprocessor: Callable | None = None,
-        low_level_image_preprocessor: Callable | None = None,
+        cond_encoder_name: str = "openai/clip-vit-large-patch14",
         **kwargs: dict,
     ):
         base_pipe = StableDiffusionImageVariationPipeline.from_pretrained(
             model_id,
-            revision=revision,
             torch_dtype=dtype,
         ).to(device)
 
         unet = base_pipe.unet
         vae = base_pipe.vae
         noise_scheduler = base_pipe.scheduler
-        image_encoder = base_pipe.image_encoder
-        image_processor = base_pipe.image_processor
+        clip_encoder = CLIPImageEncoder(cond_encoder_name)
+        vae_encoder = VAEImageEncoder(model_id)
 
         return cls(
             unet=unet,
             vae=vae,
             noise_scheduler=noise_scheduler,
-            image_encoder=image_encoder,
-            image_processor=image_processor,
-            cond_image_preprocessor=cond_image_preprocessor,
-            low_level_image_preprocessor=low_level_image_preprocessor,
-            dtype=dtype,
+            clip_encoder=clip_encoder,
+            vae_encoder=vae_encoder,
             **kwargs,
         )
 
@@ -114,7 +81,6 @@ class ReconstructionPipeline:
         guidance_scale: float = 7.5,
         num_inference_steps: int = 50,
         noise_strength: float = 1.0,
-        device: torch.device = get_device(),
         seed: int = 0,
         backend: Literal[
             "stable_diffusion", "versatile_diffusion"
@@ -138,22 +104,23 @@ class ReconstructionPipeline:
         Returns:
             reconstruction <batch_size, channels, height, width>: The reconstructed image.
         """
-        condition_latent = self.encode_conditioning_image(target)
+        device = self.vae.device
+        condition_latent = self.clip_encoder.encode(target.to(device))
+
         if low_level_image is not None:
-            low_level_latent = self.encode_low_level_image(low_level_image)
+            low_level_latent = self.vae_encoder.encode(low_level_image.to(device))
         else:
             low_level_latent = None
 
         return self.reconstruct_latents(
             condition_latent,
             low_level_latent,
-            guidance_scale,
-            num_inference_steps,
-            noise_strength,
-            device,
-            seed,
-            backend,
-            extra_step_kwargs,
+            guidance_scale=guidance_scale,
+            num_inference_steps=num_inference_steps,
+            noise_strength=noise_strength,
+            seed=seed,
+            backend=backend,
+            extra_step_kwargs=extra_step_kwargs,
         )
 
     def reconstruct_latents(
@@ -163,7 +130,6 @@ class ReconstructionPipeline:
         guidance_scale: float = 7.5,
         num_inference_steps: int = 25,
         noise_strength: float = 1.0,
-        device: torch.device = get_device(),
         progress_bar: bool = False,
         seed: int = 0,
         backend: Literal[
@@ -174,13 +140,14 @@ class ReconstructionPipeline:
         if backend != "stable_diffusion":
             raise NotImplementedError(f"backend {backend} is not implemented")
 
+        device = self.vae.device
         generator = torch.Generator(device=device).manual_seed(seed)
 
         do_classifier_free_guidance = guidance_scale > 1.0
         vae_scale_factor = 2 ** (len(self.vae.config["block_out_channels"]) - 1)
-        height = self.unet.config["sample_size"] * vae_scale_factor
-        width = self.unet.config["sample_size"] * vae_scale_factor
+        sample_size = self.unet.config["sample_size"]
         channels = self.unet.config["in_channels"]
+        height, width = sample_size * vae_scale_factor, sample_size * vae_scale_factor
         batch_size = conditioning_latent.shape[0]
         latents_shape = (batch_size, channels, height // 8, width // 8)
 
@@ -256,73 +223,11 @@ class ReconstructionPipeline:
                 noise_pred, t, latents, **extra_step_kwargs  # type: ignore
             ).prev_sample  # type: ignore
 
-        # Decode Latents
-        reconstruction = self.vae.decode(
-            latents / self.vae.config["scaling_factor"]
-        ).sample  # type: ignore
-
-        if self.image_processor:
-            reconstruction = self.image_processor.postprocess(
-                reconstruction, output_type="pt"
-            )
-            reconstruction = cast(torch.Tensor, reconstruction)
-        else:
-            reconstruction = (reconstruction * 0.5 + 0.5).clamp(0, 1)
-
+        reconstruction = self.vae_encoder.decode(latents)
         return reconstruction
-
-    def preprocess_conditioning_image(self, image: torch.Tensor) -> torch.Tensor:
-        return self.conditioning_image_preprocessor(image)
-
-    def preprocess_low_level_image(self, image: torch.Tensor) -> torch.Tensor:
-        return self.low_level_image_preprocessor(image)
-
-    def encode_conditioning_image(
-        self, image: torch.Tensor
-    ) -> torch.Tensor:  # Assumed not preprocessed
-        """
-        Encodes the conditioning image into a latent space.
-
-        Args:
-            image <batch_size, channels, height, width>: The image to encode.
-
-        Returns:
-            condition_latent <batch_size, 768>: The encoded image.
-        """
-        image = image.to(self.vae.device)
-        processed_image = self.preprocess_conditioning_image(image)
-        condition_latent = self.image_encoder(processed_image).image_embeds
-
-        return condition_latent
-
-    def encode_low_level_image(self, image: torch.Tensor) -> torch.Tensor:
-        """
-        Encodes the low level image into a latent space.
-
-        Args:
-            image <batch_size, channels, height, width>: The image to encode.
-
-        Returns:
-            low_level_latent <batch_size, 4, 64, 64>: The encoded image.
-        """
-        image = image.to(self.vae.device)
-
-        processed_image = self.preprocess_low_level_image(image)
-
-        if self.image_processor:
-            processed_image = self.image_processor.preprocess(processed_image)
-        else:
-            logging.warning(
-                "Tried to encode low level image but no image processor provided, Skipping this step."
-            )
-
-        low_level_latent = (
-            self.vae.encode(processed_image).latent_dist.sample()  # type: ignore
-            * self.vae.config["scaling_factor"]
-        )
-        return low_level_latent
 
     def compile(self):
         self.unet = torch.compile(self.unet)
         self.vae = torch.compile(self.vae)
-        self.image_encoder = torch.compile(self.image_encoder)
+        self.clip_encoder = torch.compile(self.clip_encoder)
+        self.vae_encoder = torch.compile(self.vae_encoder)

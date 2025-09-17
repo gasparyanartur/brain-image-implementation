@@ -68,6 +68,17 @@ default_normalize_option = "unnorm"
 recon_model_options = ["sd_highlevel", "sd_lowlevel"]
 
 
+latent_types = [
+    "unaligned_synclr_16",
+    "unaligned_synclr_32",
+    "aligned_synclr_16",
+    "aligned_synclr_32",
+    "aligned_clip_16",
+    "aligned_clip_32",
+    "sd_"
+]
+
+
 def extract_model_config(task_type: str, model_config_str: str) -> dict[str, str]:
     if task_type not in task_type_options:
         raise ValueError(f"Invalid task type: {task_type}")
@@ -806,7 +817,7 @@ class EEGAlignmentModel(pl.LightningModule):
             )
 
         self.eeg_encoder: EEGEncoder | None = (
-            (eeg_encoder or EEGEncoder3(self.config.eeg_config))
+            (eeg_encoder or EEGEncoder(self.config.eeg_config))
             if not self.config.prior_debug_mode
             else None
         )
@@ -1553,7 +1564,7 @@ class EEGAlignmentModel(pl.LightningModule):
 
             img_outputs.update(
                 {
-                    f"align_test_target": [wandb.Image(x) for x in target_img_paths[:3]],  # type: ignore
+                    f"align_test_target": [wandb.Image(x) for x in img_paths[:3]],  # type: ignore
                     f"align_test_chosen": [wandb.Image(x) for x in chosen_img_paths[:3]],  # type: ignore
                 }
             )
