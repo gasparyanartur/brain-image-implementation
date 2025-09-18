@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from pathlib import Path
 import typing
 from torch import nn
 import torch
@@ -13,6 +14,18 @@ from torchvision.transforms.v2 import (
     Normalize,
     InterpolationMode,
 )
+import dreamsim
+from dreamsim.model import PerceptualModel
+
+
+def model_name_to_hf_name(model_name: str) -> str:
+    match model_name:
+        case "clip_vitl14":
+            return "openai/clip-vit-large-patch14"
+        case "sd_variations_v2":
+            return "lambdalabs/sd-image-variations-diffusers"
+        case _:
+            raise ValueError(f"Unknown model name: {model_name}")
 
 
 class BaseImageEncoder(nn.Module):
@@ -27,26 +40,18 @@ class BaseImageEncoder(nn.Module):
         return self.encode(img)
 
 
-def hf_name_to_model_name(hf_name: str) -> str:
-    match hf_name:
-        case "openai/clip-vit-large-patch14":
-            return "clip_vitl14"
-        case "lambdalabs/sd-image-variations-diffusers":
-            return "sd_variations_v2"
-        case _:
-            raise ValueError(f"Unknown HF model name: {hf_name}")
-
-
 class CLIPImageEncoder(BaseImageEncoder):
     def __init__(
         self,
-        hf_model_name: str = "openai/clip-vit-large-patch14",
+        model_name: str = "clip_vitl14",
         use_native_processor: bool = False,
     ):
-        super().__init__(model_name=hf_name_to_model_name(hf_model_name))
+        super().__init__(model_name=model_name)
+
+        hf_name = model_name_to_hf_name(model_name)
 
         if use_native_processor:
-            proc = CLIPImageProcessor.from_pretrained(hf_model_name)
+            proc = CLIPImageProcessor.from_pretrained(hf_name)
             self.processor = lambda x: proc.preprocess(
                 x, return_tensors="pt"
             ).pixel_values
@@ -54,19 +59,22 @@ class CLIPImageEncoder(BaseImageEncoder):
             self.processor = tv2.Compose(
                 [
                     ToImage(),
-                    ToDtype(torch.float32, scale=True),
                     Resize(
                         (224, 224),
                         interpolation=InterpolationMode.BICUBIC,
                         antialias=False,
                     ),
+                    ToDtype(torch.float32, scale=True),
                     Normalize(
                         [0.48145466, 0.4578275, 0.40821073],
                         [0.26862954, 0.26130258, 0.27577711],
                     ),
                 ]
             )
-        self.model = CLIPVisionModelWithProjection.from_pretrained(hf_model_name)
+        self.model = CLIPVisionModelWithProjection.from_pretrained(hf_name)
+
+        self.processor.requires_grad_(False)
+        self.model.requires_grad_(False)
 
     def encode(self, images: torch.Tensor) -> torch.Tensor:
         img = self.processor(images)
@@ -75,25 +83,28 @@ class CLIPImageEncoder(BaseImageEncoder):
 
 
 class VAEImageEncoder(BaseImageEncoder):
-    def __init__(self, hf_model_name: str = "lambdalabs/sd-image-variations-diffusers"):
-        model_name = hf_name_to_model_name(hf_model_name)
+    def __init__(self, model_name: str = "sd_variations_v2"):
 
         super().__init__(model_name=model_name)
+        hf_name = model_name_to_hf_name(model_name)
 
         self.processor = tv2.Compose(
             [
                 ToImage(),
-                ToDtype(torch.float32, scale=True),
                 Resize(
                     (512, 512),
                     interpolation=InterpolationMode.BICUBIC,
                     antialias=True,
                 ),
+                ToDtype(torch.float32, scale=True),
             ]
         )
-        self.vae = AutoencoderKL.from_pretrained(hf_model_name, subfolder="vae")
+        self.vae = AutoencoderKL.from_pretrained(hf_name, subfolder="vae")
         self.vae_scale_factor = 2 ** (len(self.vae.config["block_out_channels"]) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
+
+        self.processor.requires_grad_(False)
+        self.vae.requires_grad_(False)
 
     def encode(self, img: torch.Tensor) -> torch.Tensor:
         img = self.processor(img)
@@ -116,8 +127,70 @@ class VAEImageEncoder(BaseImageEncoder):
 
 class SynCLRImageEncoder(BaseImageEncoder):
     def __init__(
-        self, model_name: str = "facebookresearch/synclr-50", patch_size: int = 16
+        self,
+        model_name: typing.Literal[
+            "unaligned_synclr_vitb16", "aligned_synclr_vitb16"
+        ] = "unaligned_synclr_vitb16",
+        download_weights: bool = True,
+        models_path: Path = Path("models"),
     ):
-        super().__init__()
-        # TODO: Implement SynCLR image encoder
-        raise NotImplementedError
+        super().__init__(model_name)
+
+        models_path_str = str(models_path)
+        model_name_parts = model_name.split("_")
+        if model_name_parts[0] == "unaligned":
+            self.aligned = False
+        elif model_name_parts[1] == "aligned":
+            self.aligned = True
+        else:
+            raise ValueError(
+                f"Invalid model name: {model_name} - Could not recognize 'aligned' variable {model_name_parts[0]}"
+            )
+
+        if model_name_parts[-1] == "vitb16":
+            self.patch_size = 16
+        elif model_name_parts[-1] == "vitl14":
+            self.patch_size = 14
+        else:
+            raise ValueError(
+                f"Invalid model name: {model_name} - Could not recognize 'patch_size' variable {model_name_parts[-1]}"
+            )
+
+        model_url = "_".join(model_name_parts[1:])
+        if download_weights:
+            dreamsim.model.download_weights(
+                cache_dir=models_path_str, dreamsim_type=model_url
+            )
+
+        if self.aligned:
+            self.model = PerceptualModel(
+                model_type=model_url,
+                normalize_embeds=False,
+                stride=self.patch_size,  # type: ignore
+                load_dir=models_path_str,
+                baseline=True,
+            )
+
+        else:
+            self.model, _ = dreamsim.dreamsim(
+                dreamsim_type=model_url,
+                cache_dir=models_path_str,
+                normalize_embeds=False,
+            )
+
+        self.processor = tv2.Compose(
+            [
+                ToImage(),
+                tv2.Resize([224, 224], interpolation=tv2.InterpolationMode.BICUBIC),
+                ToDtype(torch.float32, scale=True),
+            ]
+        )
+
+        self.model.requires_grad_(False)
+        self.processor.requires_grad_(False)
+
+    def encode(self, img: torch.Tensor) -> torch.Tensor:
+        img = self.processor(img)
+        latent = self.model.embed(img)  # type: ignore
+
+        return latent
