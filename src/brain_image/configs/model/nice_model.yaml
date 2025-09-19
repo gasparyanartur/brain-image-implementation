@@ -1,9 +1,9 @@
 # NICE Model Configuration
 
 # Model architecture and reconstruction settings
-align_target_model: "unaligned_synclr_16"
-low_recon_model: "sd_lowlevel"
-high_recon_model: "sd_highlevel"
+align_target_model: "unaligned_synclr_vitb16"
+low_recon_model: "sd_variations_v2"
+high_recon_model: "clip_vitl14"
 do_align: true
 do_high_recon: true
 do_low_recon: false
