@@ -5,15 +5,13 @@ defaults:
   - _self_
 
 # Model configuration
-model_name: aligned_synclr_16  # Options: aligned_synclr_16, unaligned_synclr_16, aligned_clip_32, unaligned_clip_32, sd_highlevel, sd_lowlevel
-task_type: align  # Options: align, recon
+model_name: aligned_synclr_vitb16  # Options: aligned_synclr_vitb16, unaligned_synclr_vitb16, clip_vitl14, sd_variations_v2
 
 # Generation settings
 batch_size: 128
 splits:
   - train
   - test
-img_size: [224, 224]
 models_path: models
 dtype: float32
 device: null

@@ -9,7 +9,7 @@ import pytest
 
 # Import the current functions
 from src.brain_image.data import preprocess_image, batch_load_images, load_image_from_path
-from src.brain_image.model import load_image_encoder
+from brain_image.model.model import load_image_encoder
 import dreamsim
 from dreamsim.model import PerceptualModel
 
@@ -30,7 +30,7 @@ def old_embedding_method(model_config_str, models_path, img_paths, img_size=(224
     # Load the model exactly like the old version did
     try:
         # Extract model config like the old version
-        from src.brain_image.model import extract_model_config
+        from brain_image.model.model import extract_model_config
         model_config = extract_model_config("align", model_config_str)
         
         aligned_option = model_config["aligned_option"]

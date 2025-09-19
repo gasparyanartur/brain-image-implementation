@@ -7,7 +7,7 @@ from omegaconf import DictConfig
 from lightning import Trainer
 import torch
 from brain_image.configs import BaseConfig, get_device
-from brain_image.model import NICEModel
+from brain_image.model.model import NICEModel
 
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 

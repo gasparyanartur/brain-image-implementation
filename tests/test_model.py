@@ -4,11 +4,10 @@ import tempfile
 import shutil
 from pathlib import Path
 
-from brain_image.model import (
-    EEGEncoderConfig, 
-    EEGEncoder, 
+from brain_image.model.eeg_alignment import EEGAlignmentModel
+from brain_image.model.eeg_encoder import EEGEncoder, EEGEncoderConfig
+from brain_image.model.model import (
     LatentProjector,
-    EEGAlignmentModel,
 )
 from brain_image.data import EEGDatasetConfig
 

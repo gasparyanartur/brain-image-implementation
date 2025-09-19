@@ -1,633 +1,35 @@
-from __future__ import annotations
-import time
-
+import lightning as pl
 import matplotlib.pyplot as plt
-from abc import ABC, abstractmethod
-from collections import OrderedDict
-from collections.abc import Callable
+import torch
+import torch.nn as nn
+from lightning.pytorch.loggers import WandbLogger
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+import itertools as it
+from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
-from functools import cached_property, lru_cache
-import logging
-import os
+from functools import cached_property
 from pathlib import Path
-import re
-import tempfile
+from brain_image.configs import BaseConfig, get_device
+from brain_image.data import EEGDataModule, EEGDatasetConfig, TensorCache, batch_load_images, get_image_paths
+from brain_image.model.eeg_encoder import EEGEncoder, EEGEncoderConfig
+from brain_image.model.loss import CLIPLoss, InfoNCELoss
+from brain_image.model.model import LatentProjector, ResidualAdapter, normalize_projection
+from brain_image.model.prior import BrainDiffusionPrior, BrainDiffusionPriorConfig
+
+
 from typing import Any, Literal, TypedDict, cast
-from matplotlib.pyplot import bar
-import numpy as np
-from pydantic import BaseModel, field_validator
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-from sympy import O
-import torch
-import torch.nn as nn
-import einops
-import math
-import itertools as it
-import lightning as pl
-import tqdm
-from lightning.pytorch.loggers import WandbLogger
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
-from torchvision.models import resnet34
-from PIL import Image
-import wandb
-
-from brain_image.configs import BaseConfig, get_device, get_device_str
-from brain_image.data import (
-    EEGDataModule,
-    EEGDatasetConfig,
-    TensorCache,
-    batch_load_images,
-    get_image_paths,
-    load_image_from_path,
-    preprocess_image,
-)
-import dreamsim
-from dreamsim.model import PerceptualModel
-
+import logging
 from brain_image.reconstruction import ReconstructionPipeline
 from brain_image.utils import DTYPE, gather_dataloader, get_dtype, get_mean_gradients, get_norm_dir_len, key_in_dict
-from brain_image.prior import (
-    BrainDiffusionPrior,
-    BrainDiffusionPriorConfig,
-    DiffusionPriorNetwork,
-)
 
-task_type_options = ["align", "recon"]
-model_name_options = ["synclr", "clip"]
-patch_size_options = ["16", "32"]
-aligned_options = ["aligned", "unaligned"]
-normalize_options = ["norm", "unnorm"]
-
-default_aligned_option = "aligned"
-default_patch_size = "16"
-default_normalize_option = "unnorm"
-
-recon_model_options = ["sd_highlevel", "sd_lowlevel"]
-
-
-latent_types = [
-    "unaligned_synclr_16",
-    "unaligned_synclr_32",
-    "aligned_synclr_16",
-    "aligned_synclr_32",
-    "aligned_clip_16",
-    "aligned_clip_32",
-    "sd_"
-]
-
-
-def extract_model_config(task_type: str, model_config_str: str) -> dict[str, str]:
-    if task_type not in task_type_options:
-        raise ValueError(f"Invalid task type: {task_type}")
-    if task_type == "recon":
-        assert model_config_str in recon_model_options
-        return {
-            "task_type": "recon",
-            "model_name": model_config_str,
-        }
-
-    # Extracts whether aligned/unaligned, model_name, and patch_size (16 or 32)
-    name_parts = model_config_str.split("_")
-    if len(name_parts) == 1:
-        aligned_option, model_name, patch_size, normalize_option = (
-            default_aligned_option,
-            name_parts[0],
-            default_patch_size,
-            default_normalize_option,
-        )
-    elif len(name_parts) == 2:
-        aligned_option, model_name, patch_size, normalize_option = (
-            default_aligned_option,
-            name_parts[0],
-            name_parts[1],
-            default_normalize_option,
-        )
-    elif len(name_parts) == 3:
-        aligned_option, model_name, patch_size, normalize_option = (
-            name_parts[0],
-            name_parts[1],
-            name_parts[2],
-            default_normalize_option,
-        )
-    elif len(name_parts) == 4:
-        aligned_option, model_name, patch_size, normalize_option = (
-            name_parts[0],
-            name_parts[1],
-            name_parts[2],
-            name_parts[3],
-        )
-    else:
-        raise ValueError(f"Invalid model name: {model_config_str}")
-
-    if aligned_option not in aligned_options:
-        raise ValueError(f"Invalid aligned option: {aligned_option}")
-    if model_name not in model_name_options:
-        raise ValueError(f"Invalid model name: {model_name}")
-    if patch_size not in patch_size_options:
-        raise ValueError(f"Invalid patch size: {patch_size}")
-    if normalize_option not in normalize_options:
-        raise ValueError(f"Invalid normalize option: {normalize_option}")
-
-    return {
-        "task_type": "align",
-        "aligned_option": aligned_option,
-        "model_name": model_name,
-        "patch_size": patch_size,
-        "normalize_option": normalize_option,
-    }
-
-
-def load_image_encoder(
-    task_type: str,
-    model_config_str: str,
-    models_path: Path,
-    download_weights: bool = True,
-    device: str | torch.device | None = None,
-    dtype: torch.dtype = DTYPE,
-    img_size: tuple[int, int] = (224, 224),
-    compile: bool = True,
-) -> Callable[[torch.Tensor], torch.Tensor]:
-    model_config = extract_model_config(task_type, model_config_str)
-    if device is None:
-        device = get_device()
-    if isinstance(device, str):
-        device = torch.device(device)
-
-    if model_config["task_type"] == "recon":
-        model_name = model_config["model_name"]
-        pipe = ReconstructionPipeline.from_stable_diffusion(
-            dtype=dtype,
-            device=device,
-        )
-        if compile:
-            pipe.compile()
-
-        if model_name == "sd_highlevel":
-
-            def embed(imgs: torch.Tensor) -> torch.Tensor:
-                with torch.no_grad():
-                    imgs = imgs.to(device=device)
-                    latent = pipe.encode_conditioning_image(imgs)
-                    latent = latent.detach().cpu()
-                return latent
-
-            return embed
-
-        elif model_name == "sd_lowlevel":
-
-            def embed(imgs: torch.Tensor) -> torch.Tensor:
-                with torch.no_grad():
-                    imgs = imgs.to(device=device)
-                    latent = pipe.encode_low_level_image(imgs)
-
-                    latent = latent.detach().cpu()
-                return latent
-
-            return embed
-
-        else:
-            raise ValueError(f"Invalid model name: {model_name}")
-
-    # Align
-    aligned_option = model_config["aligned_option"]
-    model_name = model_config["model_name"]
-    patch_size = model_config["patch_size"]
-    normalize_option = model_config["normalize_option"]
-
-    logging.info(
-        f"Loading {model_name} model with {patch_size} patch size and {aligned_option} alignment and {normalize_option} normalization..."
-    )
-
-    model_type = f"{model_name}_vitb{patch_size}"
-    if download_weights:
-        dreamsim.model.download_weights(
-            dreamsim_type=model_type,
-            cache_dir=str(models_path),
-        )
-
-    if aligned_option == "unaligned":
-        model = PerceptualModel(
-            model_type=model_type,
-            normalize_embeds=False,
-            stride=patch_size,
-            load_dir=str(models_path),
-            baseline=True,
-            device=device or get_device_str(),  # type: ignore
-        )
-
-    else:
-        model, _ = dreamsim.dreamsim(
-            dreamsim_type=model_type,
-            cache_dir=str(models_path),
-            normalize_embeds=False,
-            device=device or get_device_str(),  # type: ignore
-        )
-
-    model = model.to(device=device, dtype=dtype)
-    model.eval().requires_grad_(False)
-    if compile:
-        model = torch.compile(model)
-
-    logging.info(f"Model {model_name} loaded successfully.")
-
-    def embed(imgs: torch.Tensor) -> torch.Tensor:
-        with torch.no_grad():
-            imgs = imgs.to(device=device)
-            imgs = preprocess_image(imgs, img_size=list(img_size)).to(
-                device=device, dtype=dtype
-            )
-
-            latent = model.embed(imgs)  # type: ignore
-            latent = latent.detach().cpu()
-        return latent
-
-    return embed
-
-
-@torch.compile()
-def normalize_projection(
-    x: torch.Tensor, rescale_norm_by_mean: bool = False, eps: float = 1e-8
-) -> torch.Tensor:
-    if rescale_norm_by_mean:
-        x = x - x.mean(dim=-1, keepdim=True)
-    return nn.functional.normalize(x, dim=-1, p=2, eps=eps)
-
-
-class DebugLayer(nn.Module):
-    def __init__(self, note: str = ""):
-        super(DebugLayer, self).__init__()
-        self.note = note
-
-    def forward(self, x):
-        print(f"(debug): {x.shape} - {self.note}")
-        return x
-
-
-class WrapDebugSequential(nn.Module):
-    def __init__(self, seq: nn.Sequential, note: str = ""):
-        super(WrapDebugSequential, self).__init__()
-        self.seq = seq
-
-        self.debug_layers = nn.ModuleList(
-            [DebugLayer(f"layer_{i}") for i in range(len(seq))]
-        )
-
-    def forward(self, x):
-        for i, layer in enumerate(self.seq):
-            x = layer(x)
-            print(f"(debug): {i} - {x.shape} - {self.debug_layers[i].note}")
-        return x
-
-
-class ResidualAdd(nn.Module):
-    def __init__(self, module: nn.Module):
-        super().__init__()
-        self.module = module
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + self.module(x)
-
-
-class ResidualAdapter(nn.Module):
-    def __init__(self, latent_dim: int = 768, hidden_factor: int = 2, dropout: float = 0.5):
-        super().__init__()
-
-        self.layers = nn.Sequential(
-            nn.LayerNorm(latent_dim),
-            nn.Dropout(dropout),
-            nn.Linear(latent_dim, latent_dim * hidden_factor),
-            nn.GELU(),
-            nn.Linear(latent_dim * hidden_factor, latent_dim),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.layers(x) + x
-
-
-def is_debug_layer_active(layer_name: str) -> bool:
-    query = "DEBUG_" + layer_name.upper().strip()
-    result = os.getenv(query)
-    if result is None:
-        result = os.getenv(query.lower())
-        if result is None:
-            return False
-
-    result = result.lower().strip()
-    if result in {"1", "true", "yes"}:
-        return True
-    elif result in {"0", "false", "no"}:
-        return False
-    else:
-        raise ValueError(f"Invalid value for {layer_name}: {result}")
-
-
-class LatentProjector(nn.Module):
-    def __init__(
-        self,
-        embed_dim: int = 768,
-        proj_dim: int = 768,
-        hidden_dim: int = 768,
-        dropout: float = 0.5,
-    ):
-        super().__init__()
-
-        self.l_proj = nn.Linear(embed_dim, hidden_dim)
-        self.l_inner = nn.Sequential(
-            nn.GELU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Dropout(dropout),
-        )
-        self.norm1 = nn.LayerNorm(hidden_dim)
-        self.l_out = nn.Linear(hidden_dim, proj_dim)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_res = x = self.l_proj(x)
-        x = self.l_inner(x) + x_res
-        x = self.norm1(x)
-        x = self.l_out(x)
-
-        return x
-
-
-class CLIPLoss(nn.Module):
-    def __init__(self, init_temperature: float = 0.04, max_scale: float = 100):
-        super().__init__()
-        self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / init_temperature)))
-        self.max_scale = max_scale
-        self.cross_entropy = nn.CrossEntropyLoss()
-
-    def forward(
-        self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor | None = None, symmetric: bool = True, reduce: bool = True
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        if labels is None:
-            labels = torch.zeros((z_i.size(0), z_i.size(0)), device=z_i.device)
-            for i in range(labels.shape[0]):
-                labels[i, i] = 1
-
-        labels = labels.float()
-
-        sim = z_e @ z_i.T
-        scale = self.logit_scale.exp().clamp(self.max_scale)
-        sim_scaled = sim * scale
-
-        loss_e = torch.nn.functional.binary_cross_entropy_with_logits(
-            sim_scaled, labels, reduction = "mean" if reduce else "none"
-        )
-        if not symmetric:
-            return loss_e, sim
-
-        loss_i = torch.nn.functional.binary_cross_entropy_with_logits(
-            sim_scaled.T, labels.T, reduction = "mean" if reduce else "none"
-        )
-        loss = (loss_e + loss_i) / 2
-
-        return loss, sim
-
-
-class InfoNCELoss(nn.Module):
-    def __init__(self, init_temperature: float = 0.04, max_scale: float = 100, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / init_temperature)))
-        self.max_scale = max_scale
-
-    @staticmethod
-    def _get_directional_loss(sim: torch.Tensor, neg_mask: torch.Tensor, reduce: bool = True):
-        row_max = sim.max(dim=-1, keepdim=True).values
-        logits_row = sim - row_max
-
-        row_log_denom = torch.logsumexp(logits_row, dim=-1)
-        
-        row_correct = logits_row.masked_fill(neg_mask, -torch.inf)
-        row_log_numer = torch.logsumexp(row_correct, dim=-1)
-
-        row_loss = -(row_log_numer - row_log_denom)
-        if reduce:
-            row_loss = row_loss.mean()
-        return row_loss
-
-    def forward(self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor, symmetric: bool = True, reduce: bool = True):
-        neg_mask = ~labels
-        sim = z_e @ z_i.T 
-        scale = self.logit_scale.exp().clamp(self.max_scale)
-        logits = sim * scale
-        
-        loss_e = self._get_directional_loss(logits, neg_mask, reduce=reduce)
-
-        if not symmetric:
-            return loss_e, sim
-
-        loss_i = self._get_directional_loss(logits.T, neg_mask.T)
-        loss = 0.5 * (loss_e + loss_i)
-
-        return loss, sim
-
-
-def get_belong_group(img_path: list[Path], to_float: bool = False) -> torch.Tensor:
-    unique_ids = {v: k for k, v in enumerate(img_path)}
-
-    belonings = [[] for _ in range(len(img_path))]
-    for i, p in enumerate(img_path):
-        belonings[unique_ids[p]].append(i)
-
-    path_groups = torch.zeros((len(img_path), len(img_path)), dtype=torch.bool)
-    for i, p in enumerate(img_path):
-        uid = unique_ids[p]
-        for op in belonings[uid]:
-            path_groups[i, op] = True
-
-    if to_float:
-        path_groups = path_groups.float()
-
-    return path_groups
-
-
-class EEGEncoderConfig(BaseConfig):
-    f1: int = 64
-    f2: int = 128
-    pool1: int = 8
-    stride1: int = 5
-    pool2: int = 4
-    stride2: int = 1
-    kernel1: int = 25
-    kernel2: int = 17
-    dropout: float = 0.5
-    embed_dim: int = 128
-    patch_out_size: int = 16
-    hidden_dim: int = 768
-    output_dim: int = 768
-    
-    noise_augment: float = 0.00
-    temporal_zero_prob: float = 0.0
-    spatial_zero_prob: float = 0.0
-    #noise_augment: float = 0.01
-    #temporal_zero_prob: float = 0.2
-    #spatial_zero_prob: float = 0.1
-    norm_type: Literal["batch", "group"] = "group"
-    norm_groups: int = 16
-
-
-class EEGEncoder(nn.Module):
-    def __init__(
-        self,
-        config: EEGEncoderConfig = EEGEncoderConfig(),
-        norm_func: type[nn.Module] = nn.BatchNorm2d,
-        act_func: type[nn.Module] = nn.ELU,
-    ):
-        # Adapted from https://github.com/eeyhsong/NICE-EEG
-        super(EEGEncoder, self).__init__()
-
-        self.config = config
-
-        if config.norm_type == "batch":
-            norm = nn.BatchNorm2d
-        elif config.norm_type == "group":
-            norm = lambda c: nn.GroupNorm(num_groups=config.norm_groups, num_channels=c)
-        else:
-            raise ValueError(f"Unknown norm_type: {config.norm_type}")
-
-        self.patch_embedding = nn.Sequential(
-            nn.Conv2d(
-                1,
-                config.f1,
-                kernel_size=(1, config.kernel1),
-                bias=False,
-                stride=(1, config.stride1),
-            ),
-            norm(config.f1),
-            act_func(),
-            nn.Conv2d(
-                config.f1,
-                config.f2,
-                kernel_size=(config.kernel2, 1),
-                bias=False,
-            ),
-            norm(config.f2),
-            act_func(),
-            nn.Dropout(config.dropout, inplace=True),
-            nn.Conv2d(config.f2, config.embed_dim, kernel_size=1),
-        )
-
-        if is_debug_layer_active("eeg_layers"):
-            self.patch_embedding = WrapDebugSequential(
-                self.patch_embedding, "patch_embedding"
-            )
-
-        self.proj = nn.Sequential(
-            #nn.LayerNorm(config.embed_dim * config.patch_out_size),
-            nn.Linear(config.patch_out_size * config.embed_dim, config.hidden_dim),
-            ResidualAdd(
-                nn.Sequential(
-                    nn.GELU(),
-                    nn.Linear(config.hidden_dim, config.hidden_dim),
-                )
-            ),
-            nn.Linear(config.hidden_dim, config.output_dim),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B, S, T = x.shape
-
-        if self.training:
-            if self.config.noise_augment > 0:
-                x += torch.randn_like(x) * self.config.noise_augment
-
-            if self.config.temporal_zero_prob > 0:
-                num_temporal = x.shape[-1]
-                zero_mask = torch.rand(num_temporal) < self.config.temporal_zero_prob
-                zero_mask = (
-                    zero_mask[None, None, :].repeat(B, S, 1).to(x.device, dtype=x.dtype)
-                )
-                x = x * (1 - zero_mask)
-
-            if self.config.spatial_zero_prob > 0:
-                num_spatial = x.shape[-2]
-                zero_mask = torch.rand(num_spatial) < self.config.spatial_zero_prob
-                zero_mask = (
-                    zero_mask[None, :, None].repeat(B, 1, T).to(x.device, dtype=x.dtype)
-                )
-                x = x * (1 - zero_mask)
-
-        x = einops.rearrange(x, "b s t -> b 1 s t")
-        x = self.patch_embedding(x)
-        x = einops.rearrange(x, "b e s t -> b (s t e)")
-        x = self.proj(x)
-        return x
-
-
-class EEGEncoder2(nn.Module):
-    def __init__(self, config: EEGEncoderConfig = EEGEncoderConfig()):
-        super().__init__()
-        
-        self.convs = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=(5, 25), stride=(1, 5)),   # 13, 15
-            nn.GroupNorm(8, 32),
-            nn.ELU(),
-            nn.Dropout(0.5),
-            nn.Conv2d(32, 64, kernel_size=(3, 5), stride=(1, 2)),    # 11, 6
-            nn.GroupNorm(16, 64),
-            nn.ELU(),
-            nn.Dropout(0.5),
-            nn.Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1)),   # 9, 4
-            nn.GroupNorm(32, 128),
-            nn.ELU(),
-            nn.Dropout(0.5),
-            nn.Conv2d(128, 256, kernel_size=(9, 4)),
-            nn.Flatten(),
-        )
-
-        self.seq = nn.Sequential(
-            nn.Linear(256, 512),
-            nn.LayerNorm(512),
-            nn.GELU(),
-            nn.Dropout(0.5),
-            ResidualAdd(
-                nn.Sequential(
-                    nn.Linear(512, 512),
-                    nn.LayerNorm(512),
-                    nn.GELU(),
-                    )
-            ),
-            nn.Linear(512, config.output_dim)
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = einops.rearrange(x, "b s t -> b 1 s t")
-        x = self.convs(x)
-        x = self.seq(x)
-        return x
-
-
-class EEGEncoder3(nn.Module):
-    def __init__(self, config: EEGEncoderConfig = EEGEncoderConfig()):
-        super().__init__()
-
-        model = resnet34(weights="DEFAULT")
-        model.conv1 = torch.nn.Conv2d(1, 64, kernel_size=(1, 25), stride=(1, 3), padding=(0, 0), bias=False)
-        model.fc = torch.nn.Linear(512, 768)
-        model.max_pool = torch.nn.MaxPool2d(kernel_size=(1, 3), stride=(1, 2), dilation=1, ceil_mode=False)
-
-        self.model = model
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = einops.rearrange(x, "b s t -> b 1 s t")
-        x = self.model(x)
-        return x
-
-
-class DataBatchT(TypedDict):
-    img_path: list[str] | None
-    eeg_data: torch.Tensor | None
-    idx: torch.Tensor | None
-    eeg_latent: torch.Tensor | None
-    align_image_latent: torch.Tensor | None
-    high_recon_image_latent: torch.Tensor | None
-    low_recon_image_latent: torch.Tensor | None
-    prior_pred: torch.Tensor | None
-    prior_pred_single: torch.Tensor | None
+import tqdm
+import re
+import tempfile
+import time
 
 
 class EEGAlignmentConfig(BaseConfig):
@@ -720,6 +122,37 @@ class EEGAlignmentConfig(BaseConfig):
         "VAL__align_top1_acc",
         "VAL__prior_pred_cos",
     ]
+
+
+class DataBatchT(TypedDict):
+    img_path: list[str] | None
+    eeg_data: torch.Tensor | None
+    idx: torch.Tensor | None
+    eeg_latent: torch.Tensor | None
+    align_image_latent: torch.Tensor | None
+    high_recon_image_latent: torch.Tensor | None
+    low_recon_image_latent: torch.Tensor | None
+    prior_pred: torch.Tensor | None
+    prior_pred_single: torch.Tensor | None
+
+
+def get_belong_group(img_path: list[str], to_float: bool = False) -> torch.Tensor:
+    unique_ids = {v: k for k, v in enumerate(img_path)}
+
+    belonings = [[] for _ in range(len(img_path))]
+    for i, p in enumerate(img_path):
+        belonings[unique_ids[p]].append(i)
+
+    path_groups = torch.zeros((len(img_path), len(img_path)), dtype=torch.bool)
+    for i, p in enumerate(img_path):
+        uid = unique_ids[p]
+        for op in belonings[uid]:
+            path_groups[i, op] = True
+
+    if to_float:
+        path_groups = path_groups.float()
+
+    return path_groups
 
 
 class EEGAlignmentModel(pl.LightningModule):
@@ -1304,7 +737,7 @@ class EEGAlignmentModel(pl.LightningModule):
         else:
             assert self.eeg_encoder is not None, "EEG encoder is not initialized"
             assert "eeg_data" in batch and batch["eeg_data"] is not None, "EEG data is not in batch"
-            
+
             eeg_data = batch["eeg_data"].to(device, dtype=dtype)
             proj_eeg_latent = self.eeg_encoder(eeg_data)
 
@@ -1380,7 +813,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 )
                 _, prior_prep_single = self.prior(
                     brain_embedding=latent_batch,
-                    image_embedding=target_batch,  
+                    image_embedding=target_batch,
                 )
                 prior_pred_single = prior_prep_single / self.prior.image_embed_scale
                 if self.prior_adapter:
@@ -1673,6 +1106,8 @@ class EEGAlignmentModel(pl.LightningModule):
                 assert proj_eeg_latent is not None, "EEG latent is not initialized"
                 assert proj_eeg_latent_normed is not None, "EEG latent is not initialized"
                 assert self.align_loss is not None, "Align loss is not initialized"
+                assert "align_image_latent" in batch and batch["align_image_latent"] is not None
+                assert "img_path" in batch and batch["img_path"] is not None
 
                 align_image_latent = batch["align_image_latent"].to(device)
 
@@ -1710,12 +1145,12 @@ class EEGAlignmentModel(pl.LightningModule):
                 )
                 align_cos = align_sim.diag()
                 align_cos_loss = (1-align_cos).mean() * self.config.align_cos_loss_factor
-               
+
 
                 losses.update(
                     {
-                        "align_mse_loss": align_mse_loss, 
-                        "align_clip_loss": align_clip_loss, 
+                        "align_mse_loss": align_mse_loss,
+                        "align_clip_loss": align_clip_loss,
                         "align_cos_loss": align_cos_loss
                     }
                 )

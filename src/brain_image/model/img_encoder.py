@@ -3,7 +3,11 @@ from pathlib import Path
 import typing
 from torch import nn
 import torch
-from transformers import CLIPVisionModelWithProjection, CLIPImageProcessor, ViTImageProcessor
+from transformers import (
+    CLIPVisionModelWithProjection,
+    CLIPImageProcessor,
+    ViTImageProcessor,
+)
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.image_processor import VaeImageProcessor
 from torchvision.transforms import v2 as tv2
@@ -31,7 +35,7 @@ def model_name_to_hf_name(model_name: str) -> str:
 
 
 class BaseImageEncoder(nn.Module):
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, *args, **kwargs):
         super().__init__()
         self.model_name = model_name
 
@@ -42,11 +46,47 @@ class BaseImageEncoder(nn.Module):
         return self.encode(img)
 
 
+def load_image_encoder(
+    model_name: str,
+    models_path: Path = Path("models"),
+    download_weights: bool = True,
+    compile: bool = True,
+    device: str | torch.device | None = None,
+    dtype: torch.dtype = torch.float32,
+    *args,
+    **kwargs,
+) -> BaseImageEncoder:
+    match model_name:
+        case "clip_vitl14":
+            model = CLIPImageEncoder(*args, **kwargs)
+        case "sd_variations_v2":
+            model = CLIPImageEncoder(*args, **kwargs)
+        case "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
+            model = SynCLRImageEncoder(
+                *args,
+                models_path=models_path,
+                download_weights=download_weights,
+                **kwargs,
+            )
+        case _:
+            raise ValueError(f"Unknown model name: {model_name}")
+
+    model.requires_grad_(False)
+    model.eval()
+
+    if compile:
+        model = torch.compile(model)
+
+    if device is not None:
+        model.to(device)
+
+    model = model.to(dtype=dtype)
+
+    return typing.cast(BaseImageEncoder, model)
+
+
 class CLIPImageEncoder(BaseImageEncoder):
-    def __init__(
-        self,
-        model_name: str = "clip_vitl14",
-    ):
+    def __init__(self, model_name: str = "clip_vitl14", *args, **kwargs):
         super().__init__(model_name=model_name)
 
         hf_name = model_name_to_hf_name(model_name)
@@ -64,7 +104,7 @@ class CLIPImageEncoder(BaseImageEncoder):
 
 
 class VAEImageEncoder(BaseImageEncoder):
-    def __init__(self, model_name: str = "sd_variations_v2"):
+    def __init__(self, model_name: str = "sd_variations_v2", *args, **kwargs):
 
         super().__init__(model_name=model_name)
         hf_name = model_name_to_hf_name(model_name)
@@ -114,6 +154,8 @@ class SynCLRImageEncoder(BaseImageEncoder):
         ] = "unaligned_synclr_vitb16",
         download_weights: bool = True,
         models_path: Path = Path("models"),
+        *args,
+        **kwargs,
     ):
         super().__init__(model_name)
 
@@ -166,7 +208,9 @@ class SynCLRImageEncoder(BaseImageEncoder):
         self.model.requires_grad_(False)
 
     def encode(self, img: torch.Tensor) -> torch.Tensor:
-        img = self.processor(img, return_tensors="pt").pixel_values.to(self.model.device)
+        img = self.processor(img, return_tensors="pt").pixel_values.to(
+            self.model.device
+        )
         latent = self.model.embed(img)  # type: ignore
 
         return latent

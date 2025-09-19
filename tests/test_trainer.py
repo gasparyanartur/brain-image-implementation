@@ -9,8 +9,9 @@ import torch.utils.data
 import lightning
 from typing import cast
 
+from brain_image.model.eeg_encoder import EEGEncoderConfig
 from brain_image.trainer import NICETrainerConfig, NICETrainer, load_eeg_encoder_from_checkpoint
-from brain_image.model import EEGEncoderConfig, EEGEncoder
+from brain_image.model.eeg_encoder import EEGEncoder
 from brain_image.data import EEGDatasetConfig
 from brain_image.utils import state_dict_equal
 

@@ -14,7 +14,7 @@ from brain_image.data import (
     load_all_eeg_data,
     TensorCache,
 )
-from brain_image.model import load_image_encoder
+from brain_image.model.model import load_image_encoder
 
 
 def test_eeg_dataset_creation(mock_data_directory):
