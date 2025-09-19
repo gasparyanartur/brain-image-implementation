@@ -24,7 +24,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_image_variat
 )
 
 from brain_image.configs import get_device
-from brain_image.img_encoder import CLIPImageEncoder, VAEImageEncoder
+from brain_image.img_encoder import CLIPImageEncoder, VAEImageEncoder, model_name_to_hf_name
 from brain_image.utils import DTYPE
 
 
@@ -48,14 +48,14 @@ class ReconstructionPipeline:
     @classmethod
     def from_stable_diffusion(
         cls,
-        model_id: str = "lambdalabs/sd-image-variations-diffusers",
+        model_name: str = "sd_variations_v2",
         device: torch.device = get_device(),
         dtype: torch.dtype = DTYPE,
-        cond_encoder_name: str = "openai/clip-vit-large-patch14",
+        cond_encoder_name: str = "clip_vitl14",
         **kwargs: dict,
     ):
         base_pipe = StableDiffusionImageVariationPipeline.from_pretrained(
-            model_id,
+            model_name_to_hf_name(model_name),
             torch_dtype=dtype,
         ).to(device)
 
@@ -63,7 +63,7 @@ class ReconstructionPipeline:
         vae = base_pipe.vae
         noise_scheduler = base_pipe.scheduler
         clip_encoder = CLIPImageEncoder(cond_encoder_name)
-        vae_encoder = VAEImageEncoder(model_id)
+        vae_encoder = VAEImageEncoder(model_name)
 
         return cls(
             unet=unet,

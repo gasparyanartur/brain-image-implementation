@@ -3,7 +3,7 @@ from pathlib import Path
 import typing
 from torch import nn
 import torch
-from transformers import CLIPVisionModelWithProjection, CLIPImageProcessor
+from transformers import CLIPVisionModelWithProjection, CLIPImageProcessor, ViTImageProcessor
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.image_processor import VaeImageProcessor
 from torchvision.transforms import v2 as tv2
@@ -24,6 +24,8 @@ def model_name_to_hf_name(model_name: str) -> str:
             return "openai/clip-vit-large-patch14"
         case "sd_variations_v2":
             return "lambdalabs/sd-image-variations-diffusers"
+        case "synclr_vitb16":
+            return "facebook/dino-vitb16"
         case _:
             raise ValueError(f"Unknown model name: {model_name}")
 
@@ -44,42 +46,21 @@ class CLIPImageEncoder(BaseImageEncoder):
     def __init__(
         self,
         model_name: str = "clip_vitl14",
-        use_native_processor: bool = False,
     ):
         super().__init__(model_name=model_name)
 
         hf_name = model_name_to_hf_name(model_name)
 
-        if use_native_processor:
-            proc = CLIPImageProcessor.from_pretrained(hf_name)
-            self.processor = lambda x: proc.preprocess(
-                x, return_tensors="pt"
-            ).pixel_values
-        else:
-            self.processor = tv2.Compose(
-                [
-                    ToImage(),
-                    Resize(
-                        (224, 224),
-                        interpolation=InterpolationMode.BICUBIC,
-                        antialias=False,
-                    ),
-                    ToDtype(torch.float32, scale=True),
-                    Normalize(
-                        [0.48145466, 0.4578275, 0.40821073],
-                        [0.26862954, 0.26130258, 0.27577711],
-                    ),
-                ]
-            )
+        self.processor = CLIPImageProcessor.from_pretrained(hf_name)
         self.model = CLIPVisionModelWithProjection.from_pretrained(hf_name)
 
-        self.processor.requires_grad_(False)
         self.model.requires_grad_(False)
 
     def encode(self, images: torch.Tensor) -> torch.Tensor:
-        img = self.processor(images)
-        out = self.model(img).image_embeds
-        return out
+        img = self.processor(images, return_tensors="pt").pixel_values.to(
+            self.model.device
+        )
+        return self.model(img).image_embeds
 
 
 class VAEImageEncoder(BaseImageEncoder):
@@ -88,7 +69,7 @@ class VAEImageEncoder(BaseImageEncoder):
         super().__init__(model_name=model_name)
         hf_name = model_name_to_hf_name(model_name)
 
-        self.processor = tv2.Compose(
+        self.preprocessor = tv2.Compose(
             [
                 ToImage(),
                 Resize(
@@ -99,16 +80,16 @@ class VAEImageEncoder(BaseImageEncoder):
                 ToDtype(torch.float32, scale=True),
             ]
         )
+        self.processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.vae = AutoencoderKL.from_pretrained(hf_name, subfolder="vae")
         self.vae_scale_factor = 2 ** (len(self.vae.config["block_out_channels"]) - 1)
-        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
 
-        self.processor.requires_grad_(False)
+        self.preprocessor.requires_grad_(False)
         self.vae.requires_grad_(False)
 
     def encode(self, img: torch.Tensor) -> torch.Tensor:
-        img = self.processor(img)
-        img = self.image_processor.preprocess(img)
+        img = self.preprocessor(img)
+        img = self.processor.preprocess(img)
 
         latent = (
             self.vae.encode(img).latent_dist.sample()  # type: ignore
@@ -120,7 +101,7 @@ class VAEImageEncoder(BaseImageEncoder):
     def decode(self, latent: torch.Tensor) -> torch.Tensor:
         img = self.vae.decode(latent / self.vae.config["scaling_factor"]).sample  # type: ignore
         img = typing.cast(
-            torch.Tensor, self.image_processor.postprocess(img, output_type="pt")
+            torch.Tensor, self.processor.postprocess(img, output_type="pt")
         )
         return img
 
@@ -162,6 +143,9 @@ class SynCLRImageEncoder(BaseImageEncoder):
                 cache_dir=models_path_str, dreamsim_type=model_url
             )
 
+        hf_name = model_name_to_hf_name(model_url)
+        processor = ViTImageProcessor.from_pretrained(hf_name)
+
         if self.aligned:
             self.model = PerceptualModel(
                 model_type=model_url,
@@ -178,19 +162,11 @@ class SynCLRImageEncoder(BaseImageEncoder):
                 normalize_embeds=False,
             )
 
-        self.processor = tv2.Compose(
-            [
-                ToImage(),
-                tv2.Resize([224, 224], interpolation=tv2.InterpolationMode.BICUBIC),
-                ToDtype(torch.float32, scale=True),
-            ]
-        )
-
+        self.processor = processor
         self.model.requires_grad_(False)
-        self.processor.requires_grad_(False)
 
     def encode(self, img: torch.Tensor) -> torch.Tensor:
-        img = self.processor(img)
+        img = self.processor(img, return_tensors="pt").pixel_values.to(self.model.device)
         latent = self.model.embed(img)  # type: ignore
 
         return latent
