@@ -52,7 +52,7 @@ class BrainDiffusionPriorConfig(BaseConfig):
     condition_on_text_encodings: bool = False
     image_size: int = 224
     predict_x_start: bool = True
-    sample_timesteps: int = None
+    sample_timesteps: int | None = None
     beta_schedule: Literal["cosine", "linear", "quadratic", "sigmoid"] = "cosine"
     image_embed_scale: float | None = None
     init_image_embed_l2norm: bool = False
@@ -168,6 +168,10 @@ class DiffusionPriorNetwork(nn.Module):
             raise NotImplementedError(
                 "text_encodings are not supported in the prior network"
             )
+
+        if text_embed is None:
+            raise NotImplementedError("text_embed is required in the prior network")
+
 
         batch, dim, device, dtype = (
             *image_embed.shape,

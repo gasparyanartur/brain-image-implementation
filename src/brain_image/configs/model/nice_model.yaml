@@ -5,7 +5,7 @@ align_target_model: "unaligned_synclr_vitb16"
 low_recon_model: "sd_variations_v2"
 high_recon_model: "clip_vitl14"
 do_align: true
-do_high_recon: true
+do_high_recon: false
 do_low_recon: false
 do_prior: true
 prior_debug_mode: false

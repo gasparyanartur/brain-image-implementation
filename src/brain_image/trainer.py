@@ -11,7 +11,8 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
-from brain_image.model.model import EEGAlignmentConfig, EEGAlignmentModel, EEGEncoder, EEGEncoderConfig
+from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
+from brain_image.model.eeg_encoder import EEGEncoder, EEGEncoderConfig
 from brain_image.utils import find_module_content_in_state_dict, get_dtype
 
 

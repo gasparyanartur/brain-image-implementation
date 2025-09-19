@@ -6,7 +6,8 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from brain_image.configs import BaseConfig
 from brain_image.trainer import NICETrainer, NICETrainerConfig
-from brain_image.model.model import EEGAlignmentConfig, EEGEncoderConfig
+from brain_image.model.eeg_alignment import EEGAlignmentConfig
+from brain_image.model.eeg_encoder import EEGEncoderConfig
 from brain_image.data import EEGDatasetConfig
 
 import torch

@@ -105,12 +105,13 @@ class CLIPImageEncoder(BaseImageEncoder):
 
 class VAEImageEncoder(BaseImageEncoder):
     def __init__(self, model_name: str = "sd_variations_v2", *args, **kwargs):
-
         super().__init__(model_name=model_name)
         hf_name = model_name_to_hf_name(model_name)
 
+        self.vae = AutoencoderKL.from_pretrained(hf_name, subfolder="vae")
+        self.vae_scale_factor = 2 ** (len(self.vae.config["block_out_channels"]) - 1)
         self.preprocessor = tv2.Compose(
-            [
+                    [
                 ToImage(),
                 Resize(
                     (512, 512),
@@ -121,8 +122,6 @@ class VAEImageEncoder(BaseImageEncoder):
             ]
         )
         self.processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
-        self.vae = AutoencoderKL.from_pretrained(hf_name, subfolder="vae")
-        self.vae_scale_factor = 2 ** (len(self.vae.config["block_out_channels"]) - 1)
 
         self.preprocessor.requires_grad_(False)
         self.vae.requires_grad_(False)

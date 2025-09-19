@@ -9,8 +9,8 @@ latents_dir: img-latents
 # Dataset parameters
 train_imgs_per_concept: 10
 test_imgs_per_concept: 1
-subs: [1,2,3,4,5,6,7,8,9,10]
-#subs: [10]
+#subs: [1,2,3,4,5,6,7,8,9,10]
+subs: [10]
 
 # DataLoader parameters
 batch_size: 256

@@ -47,6 +47,7 @@ import tqdm
 import re
 import tempfile
 import time
+import wandb
 
 
 class EEGAlignmentConfig(BaseConfig):
@@ -1233,7 +1234,7 @@ class EEGAlignmentModel(pl.LightningModule):
         ) is not None, "EEG latent is not initialized"
         assert (
             proj_eeg_latent_normed := cache.get("proj_eeg_latent_normed")
-        ), "EEG latent is not initialized"
+        ) is not None, "EEG latent is not initialized"
         assert (
             align_image_latent := batch.get("align_image_latent")
         ) is not None, "Align image latent is not initialized"

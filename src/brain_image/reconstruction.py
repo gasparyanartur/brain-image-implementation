@@ -62,8 +62,8 @@ class ReconstructionPipeline:
         unet = base_pipe.unet
         vae = base_pipe.vae
         noise_scheduler = base_pipe.scheduler
-        clip_encoder = CLIPImageEncoder(cond_encoder_name)
-        vae_encoder = VAEImageEncoder(model_name)
+        clip_encoder = CLIPImageEncoder(cond_encoder_name).to(dtype=dtype, device=device)
+        vae_encoder = VAEImageEncoder(model_name).to(dtype=dtype, device=device)
 
         return cls(
             unet=unet,
