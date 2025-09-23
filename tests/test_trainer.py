@@ -11,7 +11,7 @@ from typing import cast
 
 from brain_image.model.eeg_encoder import EEGEncoderConfig
 from brain_image.trainer import NICETrainerConfig, NICETrainer, load_eeg_encoder_from_checkpoint
-from brain_image.model.eeg_encoder import EEGEncoder
+from brain_image.model.eeg_encoder import NiceEEGEncoder
 from brain_image.data import EEGDatasetConfig
 from brain_image.utils import state_dict_equal
 
@@ -86,7 +86,7 @@ def test_nice_trainer_predict(mock_nice_trainer):
 def test_load_eeg_encoder_from_checkpoint():
     """Test that EEG encoder can be loaded from a checkpoint."""
     config = EEGEncoderConfig()
-    encoder = EEGEncoder(config)
+    encoder = NiceEEGEncoder(config)
 
     class DistractionModule(torch.nn.Module):
         def __init__(self):
@@ -120,7 +120,7 @@ def test_load_eeg_encoder_from_checkpoint():
         loaded_encoder = load_eeg_encoder_from_checkpoint(config, checkpoint_path)
         
         assert loaded_encoder is not None
-        assert isinstance(loaded_encoder, EEGEncoder)
+        assert isinstance(loaded_encoder, NiceEEGEncoder)
         
         original_state_dict = encoder.state_dict()
         loaded_state_dict = loaded_encoder.state_dict()

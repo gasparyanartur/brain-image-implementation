@@ -21,7 +21,7 @@ from brain_image.data import (
     batch_load_images,
     get_image_paths,
 )
-from brain_image.model.eeg_encoder import EEGEncoder, EEGEncoderConfig
+from brain_image.model.eeg_encoder import NiceEEGEncoder, EEGEncoderConfig
 from brain_image.model.loss import CLIPLoss, InfoNCELoss
 from brain_image.model.model import (
     LatentProjector,
@@ -191,7 +191,7 @@ class EEGAlignmentModel(pl.LightningModule):
             "prior_adapter",
         ],
         cache_dir: Path = Path("cache/tensorcache"),
-        eeg_encoder: EEGEncoder | None = None,
+        eeg_encoder: NiceEEGEncoder | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -267,8 +267,8 @@ class EEGAlignmentModel(pl.LightningModule):
                 "Projected dimension must match the image latent dimension if project_image is False"
             )
 
-        self.eeg_encoder: EEGEncoder | None = (
-            (eeg_encoder or EEGEncoder(self.config.eeg_config))
+        self.eeg_encoder: NiceEEGEncoder | None = (
+            (eeg_encoder or NiceEEGEncoder(self.config.eeg_config))
             if not self.config.prior_debug_mode
             else None
         )

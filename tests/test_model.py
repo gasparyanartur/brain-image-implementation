@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from brain_image.model.eeg_alignment import EEGAlignmentModel
-from brain_image.model.eeg_encoder import EEGEncoder, EEGEncoderConfig
+from brain_image.model.eeg_encoder import NiceEEGEncoder, EEGEncoderConfig
 from brain_image.model.model import (
     LatentProjector,
 )
@@ -15,7 +15,7 @@ from brain_image.data import EEGDatasetConfig
 def test_eeg_encoder_creation():
     """Test that EEGEncoder can be created successfully."""
     config = EEGEncoderConfig()
-    encoder = EEGEncoder(config)
+    encoder = NiceEEGEncoder(config)
     
     assert encoder is not None
     assert hasattr(encoder, "patch_embedding")

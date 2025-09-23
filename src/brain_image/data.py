@@ -138,7 +138,7 @@ class EEGDatasetConfig(DataConfig):
     data_path: Path = GlobalConfig.DATA_DIR / "things-eeg2"
 
     imgs_dir: str = "imgs"
-    eeg_dir: str = "eeg"
+    eeg_dir: str = "prepared"
 
     train_imgs_per_concept: int = 10
     test_imgs_per_concept: int = 1
@@ -209,12 +209,15 @@ class EEGDataModule(DataModule):
             self.get_train_dataset(),
             batch_size=self.config.batch_size,
             shuffle=self.config.shuffle_train,
-            **kwargs
+            **kwargs,
         )
 
     def val_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
         return self._create_dataloader(
-            self.get_val_dataset(), batch_size=self.config.val_batch_size, shuffle=False, **kwargs
+            self.get_val_dataset(),
+            batch_size=self.config.val_batch_size,
+            shuffle=False,
+            **kwargs,
         )
 
     def test_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
@@ -222,11 +225,15 @@ class EEGDataModule(DataModule):
             self.get_test_dataset(),
             batch_size=self.config.val_batch_size,
             shuffle=False,
-            **kwargs
+            **kwargs,
         )
 
     def _create_dataloader(
-        self, dataset: EEGDataset, shuffle: bool = True, batch_size: int | None = None, **kwargs
+        self,
+        dataset: EEGDataset,
+        shuffle: bool = True,
+        batch_size: int | None = None,
+        **kwargs,
     ) -> torch.utils.data.DataLoader:
         if batch_size is None:
             batch_size = self.config.batch_size
@@ -254,11 +261,18 @@ class EEGDataset(Dataset):
     ):
         self.config = config
         self.split = split
+
+        self.prepared_data: list[dict] = []
+        for sub in self.config.subs:
+            self.prepared_data.extend(
+                torch.load(
+                    self.config.data_path
+                    / self.config.eeg_dir
+                    / f"sub-{sub:02}"
+                    / f"{split}.pt"
+                )
+            )
         
-        self.prepared_data = torch.load(self.config.data_path / "prepared" / f"{split}.pt")
-        self.prepared_data = [
-            sample for sample in self.prepared_data if sample["sub"] in self.config.subs
-        ]
 
     def __len__(self):
         return len(self.prepared_data)
@@ -319,7 +333,7 @@ def load_eeg_data(
         raise FileNotFoundError(f"EEG data not found: {eeg_path}")
 
     # Load the EEG data
-    eeg_pickle = np.load(eeg_path, allow_pickle=True).item()
+    eeg_pickle = np.load(eeg_path, allow_pickle=True)
     raw_eeg = eeg_pickle["preprocessed_eeg_data"]
     channel_names = eeg_pickle["ch_names"]
     times = eeg_pickle["times"]

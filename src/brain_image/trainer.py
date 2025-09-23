@@ -12,7 +12,7 @@ from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
 from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
-from brain_image.model.eeg_encoder import EEGEncoder, EEGEncoderConfig
+from brain_image.model.eeg_encoder import NiceEEGEncoder, EEGEncoderConfig
 from brain_image.utils import find_module_content_in_state_dict, get_dtype
 
 
@@ -260,14 +260,14 @@ class Trainer:
         logging.info(f"Loaded checkpoint from {filepath}")
 
 
-def load_eeg_encoder_from_checkpoint(config: EEGEncoderConfig, checkpoint_path: Path) -> EEGEncoder:
+def load_eeg_encoder_from_checkpoint(config: EEGEncoderConfig, checkpoint_path: Path) -> NiceEEGEncoder:
     checkpoint = torch.load(checkpoint_path)
     
     eeg_encoder_state_dict = find_module_content_in_state_dict("state_dict", checkpoint, module_name="eeg_encoder")
     if not eeg_encoder_state_dict:
         raise ValueError("Could not find EEG encoder in checkpoint")
 
-    encoder = EEGEncoder(config)
+    encoder = NiceEEGEncoder(config)
     encoder.load_state_dict(eeg_encoder_state_dict)
     return encoder
 
