@@ -9,9 +9,9 @@ import torch.utils.data
 import lightning
 from typing import cast
 
-from brain_image.model.eeg_encoder import EEGEncoderConfig
-from brain_image.trainer import NICETrainerConfig, NICETrainer, load_eeg_encoder_from_checkpoint
-from brain_image.model.eeg_encoder import NiceEEGEncoder
+from brain_image.model.nice import NiceConfig
+from brain_image.trainer import EEGAlignTrainerConfig, EEGAlignTrainer, load_eeg_encoder_from_checkpoint
+from brain_image.model.nice import NiceEEGEncoder
 from brain_image.data import EEGDatasetConfig
 from brain_image.utils import state_dict_equal
 
@@ -31,7 +31,7 @@ def test_nice_trainer_checkpoint_saving_and_loading(mock_nice_trainer):
         assert checkpoint_path.exists()
 
         # Create a new trainer and load the checkpoint
-        new_trainer = NICETrainer(
+        new_trainer = EEGAlignTrainer(
             config=trainer_config,
             model_config=nice_config,
             dataset_config=dataset_config,
@@ -85,7 +85,7 @@ def test_nice_trainer_predict(mock_nice_trainer):
 
 def test_load_eeg_encoder_from_checkpoint():
     """Test that EEG encoder can be loaded from a checkpoint."""
-    config = EEGEncoderConfig()
+    config = NiceConfig()
     encoder = NiceEEGEncoder(config)
 
     class DistractionModule(torch.nn.Module):

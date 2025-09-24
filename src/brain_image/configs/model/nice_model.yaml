@@ -4,6 +4,8 @@
 align_target_model: "unaligned_synclr_vitb16"
 low_recon_model: "sd_variations_v2"
 high_recon_model: "clip_vitl14"
+eeg_encoder_model: "nice"
+
 do_align: true
 do_high_recon: false
 do_low_recon: false

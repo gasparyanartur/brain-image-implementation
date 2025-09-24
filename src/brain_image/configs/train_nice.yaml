@@ -1,19 +1,15 @@
 # Training configuration for NICE model
 
-# Default components for NICE training
 defaults:
   - dataset: eeg_dataset
   - model: nice_model
   - trainer: nice_trainer
-  - encoder: eeg_encoder
   - prior: diffusion_prior
   - _self_
 
-# Script-specific settings
 script_name: train_nice
 description: "Training script for NICE model with EEG data"
 
-# Script-level overrides (not training parameters)
 checkpoint_path: null
 resume_training: false
 run_test_after_training: true

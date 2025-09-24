@@ -6,10 +6,11 @@ import einops
 
 from typing import Literal
 
+from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
 from brain_image.model.model import ResidualAdd, WrapDebugSequential, is_debug_layer_active
 
 
-class EEGEncoderConfig(BaseConfig):
+class NiceConfig(BaseConfig):
     f1: int = 40
     f2: int = 40
     pool1: int = 8
@@ -50,10 +51,10 @@ class PatchEmbedding(nn.Module):
         return x
 
 
-class NiceEEGEncoder(nn.Module):
+class NiceEEGEncoder(EEGEncoder):
     def __init__(
         self,
-        config: EEGEncoderConfig = EEGEncoderConfig(),
+        config: NiceConfig = NiceConfig(),
     ):
         # Adapted from https://github.com/eeyhsong/NICE-EEG
         super(NiceEEGEncoder, self).__init__()
@@ -77,7 +78,7 @@ class NiceEEGEncoder(nn.Module):
             nn.LayerNorm(config.output_dim),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, sub: torch.Tensor | None = None) -> torch.Tensor:
         x = self.patch_embedding(x)
         x = x.flatten(start_dim=1)
         x = self.proj(x)
@@ -85,7 +86,7 @@ class NiceEEGEncoder(nn.Module):
 
 
 class EEGEncoderResnet(nn.Module):
-    def __init__(self, config: EEGEncoderConfig = EEGEncoderConfig()):
+    def __init__(self, config: NiceConfig = NiceConfig()):
         super().__init__()
 
         model = resnet34(weights="DEFAULT")
@@ -95,7 +96,7 @@ class EEGEncoderResnet(nn.Module):
 
         self.model = model
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = einops.rearrange(x, "b s t -> b 1 s t")
+    def forward(self, x: torch.Tensor, sub: torch.Tensor | None = None) -> torch.Tensor:
+        x = x.unsqueeze(1)
         x = self.model(x)
         return x

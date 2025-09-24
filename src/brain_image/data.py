@@ -284,6 +284,7 @@ class EEGDataset(Dataset):
             "img_path": str(item["img_path"]),
             "eeg_data": item["eeg"],
             "idx": idx,
+            "sub": item["sub"],
         }
 
 

@@ -10,14 +10,14 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from brain_image.trainer import NICETrainerConfig, NICETrainer
+from brain_image.trainer import EEGAlignTrainerConfig, EEGAlignTrainer
 
 
 def test_wandb_integration():
     """Test wandb integration with a simple training configuration."""
 
     # Create a test configuration with wandb enabled
-    config = NICETrainerConfig(
+    config = EEGAlignTrainerConfig(
         run_name="test-wandb",
         num_epochs=1,  # Just 1 epoch for testing
         enable_wandb=True,

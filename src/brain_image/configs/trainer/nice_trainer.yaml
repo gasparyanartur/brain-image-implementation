@@ -6,6 +6,7 @@ run_name: "nice"
 # Model compilation and initialization
 compile_model: true
 init_weights: true
+debug_mode: false
 
 dtype: "float32"
 
@@ -32,8 +33,7 @@ save_top_k: 1
 enable_wandb: true
 wandb_project: "brain-image"
 wandb_entity: null  # Set to your wandb username or team name
-wandb_log_model: false
-wandb_tags: ["nice"]
+wandb_log_model: true
 wandb_mode: "online"
 
 # Device settings

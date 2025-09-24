@@ -12,22 +12,17 @@ from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
 from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
-from brain_image.model.eeg_encoder import NiceEEGEncoder, EEGEncoderConfig
-from brain_image.utils import find_module_content_in_state_dict, get_dtype
+from brain_image.utils import get_dtype
 
 
 class TrainConfig(BaseConfig):
-    """Base training configuration - focused only on training parameters."""
-
-    # Training parameters
     run_name: str
     num_epochs: int | None = None
 
-    # Model compilation and initialization
     compile_model: bool = True
     init_weights: bool = True
+    debug_mode: bool = False
 
-    # Logging and checkpointing
     log_dir: Path = Path("logs")
     checkpoint_dir: Path | None = None
     enable_barebones: bool = False
@@ -45,7 +40,6 @@ class TrainConfig(BaseConfig):
     save_checkpoints: bool = True
     save_top_k: int = 1
 
-    # Wandb settings
     enable_wandb: bool = True
     wandb_project: str = "brain-image"
     wandb_entity: Optional[str] = None
@@ -53,15 +47,12 @@ class TrainConfig(BaseConfig):
     wandb_tags: List[str] = []
     wandb_mode: Literal["online", "offline"] = "online"
 
-    # Device settings
     accelerator: str | None = None
 
 
-class NICETrainerConfig(TrainConfig):
-    """NICE-specific trainer configuration - training parameters only."""
 
-    # Required fields from TrainConfig
-    run_name: str = "nice"
+class EEGAlignTrainerConfig(TrainConfig):
+    run_name: str = "eeg_alignment"
     num_epochs: int = 100
 
     # NICE-specific training settings
@@ -75,14 +66,28 @@ class NICETrainerConfig(TrainConfig):
 
     eeg_encoder_path: Path | None = None
 
-    wandb_tags: list[str] = ["nice"]
-
-
+ 
 class Trainer:
     def __init__(self, config: TrainConfig, model: EEGAlignmentModel):
         self.config = config
         self.model: EEGAlignmentModel = model
         self.pl_trainer = self.create_pl_trainer()
+
+    def get_tags(self):
+        wandb_tags = ["train", *self.config.wandb_tags]
+        
+        if "SLURM_JOB_ID" in os.environ:
+            wandb_tags.append("slurm")
+        else:
+            wandb_tags.append("local")
+
+        if self.config.overfit_batches != 0:
+            wandb_tags.append("overfit")
+
+        if self.config.debug_mode:
+            wandb_tags.append("debug")
+
+        return wandb_tags
 
     def create_pl_trainer(self) -> pl.Trainer:
         callbacks: list[pl.Callback] = []
@@ -108,37 +113,24 @@ class Trainer:
             )
             callbacks.append(early_stopping_callback)
 
-        # Add TensorBoard logger
+        tags = sorted(self.get_tags())
+        
         loggers.append(
             TensorBoardLogger(
                 save_dir=self.config.log_dir,
-                name=self.config.run_name,
+                name="-".join(tags),
                 default_hp_metric=False,
             )
         )
 
-        # Add Wandb logger if enabled
         if self.config.enable_wandb:
-            wandb_tags = [
-                *self.config.wandb_tags,
-                "train",
-            ]
-
-            if "SLURM_JOB_ID" in os.environ:
-                wandb_tags.append("slurm")
-            else:
-                wandb_tags.append("local")
-
-            if self.config.overfit_batches != 0:
-                wandb_tags.append("overfit")
-
             name = self.get_train_title()
             wandb_logger = WandbLogger(
                 project=self.config.wandb_project,
                 entity=self.config.wandb_entity,
                 name=name,
                 log_model=self.config.wandb_log_model,
-                tags=wandb_tags,
+                tags=tags,
                 offline=self.config.wandb_mode == "offline",
             )
             loggers.append(wandb_logger)
@@ -169,27 +161,24 @@ class Trainer:
     def get_train_title_components(self) -> list[str]:
         components = [
             f"{self.config.run_name}",
-            datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+            datetime.datetime.now().strftime("%y%m%d_%H%M%S"),
         ]
-        if "SLURM_JOB_ID" in os.environ:
-            components.append(os.environ["SLURM_JOB_ID"])
-        if "SLURM_ARRAY_TASK_ID" in os.environ:
-            components.append(os.environ["SLURM_ARRAY_TASK_ID"])
+        if (slurm_job_id := os.environ.get("SLURM_JOB_ID")) is not None:
+            components.append(f"slurm_{slurm_job_id}")
+        if (slurm_array_job_id := os.environ.get("SLURM_ARRAY_JOB_ID")) is not None:
+            components.append(f"array_{slurm_array_job_id}")
         return components
 
     def get_train_title(self) -> str:
         return "-".join(self.get_train_title_components())
 
     def train(self, ckpt_path: Optional[Path] = None):
-        """Train the model using Lightning."""
         logging.info(
             f"Starting {self.get_train_title_components()} training with Lightning..."
         )
 
-        # Convert checkpoint path to string if provided
         ckpt_path_str = str(ckpt_path) if ckpt_path else None
 
-        # Start training
         self.pl_trainer.fit(
             model=self.model,
             ckpt_path=ckpt_path_str,
@@ -198,12 +187,10 @@ class Trainer:
         logging.info("Training completed!")
 
     def test(self) -> Dict[str, float]:
-        """Test the model using Lightning."""
         logging.info("Running model testing...")
 
         results = self.pl_trainer.test(model=self.model)
 
-        # Extract metrics from results
         if results and len(results) > 0:
             test_metrics = dict(results[0])
             logging.info(f"Test Results: {test_metrics}")
@@ -213,12 +200,10 @@ class Trainer:
             return {}
 
     def validate(self) -> Dict[str, float]:
-        """Validate the model using Lightning."""
         logging.info("Running model validation...")
 
         results = self.pl_trainer.validate(model=self.model)
 
-        # Extract metrics from results
         if results and len(results) > 0:
             val_metrics = dict(results[0])
             logging.info(f"Validation Results: {val_metrics}")
@@ -228,7 +213,6 @@ class Trainer:
             return {}
 
     def predict(self, dataloader: Optional[DataLoader] = None) -> List[Any]:
-        """Run predictions using Lightning."""
         logging.info("Running model predictions...")
 
         if dataloader is None:
@@ -260,38 +244,24 @@ class Trainer:
         logging.info(f"Loaded checkpoint from {filepath}")
 
 
-def load_eeg_encoder_from_checkpoint(config: EEGEncoderConfig, checkpoint_path: Path) -> NiceEEGEncoder:
-    checkpoint = torch.load(checkpoint_path)
-    
-    eeg_encoder_state_dict = find_module_content_in_state_dict("state_dict", checkpoint, module_name="eeg_encoder")
-    if not eeg_encoder_state_dict:
-        raise ValueError("Could not find EEG encoder in checkpoint")
-
-    encoder = NiceEEGEncoder(config)
-    encoder.load_state_dict(eeg_encoder_state_dict)
-    return encoder
 
 
-class NICETrainer(Trainer):
+
+class EEGAlignTrainer(Trainer):
     def __init__(
         self,
-        config: NICETrainerConfig,
+        config: EEGAlignTrainerConfig,
         model_config: EEGAlignmentConfig,
         dataset_config: EEGDatasetConfig,
     ):
         if isinstance(config, dict):
-            config = NICETrainerConfig.model_validate(config)
+            config = EEGAlignTrainerConfig.model_validate(config)
 
         if isinstance(model_config, dict):
             model_config = EEGAlignmentConfig.model_validate(model_config)
 
         if isinstance(dataset_config, dict):
             dataset_config = EEGDatasetConfig.model_validate(dataset_config)
-
-        if config.eeg_encoder_path is not None:
-            eeg_encoder = load_eeg_encoder_from_checkpoint(model_config.eeg_config, config.eeg_encoder_path)
-        else:
-            eeg_encoder = None
 
         model = EEGAlignmentModel(
             config=model_config,
@@ -301,10 +271,30 @@ class NICETrainer(Trainer):
             dtype=get_dtype(config.dtype),
             preload_latents=config.preload_latents,
             cache_dir=config.cache_dir,
-            eeg_encoder=eeg_encoder,
+            eeg_encoder_path=config.eeg_encoder_path,
         )
-        self.model_config: EEGAlignmentConfig = model_config
         super().__init__(config, model)
+        self.model = model
+
+    def get_tags(self):
+        tags = super().get_tags()
+
+        if self.model.config.do_align:
+            tags.append("align")
+        if self.model.config.do_high_recon:
+            tags.append("recon")
+        if self.model.config.do_low_recon:
+            tags.append("lowrec")
+
+        tags.append(self.model.config.align_target_model)
+        tags.append(self.model.config.eeg_encoder_model)
+
+        return tags
 
     def get_train_title_components(self) -> list[str]:
-        return super().get_train_title_components() + [self.model_config.align_target_model]
+        components = super().get_train_title_components()
+        
+        tags = self.get_tags()
+        components.extend(tags)
+
+        return components

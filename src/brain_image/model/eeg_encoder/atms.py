@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
+
 # From https://github.com/ncclab-sustech/EEG_Image_decode/
 
 class my_Layernorm(nn.Module):
@@ -505,7 +507,7 @@ class iTransformerConfig:
         self.enc_in = 63                   # Encoder input dimension (example value)
 
 class iTransformer(nn.Module):
-    def __init__(self, configs: iTransformerConfig, joint_train=False,  num_subjects=10):
+    def __init__(self, configs: iTransformerConfig, joint_train=False,  num_subjects=10, num_channels=63):
         super(iTransformer, self).__init__()
         self.task_name = configs.task_name
         self.seq_len = configs.seq_len
@@ -513,6 +515,7 @@ class iTransformer(nn.Module):
         self.output_attention = configs.output_attention
         # Embedding
         self.enc_embedding = DataEmbedding(configs.seq_len, configs.d_model, configs.embed, configs.freq, configs.dropout, joint_train=False, num_subjects=num_subjects)
+        self.num_channels = num_channels
         # Encoder
         self.encoder = Encoder(
             [
@@ -534,7 +537,7 @@ class iTransformer(nn.Module):
         # Embedding
         enc_out = self.enc_embedding(x_enc, x_mark_enc, subject_ids)
         enc_out, attns = self.encoder(enc_out, attn_mask=None)
-        enc_out = enc_out[:, :63, :]      
+        enc_out = enc_out[:, :self.num_channels, :]      
         # print("enc_out", enc_out.shape)
         return enc_out
 
@@ -613,18 +616,18 @@ class Proj_eeg(nn.Sequential):
 
 
 
-class ATMS(nn.Module):    
-    def __init__(self, num_channels=63, sequence_length=250, num_subjects=2, num_features=64, num_latents=1024, num_blocks=1):
-        super(ATMS, self).__init__()
+class AtmsEEGEncoder(EEGEncoder):    
+    def __init__(self, num_channels=63, sequence_length=250, num_subjects=2, num_features=64, output_dim=768, num_blocks=1):
+        super(AtmsEEGEncoder, self).__init__()
         default_config = iTransformerConfig()
-        self.encoder = iTransformer(default_config)   
+        self.encoder = iTransformer(default_config, num_channels=num_channels)   
         self.subject_wise_linear = nn.ModuleList([nn.Linear(default_config.d_model, sequence_length) for _ in range(num_subjects)])
         self.enc_eeg = Enc_eeg()
-        self.proj_eeg = Proj_eeg()        
+        self.proj_eeg = Proj_eeg(proj_dim=output_dim)        
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
          
-    def forward(self, x, subject_ids=None):
-        x = self.encoder(x, None, subject_ids)
+    def forward(self, x, sub: torch.Tensor | None = None):
+        x = self.encoder(x, None, sub)
         # print(f'After attention shape: {x.shape}')
         # print("x", x.shape)
         # x = self.subject_wise_linear[0](x)

@@ -21,7 +21,8 @@ from brain_image.data import (
     batch_load_images,
     get_image_paths,
 )
-from brain_image.model.eeg_encoder import NiceEEGEncoder, EEGEncoderConfig
+from brain_image.model.eeg_encoder import NiceEEGEncoder, AtmsEEGEncoder, NiceConfig
+from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
 from brain_image.model.loss import CLIPLoss, InfoNCELoss
 from brain_image.model.model import (
     LatentProjector,
@@ -36,6 +37,7 @@ import logging
 from brain_image.reconstruction import ReconstructionPipeline
 from brain_image.utils import (
     DTYPE,
+    find_module_content_in_state_dict,
     gather_dataloader,
     get_dtype,
     get_mean_gradients,
@@ -70,7 +72,7 @@ class EEGAlignmentConfig(BaseConfig):
     align_loss_factor: float = 1.0
     align_mse_loss_factor: float = 0.5
     align_cos_loss_factor: float = 0.05
-    prior_loss_factor: float = 0.01
+    prior_loss_factor: float = 0.05
     prior_sim_loss_factor: float = 1.0
     prior_len_loss_factor: float = 0.5
 
@@ -92,7 +94,8 @@ class EEGAlignmentConfig(BaseConfig):
     temperature_init: float = 0.04
     log_gradients: bool = False
 
-    eeg_config: EEGEncoderConfig = EEGEncoderConfig()
+    eeg_encoder_model: str = "nice"
+    eeg_config: NiceConfig = NiceConfig()
     prior_config: BrainDiffusionPriorConfig | None = BrainDiffusionPriorConfig()
 
     encoder_lr: float = 1e-3
@@ -145,6 +148,7 @@ class EEGAlignmentConfig(BaseConfig):
 class DataBatchT(TypedDict):
     img_path: list[str] | None
     eeg_data: torch.Tensor | None
+    sub: torch.Tensor | None
     idx: torch.Tensor | None
     eeg_latent: torch.Tensor | None
     align_image_latent: torch.Tensor | None
@@ -172,6 +176,27 @@ def get_belong_group(img_path: list[str], to_float: bool = False) -> torch.Tenso
 
     return path_groups
 
+def create_eeg_encoder(name: str, config: NiceConfig, checkpoint_path: Path | None = None) -> EEGEncoder:
+    match name:
+        case "nice":
+            encoder = NiceEEGEncoder(config)
+        case "atms":
+            encoder = AtmsEEGEncoder()
+        case _:
+            raise ValueError(f"Unknown encoder name: {name}")
+
+    if checkpoint_path is None:
+        return encoder
+
+    checkpoint = torch.load(checkpoint_path)
+    
+    eeg_encoder_state_dict = find_module_content_in_state_dict("state_dict", checkpoint, module_name="eeg_encoder")
+    if not eeg_encoder_state_dict:
+        raise ValueError("Could not find EEG encoder in checkpoint")
+
+
+    encoder.load_state_dict(eeg_encoder_state_dict)
+    return encoder
 
 class EEGAlignmentModel(pl.LightningModule):
     def __init__(
@@ -191,7 +216,7 @@ class EEGAlignmentModel(pl.LightningModule):
             "prior_adapter",
         ],
         cache_dir: Path = Path("cache/tensorcache"),
-        eeg_encoder: NiceEEGEncoder | None = None,
+        eeg_encoder_path: Path | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -267,11 +292,17 @@ class EEGAlignmentModel(pl.LightningModule):
                 "Projected dimension must match the image latent dimension if project_image is False"
             )
 
-        self.eeg_encoder: NiceEEGEncoder | None = (
-            (eeg_encoder or NiceEEGEncoder(self.config.eeg_config))
-            if not self.config.prior_debug_mode
-            else None
-        )
+        if self.config.prior_debug_mode:
+            self.eeg_encoder = None
+        else:
+            self.eeg_encoder = create_eeg_encoder(
+                self.config.eeg_encoder_model,
+                self.config.eeg_config,
+                checkpoint_path=eeg_encoder_path,
+            )
+
+
+
         self.eeg_projector: LatentProjector | None = None
         self.align_img_projector: LatentProjector | None = (
             LatentProjector(
@@ -764,12 +795,12 @@ class EEGAlignmentModel(pl.LightningModule):
 
         else:
             assert self.eeg_encoder is not None, "EEG encoder is not initialized"
-            assert (
-                "eeg_data" in batch and batch["eeg_data"] is not None
-            ), "EEG data is not in batch"
+            assert (subs := batch.get("sub")) is not None, "Subject is not in batch"
+            assert (eeg_data := batch.get("eeg_data")) is not None, "EEG data is not in batch"
 
-            eeg_data = batch["eeg_data"].to(device, dtype=dtype)
-            proj_eeg_latent = self.eeg_encoder(eeg_data)
+            eeg_data = eeg_data.to(device, dtype=dtype)
+            subs = subs.to(device) 
+            proj_eeg_latent = self.eeg_encoder(eeg_data, subs)
 
             if self.eeg_projector is not None:
                 proj_eeg_latent = self.eeg_projector(proj_eeg_latent)

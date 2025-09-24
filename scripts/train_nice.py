@@ -5,9 +5,8 @@ from typing import Any
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from brain_image.configs import BaseConfig
-from brain_image.trainer import NICETrainer, NICETrainerConfig
+from brain_image.trainer import EEGAlignTrainer, EEGAlignTrainerConfig
 from brain_image.model.eeg_alignment import EEGAlignmentConfig
-from brain_image.model.eeg_encoder import EEGEncoderConfig
 from brain_image.data import EEGDatasetConfig
 
 import torch
@@ -41,15 +40,14 @@ class TrainNICEConfig(BaseConfig):
     # Component composition - these will be populated by Hydra
     dataset: EEGDatasetConfig = EEGDatasetConfig()
     model: EEGAlignmentConfig = EEGAlignmentConfig()
-    trainer: NICETrainerConfig = NICETrainerConfig()
-    encoder: EEGEncoderConfig = EEGEncoderConfig()
+    trainer: EEGAlignTrainerConfig = EEGAlignTrainerConfig()
 
     # Script-specific settings (not training parameters)
     checkpoint_path: str | None = None
     resume_training: bool = False
 
 
-def train_nice(trainer: NICETrainer, checkpoint_path: Path | None = None):
+def train_nice(trainer: EEGAlignTrainer, checkpoint_path: Path | None = None):
     """Clean training function that takes a configured trainer."""
 
     logging.info(f"Training with configs")
@@ -95,7 +93,7 @@ def main(cfg: DictConfig):
         logging.info(f"  {key}: {value}")
 
     # Create trainer with composed components
-    trainer = NICETrainer(
+    trainer = EEGAlignTrainer(
         config=config.trainer,
         model_config=config.model,
         dataset_config=config.dataset,

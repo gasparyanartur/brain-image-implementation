@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 from brain_image.configs import GlobalConfig
 from brain_image.utils import update_config_with_nested_key
-from brain_image.trainer import NICETrainer
+from brain_image.trainer import EEGAlignTrainer
 
 # Add project root to sys.path for direct imports
 if str(GlobalConfig.WORKSPACE_DIR) not in sys.path:
@@ -77,7 +77,7 @@ def train_with_sweep_config():
 
     try:
         # Create trainer with the properly configured components
-        trainer = NICETrainer(
+        trainer = EEGAlignTrainer(
             config=new_train_configs["trainer"],
             model_config=new_train_configs["model"],
             dataset_config=new_train_configs["dataset"],
