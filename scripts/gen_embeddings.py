@@ -27,6 +27,7 @@ class EmbeddingGenerationConfig(BaseConfig):
     models_path: Path = Path("models")
     dtype: str = "float32"
     device: str | None = None
+    compile: bool = True
     download_weights: bool = True
     img_dir: Path = Path("data/things-eeg2/imgs")
     output_dir: Path = Path("cache/tensorcache")
@@ -41,6 +42,7 @@ def run_generation(
     device: str | None = None,
     dtype: torch.dtype = DTYPE,
     download_weights: bool = True,
+    compile_model: bool = True
 ) -> None:
     """Run the embedding generation process."""
 
@@ -51,6 +53,7 @@ def run_generation(
         download_weights=download_weights,
         device=device,
         dtype=dtype,
+        compile=compile_model
     )
     logging.info(f"Generating {split} embeddings for model {model_name}")
 
@@ -93,6 +96,7 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
                 device=device,
                 dtype=get_dtype(config.dtype),
                 download_weights=config.download_weights,
+                compile_model=config.compile
             )
 
 

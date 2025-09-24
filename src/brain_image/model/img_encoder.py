@@ -60,7 +60,7 @@ def load_image_encoder(
         case "clip_vitl14":
             model = CLIPImageEncoder(*args, **kwargs)
         case "sd_variations_v2":
-            model = CLIPImageEncoder(*args, **kwargs)
+            model = VAEImageEncoder(*args, **kwargs)
         case "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
             model = SynCLRImageEncoder(
                 *args,
@@ -111,8 +111,7 @@ class VAEImageEncoder(BaseImageEncoder):
         self.vae = AutoencoderKL.from_pretrained(hf_name, subfolder="vae")
         self.vae_scale_factor = 2 ** (len(self.vae.config["block_out_channels"]) - 1)
         self.preprocessor = tv2.Compose(
-                    [
-                ToImage(),
+            [
                 Resize(
                     (512, 512),
                     interpolation=InterpolationMode.BICUBIC,
@@ -126,7 +125,12 @@ class VAEImageEncoder(BaseImageEncoder):
         self.preprocessor.requires_grad_(False)
         self.vae.requires_grad_(False)
 
+    @torch.compiler.disable(recursive=True)
+    def _to_image(self, img: torch.Tensor):
+        return tv2.functional.to_image(img)
+
     def encode(self, img: torch.Tensor) -> torch.Tensor:
+        img = self._to_image(img)   # type: ignore
         img = self.preprocessor(img)
         img = self.processor.preprocess(img)
 
