@@ -70,9 +70,21 @@ def run_generation(
     with torch.no_grad():
         for i in tqdm.tqdm(range(0, len(img_paths), batch_size), desc="Generating embeddings..."):
             paths = img_paths[i : i + batch_size]
+            if len(paths) < batch_size:
+                # pad with arbitrary img_path, remove later
+                num_pad = batch_size - len(paths)
+                paths += [paths[-1]] * num_pad
+            else:
+                num_pad = 0
+                
             imgs = batch_load_images(paths).to(device=device)
 
             latent = image_encoder(imgs).detach().cpu()
+
+            if num_pad > 0:
+                # Remove padding
+                latent = latent[:-num_pad]    
+                paths = paths[:-num_pad]
             
             for i_path, path in enumerate(paths):
                 cache.save(latent[i_path], str(path), *encoder_configs)

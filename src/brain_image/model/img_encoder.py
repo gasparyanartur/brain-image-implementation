@@ -120,6 +120,7 @@ class VAEImageEncoder(BaseImageEncoder):
                 ToDtype(torch.float32, scale=True),
             ]
         )
+        self.feature_extractor = CLIPImageProcessor.from_pretrained(hf_name, subfolder="feature_extractor")
         self.processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
 
         self.preprocessor.requires_grad_(False)
