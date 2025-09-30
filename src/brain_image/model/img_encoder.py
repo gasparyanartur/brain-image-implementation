@@ -133,6 +133,9 @@ class VAEImageEncoder(BaseImageEncoder):
     def encode(self, img: torch.Tensor) -> torch.Tensor:
         img = self._to_image(img)   # type: ignore
         img = self.preprocessor(img)
+        #img = self.feature_extractor(img, return_tensors="pt").pixel_values.to(
+        #    self.vae.device
+        #)
         img = self.processor.preprocess(img)
 
         latent = (
