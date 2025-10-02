@@ -21,7 +21,7 @@ from dreamsim.model import PerceptualModel
 
 
 class EmbeddingGenerationConfig(BaseConfig):
-    model_name: Literal["aligned_synclr_vitb16", "unaligned_synclr_vitb16", "clip_vitl14", "sd_variations_v2"]
+    model_name: str
     batch_size: int = 512
     splits: list[Literal["train", "test"]] = ["train", "test"]
     models_path: Path = Path("models")

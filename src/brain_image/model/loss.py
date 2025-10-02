@@ -7,7 +7,6 @@ class CLIPLoss(nn.Module):
         super().__init__()
         self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / init_temperature)))
         self.max_scale = max_scale
-        self.cross_entropy = nn.CrossEntropyLoss()
 
     def forward(
         self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor | None = None, symmetric: bool = True, reduce: bool = True
@@ -23,16 +22,16 @@ class CLIPLoss(nn.Module):
         scale = self.logit_scale.exp().clamp(self.max_scale)
         sim_scaled = sim * scale
 
-        loss_e = torch.nn.functional.binary_cross_entropy_with_logits(
+        loss_e = torch.nn.functional.cross_entropy(
             sim_scaled, labels, reduction = "mean" if reduce else "none"
         )
         if not symmetric:
             return loss_e, sim
 
-        loss_i = torch.nn.functional.binary_cross_entropy_with_logits(
-            sim_scaled.T, labels.T, reduction = "mean" if reduce else "none"
+        loss_i = torch.nn.functional.cross_entropy(
+            sim_scaled.T, labels, reduction = "mean" if reduce else "none"
         )
-        loss = (loss_e + loss_i) / 2
+        loss = (loss_e + loss_i) * 0.5
 
         return loss, sim
 
@@ -70,7 +69,7 @@ class InfoNCELoss(nn.Module):
         if not symmetric:
             return loss_e, sim
 
-        loss_i = self._get_directional_loss(logits.T, neg_mask.T)
+        loss_i = self._get_directional_loss(logits.T, neg_mask)
         loss = 0.5 * (loss_e + loss_i)
 
         return loss, sim

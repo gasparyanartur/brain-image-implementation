@@ -91,11 +91,10 @@ class EEGAlignmentConfig(BaseConfig):
     )
     num_reconstructions: int = 5
 
-    temperature_init: float = 0.04
+    temperature_init: float = 0.07
     log_gradients: bool = False
 
     eeg_encoder_model: str = "nice"
-    eeg_config: NiceConfig = NiceConfig()
     prior_config: BrainDiffusionPriorConfig | None = BrainDiffusionPriorConfig()
 
     encoder_lr: float = 1e-3
@@ -176,7 +175,7 @@ def get_belong_group(img_path: list[str], to_float: bool = False) -> torch.Tenso
 
     return path_groups
 
-def create_eeg_encoder(name: str, config: NiceConfig, checkpoint_path: Path | None = None) -> EEGEncoder:
+def create_eeg_encoder(name: str, config = None, checkpoint_path: Path | None = None) -> EEGEncoder:
     match name:
         case "nice":
             encoder = NiceEEGEncoder(config)
@@ -297,7 +296,6 @@ class EEGAlignmentModel(pl.LightningModule):
         else:
             self.eeg_encoder = create_eeg_encoder(
                 self.config.eeg_encoder_model,
-                self.config.eeg_config,
                 checkpoint_path=eeg_encoder_path,
             )
 
@@ -1308,18 +1306,18 @@ class EEGAlignmentModel(pl.LightningModule):
             * self.config.align_loss_factor
             * (self.epoch >= self.config.align_loss_epoch)
         )
-        align_mse_loss = (
-            torch.nn.functional.mse_loss(align_image_latent, proj_eeg_latent)
-            * self.config.align_mse_loss_factor
-        )
+        #align_mse_loss = (
+        #    torch.nn.functional.mse_loss(align_image_latent, proj_eeg_latent)
+        #    * self.config.align_mse_loss_factor
+        #)
         align_cos = align_sim.diag()
-        align_cos_loss = (1 - align_cos).mean() * self.config.align_cos_loss_factor
+        #align_cos_loss = (1 - align_cos).mean() * self.config.align_cos_loss_factor
 
         losses.update(
             {
-                "align_mse_loss": align_mse_loss,
+                #"align_mse_loss": align_mse_loss,
                 "align_clip_loss": align_clip_loss,
-                "align_cos_loss": align_cos_loss,
+                #"align_cos_loss": align_cos_loss,
             }
         )
 

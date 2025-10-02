@@ -1,7 +1,7 @@
 # NICE Trainer Configuration
 
 # Training settings
-run_name: "nice"
+run_name: "train_eeg"
 
 # Model compilation and initialization
 compile_model: true

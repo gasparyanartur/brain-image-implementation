@@ -4,9 +4,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+
+from reformer_pytorch import LSHSelfAttention
+from einops import rearrange, repeat
+
 from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
 
 # From https://github.com/ncclab-sustech/EEG_Image_decode/
+
 
 class my_Layernorm(nn.Module):
     """
@@ -81,59 +86,77 @@ class series_decomp_multi(nn.Module):
         return sea, moving_mean
 
 
-class EncoderLayer(nn.Module):
-    """
-    Autoformer encoder layer with the progressive decomposition architecture
-    """
+class ConvLayer(nn.Module):
+    def __init__(self, c_in):
+        super(ConvLayer, self).__init__()
+        self.downConv = nn.Conv1d(
+            in_channels=c_in,
+            out_channels=c_in,
+            kernel_size=3,
+            padding=2,
+            padding_mode="circular",
+        )
+        self.norm = nn.BatchNorm1d(c_in)
+        self.activation = nn.ELU()
+        self.maxPool = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
 
-    def __init__(self, attention, d_model, d_ff=None, moving_avg=25, dropout=0.1, activation="relu"):
+    def forward(self, x):
+        x = self.downConv(x.permute(0, 2, 1))
+        x = self.norm(x)
+        x = self.activation(x)
+        x = self.maxPool(x)
+        x = x.transpose(1, 2)
+        return x
+
+
+class EncoderLayer(nn.Module):
+    def __init__(self, attention, d_model, d_ff=None, dropout=0.1, activation="relu"):
         super(EncoderLayer, self).__init__()
         d_ff = d_ff or 4 * d_model
         self.attention = attention
-        self.conv1 = nn.Conv1d(in_channels=d_model, out_channels=d_ff, kernel_size=1, bias=False)
-        self.conv2 = nn.Conv1d(in_channels=d_ff, out_channels=d_model, kernel_size=1, bias=False)
-        self.decomp1 = series_decomp(moving_avg)
-        self.decomp2 = series_decomp(moving_avg)
+        self.conv1 = nn.Conv1d(in_channels=d_model, out_channels=d_ff, kernel_size=1)
+        self.conv2 = nn.Conv1d(in_channels=d_ff, out_channels=d_model, kernel_size=1)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
         self.activation = F.relu if activation == "relu" else F.gelu
 
-    def forward(self, x, attn_mask=None):
-        new_x, attn = self.attention(
-            x, x, x,
-            attn_mask=attn_mask
-        )
+    def forward(self, x, attn_mask=None, tau=None, delta=None):
+        new_x, attn = self.attention(x, x, x, attn_mask=attn_mask, tau=tau, delta=delta)
         x = x + self.dropout(new_x)
-        x, _ = self.decomp1(x)
-        y = x
+
+        y = x = self.norm1(x)
         y = self.dropout(self.activation(self.conv1(y.transpose(-1, 1))))
         y = self.dropout(self.conv2(y).transpose(-1, 1))
-        res, _ = self.decomp2(x + y)
-        return res, attn
+
+        return self.norm2(x + y), attn
 
 
 class Encoder(nn.Module):
-    """
-    Autoformer encoder
-    """
-
     def __init__(self, attn_layers, conv_layers=None, norm_layer=None):
         super(Encoder, self).__init__()
         self.attn_layers = nn.ModuleList(attn_layers)
-        self.conv_layers = nn.ModuleList(conv_layers) if conv_layers is not None else None
+        self.conv_layers = (
+            nn.ModuleList(conv_layers) if conv_layers is not None else None
+        )
         self.norm = norm_layer
 
-    def forward(self, x, attn_mask=None):
+    def forward(self, x, attn_mask=None, tau=None, delta=None):
+        # x [B, L, D]
         attns = []
         if self.conv_layers is not None:
-            for attn_layer, conv_layer in zip(self.attn_layers, self.conv_layers):
-                x, attn = attn_layer(x, attn_mask=attn_mask)
+            for i, (attn_layer, conv_layer) in enumerate(
+                zip(self.attn_layers, self.conv_layers)
+            ):
+                delta = delta if i == 0 else None
+                x, attn = attn_layer(x, attn_mask=attn_mask, tau=tau, delta=delta)
                 x = conv_layer(x)
                 attns.append(attn)
-            x, attn = self.attn_layers[-1](x)
+            x, attn = self.attn_layers[-1](x, tau=tau, delta=None)
             attns.append(attn)
         else:
             for attn_layer in self.attn_layers:
-                x, attn = attn_layer(x, attn_mask=attn_mask)
+                x, attn = attn_layer(x, attn_mask=attn_mask, tau=tau, delta=delta)
                 attns.append(attn)
 
         if self.norm is not None:
@@ -143,75 +166,281 @@ class Encoder(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    """
-    Autoformer decoder layer with the progressive decomposition architecture
-    """
-
-    def __init__(self, self_attention, cross_attention, d_model, c_out, d_ff=None,
-                 moving_avg=25, dropout=0.1, activation="relu"):
+    def __init__(
+        self,
+        self_attention,
+        cross_attention,
+        d_model,
+        d_ff=None,
+        dropout=0.1,
+        activation="relu",
+    ):
         super(DecoderLayer, self).__init__()
         d_ff = d_ff or 4 * d_model
         self.self_attention = self_attention
         self.cross_attention = cross_attention
-        self.conv1 = nn.Conv1d(in_channels=d_model, out_channels=d_ff, kernel_size=1, bias=False)
-        self.conv2 = nn.Conv1d(in_channels=d_ff, out_channels=d_model, kernel_size=1, bias=False)
-        self.decomp1 = series_decomp(moving_avg)
-        self.decomp2 = series_decomp(moving_avg)
-        self.decomp3 = series_decomp(moving_avg)
+        self.conv1 = nn.Conv1d(in_channels=d_model, out_channels=d_ff, kernel_size=1)
+        self.conv2 = nn.Conv1d(in_channels=d_ff, out_channels=d_model, kernel_size=1)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
-        self.projection = nn.Conv1d(in_channels=d_model, out_channels=c_out, kernel_size=3, stride=1, padding=1,
-                                    padding_mode='circular', bias=False)
         self.activation = F.relu if activation == "relu" else F.gelu
 
-    def forward(self, x, cross, x_mask=None, cross_mask=None):
-        x = x + self.dropout(self.self_attention(
-            x, x, x,
-            attn_mask=x_mask
-        )[0])
-        x, trend1 = self.decomp1(x)
-        x = x + self.dropout(self.cross_attention(
-            x, cross, cross,
-            attn_mask=cross_mask
-        )[0])
-        x, trend2 = self.decomp2(x)
-        y = x
+    def forward(self, x, cross, x_mask=None, cross_mask=None, tau=None, delta=None):
+        x = x + self.dropout(
+            self.self_attention(x, x, x, attn_mask=x_mask, tau=tau, delta=None)[0]
+        )
+        x = self.norm1(x)
+
+        x = x + self.dropout(
+            self.cross_attention(
+                x, cross, cross, attn_mask=cross_mask, tau=tau, delta=delta
+            )[0]
+        )
+
+        y = x = self.norm2(x)
         y = self.dropout(self.activation(self.conv1(y.transpose(-1, 1))))
         y = self.dropout(self.conv2(y).transpose(-1, 1))
-        x, trend3 = self.decomp3(x + y)
 
-        residual_trend = trend1 + trend2 + trend3
-        residual_trend = self.projection(residual_trend.permute(0, 2, 1)).transpose(1, 2)
-        return x, residual_trend
+        return self.norm3(x + y)
 
 
 class Decoder(nn.Module):
-    """
-    Autoformer encoder
-    """
-
     def __init__(self, layers, norm_layer=None, projection=None):
         super(Decoder, self).__init__()
         self.layers = nn.ModuleList(layers)
         self.norm = norm_layer
         self.projection = projection
 
-    def forward(self, x, cross, x_mask=None, cross_mask=None, trend=None):
+    def forward(self, x, cross, x_mask=None, cross_mask=None, tau=None, delta=None):
         for layer in self.layers:
-            x, residual_trend = layer(x, cross, x_mask=x_mask, cross_mask=cross_mask)
-            trend = trend + residual_trend
+            x = layer(
+                x, cross, x_mask=x_mask, cross_mask=cross_mask, tau=tau, delta=delta
+            )
 
         if self.norm is not None:
             x = self.norm(x)
 
         if self.projection is not None:
             x = self.projection(x)
-        return x, trend
+        return x
 
+
+class TriangularCausalMask:
+    def __init__(self, B, L, device="cpu"):
+        mask_shape = [B, 1, L, L]
+        with torch.no_grad():
+            self._mask = torch.triu(
+                torch.ones(mask_shape, dtype=torch.bool), diagonal=1
+            ).to(device)
+
+    @property
+    def mask(self):
+        return self._mask
+
+
+class ProbMask:
+    def __init__(self, B, H, L, index, scores, device="cpu"):
+        _mask = torch.ones(L, scores.shape[-1], dtype=torch.bool).to(device).triu(1)
+        _mask_ex = _mask[None, None, :].expand(B, H, L, scores.shape[-1])
+        indicator = _mask_ex[
+            torch.arange(B)[:, None, None], torch.arange(H)[None, :, None], index, :
+        ].to(device)
+        self._mask = indicator.view(scores.shape).to(device)
+
+    @property
+    def mask(self):
+        return self._mask
+
+
+class DSAttention(nn.Module):
+    """De-stationary Attention"""
+
+    def __init__(
+        self,
+        mask_flag=True,
+        factor=5,
+        scale=None,
+        attention_dropout=0.1,
+        output_attention=False,
+    ):
+        super(DSAttention, self).__init__()
+        self.scale = scale
+        self.mask_flag = mask_flag
+        self.output_attention = output_attention
+        self.dropout = nn.Dropout(attention_dropout)
+
+    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
+        B, L, H, E = queries.shape
+        _, S, _, D = values.shape
+        scale = self.scale or 1.0 / math.sqrt(E)
+
+        tau = 1.0 if tau is None else tau.unsqueeze(1).unsqueeze(1)  # B x 1 x 1 x 1
+        delta = (
+            0.0 if delta is None else delta.unsqueeze(1).unsqueeze(1)
+        )  # B x 1 x 1 x S
+
+        # De-stationary Attention, rescaling pre-softmax score with learned de-stationary factors
+        scores = torch.einsum("blhe,bshe->bhls", queries, keys) * tau + delta
+
+        if self.mask_flag:
+            if attn_mask is None:
+                attn_mask = TriangularCausalMask(B, L, device=queries.device)
+
+            scores.masked_fill_(attn_mask.mask, -np.inf)
+
+        A = self.dropout(torch.softmax(scale * scores, dim=-1))
+        V = torch.einsum("bhls,bshd->blhd", A, values)
+
+        if self.output_attention:
+            return V.contiguous(), A
+        else:
+            return V.contiguous(), None
+
+
+class FullAttention(nn.Module):
+    def __init__(
+        self,
+        mask_flag=True,
+        factor=5,
+        scale=None,
+        attention_dropout=0.1,
+        output_attention=False,
+    ):
+        super(FullAttention, self).__init__()
+        self.scale = scale
+        self.mask_flag = mask_flag
+        self.output_attention = output_attention
+        self.dropout = nn.Dropout(attention_dropout)
+
+    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
+        B, L, H, E = queries.shape
+        _, S, _, D = values.shape
+        scale = self.scale or 1.0 / math.sqrt(E)
+
+        scores = torch.einsum("blhe,bshe->bhls", queries, keys)
+
+        if self.mask_flag:
+            if attn_mask is None:
+                attn_mask = TriangularCausalMask(B, L, device=queries.device)
+
+            scores.masked_fill_(attn_mask.mask, -np.inf)
+
+        A = self.dropout(torch.softmax(scale * scores, dim=-1))
+        V = torch.einsum("bhls,bshd->blhd", A, values)
+
+        if self.output_attention:
+            return V.contiguous(), A
+        else:
+            return V.contiguous(), None
+
+
+class ProbAttention(nn.Module):
+    def __init__(
+        self,
+        mask_flag=True,
+        factor=5,
+        scale=None,
+        attention_dropout=0.1,
+        output_attention=False,
+    ):
+        super(ProbAttention, self).__init__()
+        self.factor = factor
+        self.scale = scale
+        self.mask_flag = mask_flag
+        self.output_attention = output_attention
+        self.dropout = nn.Dropout(attention_dropout)
+
+    def _prob_QK(self, Q, K, sample_k, n_top):  # n_top: c*ln(L_q)
+        # Q [B, H, L, D]
+        B, H, L_K, E = K.shape
+        _, _, L_Q, _ = Q.shape
+
+        # calculate the sampled Q_K
+        K_expand = K.unsqueeze(-3).expand(B, H, L_Q, L_K, E)
+        # real U = U_part(factor*ln(L_k))*L_q
+        index_sample = torch.randint(L_K, (L_Q, sample_k))
+        K_sample = K_expand[:, :, torch.arange(L_Q).unsqueeze(1), index_sample, :]
+        Q_K_sample = torch.matmul(Q.unsqueeze(-2), K_sample.transpose(-2, -1)).squeeze()
+
+        # find the Top_k query with sparisty measurement
+        M = Q_K_sample.max(-1)[0] - torch.div(Q_K_sample.sum(-1), L_K)
+        M_top = M.topk(n_top, sorted=False)[1]
+
+        # use the reduced Q to calculate Q_K
+        Q_reduce = Q[
+            torch.arange(B)[:, None, None], torch.arange(H)[None, :, None], M_top, :
+        ]  # factor*ln(L_q)
+        Q_K = torch.matmul(Q_reduce, K.transpose(-2, -1))  # factor*ln(L_q)*L_k
+
+        return Q_K, M_top
+
+    def _get_initial_context(self, V, L_Q):
+        B, H, L_V, D = V.shape
+        if not self.mask_flag:
+            # V_sum = V.sum(dim=-2)
+            V_sum = V.mean(dim=-2)
+            contex = V_sum.unsqueeze(-2).expand(B, H, L_Q, V_sum.shape[-1]).clone()
+        else:  # use mask
+            # requires that L_Q == L_V, i.e. for self-attention only
+            assert L_Q == L_V
+            contex = V.cumsum(dim=-2)
+        return contex
+
+    def _update_context(self, context_in, V, scores, index, L_Q, attn_mask):
+        B, H, L_V, D = V.shape
+
+        if self.mask_flag:
+            attn_mask = ProbMask(B, H, L_Q, index, scores, device=V.device)
+            scores.masked_fill_(attn_mask.mask, -np.inf)
+
+        attn = torch.softmax(scores, dim=-1)  # nn.Softmax(dim=-1)(scores)
+
+        context_in[
+            torch.arange(B)[:, None, None], torch.arange(H)[None, :, None], index, :
+        ] = torch.matmul(attn, V).type_as(context_in)
+        if self.output_attention:
+            attns = (torch.ones([B, H, L_V, L_V]) / L_V).type_as(attn).to(attn.device)
+            attns[
+                torch.arange(B)[:, None, None], torch.arange(H)[None, :, None], index, :
+            ] = attn
+            return context_in, attns
+        else:
+            return context_in, None
+
+    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
+        B, L_Q, H, D = queries.shape
+        _, L_K, _, _ = keys.shape
+
+        queries = queries.transpose(2, 1)
+        keys = keys.transpose(2, 1)
+        values = values.transpose(2, 1)
+
+        U_part = self.factor * np.ceil(np.log(L_K)).astype("int").item()  # c*ln(L_k)
+        u = self.factor * np.ceil(np.log(L_Q)).astype("int").item()  # c*ln(L_q)
+
+        U_part = U_part if U_part < L_K else L_K
+        u = u if u < L_Q else L_Q
+
+        scores_top, index = self._prob_QK(queries, keys, sample_k=U_part, n_top=u)
+
+        # add scale factor
+        scale = self.scale or 1.0 / math.sqrt(D)
+        if scale is not None:
+            scores_top = scores_top * scale
+        # get the context
+        context = self._get_initial_context(values, L_Q)
+        # update the context with selected top_k queries
+        context, attn = self._update_context(
+            context, values, scores_top, index, L_Q, attn_mask
+        )
+
+        return context.contiguous(), attn
 
 
 class AttentionLayer(nn.Module):
-    def __init__(self, attention, d_model, n_heads, d_keys=None,
-                 d_values=None):
+    def __init__(self, attention, d_model, n_heads, d_keys=None, d_values=None):
         super(AttentionLayer, self).__init__()
 
         d_keys = d_keys or (d_model // n_heads)
@@ -234,70 +463,148 @@ class AttentionLayer(nn.Module):
         values = self.value_projection(values).view(B, S, H, -1)
 
         out, attn = self.inner_attention(
-            queries,
-            keys,
-            values,
-            attn_mask,
-            tau=tau,
-            delta=delta
+            queries, keys, values, attn_mask, tau=tau, delta=delta
         )
         out = out.view(B, L, -1)
 
         return self.out_projection(out), attn
 
 
-class TriangularCausalMask():
-    def __init__(self, B, L, device="cpu"):
-        mask_shape = [B, 1, L, L]
-        with torch.no_grad():
-            self._mask = torch.triu(torch.ones(mask_shape, dtype=torch.bool), diagonal=1).to(device)
+class ReformerLayer(nn.Module):
+    def __init__(
+        self,
+        attention,
+        d_model,
+        n_heads,
+        d_keys=None,
+        d_values=None,
+        causal=False,
+        bucket_size=4,
+        n_hashes=4,
+    ):
+        super().__init__()
+        self.bucket_size = bucket_size
+        self.attn = LSHSelfAttention(
+            dim=d_model,
+            heads=n_heads,
+            bucket_size=bucket_size,
+            n_hashes=n_hashes,
+            causal=causal,
+        )
 
-    @property
-    def mask(self):
-        return self._mask
-
-
-class ProbMask():
-    def __init__(self, B, H, L, index, scores, device="cpu"):
-        _mask = torch.ones(L, scores.shape[-1], dtype=torch.bool).to(device).triu(1)
-        _mask_ex = _mask[None, None, :].expand(B, H, L, scores.shape[-1])
-        indicator = _mask_ex[torch.arange(B)[:, None, None],
-                    torch.arange(H)[None, :, None],
-                    index, :].to(device)
-        self._mask = indicator.view(scores.shape).to(device)
-
-    @property
-    def mask(self):
-        return self._mask
-
-class FullAttention(nn.Module):
-    def __init__(self, mask_flag=True, factor=5, scale=None, attention_dropout=0.1, output_attention=False):
-        super(FullAttention, self).__init__()
-        self.scale = scale
-        self.mask_flag = mask_flag
-        self.output_attention = output_attention
-        self.dropout = nn.Dropout(attention_dropout)
-
-    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
-        B, L, H, E = queries.shape
-        _, S, _, D = values.shape
-        scale = self.scale or 1. / math.sqrt(E)
-
-        scores = torch.einsum("blhe,bshe->bhls", queries, keys)
-
-        if self.mask_flag:
-            if attn_mask is None:
-                attn_mask = TriangularCausalMask(B, L, device=queries.device)
-
-            scores.masked_fill_(attn_mask.mask, -np.inf)
-
-        A = self.dropout(torch.softmax(scale * scores, dim=-1))
-        V = torch.einsum("bhls,bshd->blhd", A, values)
-
-        if self.output_attention:
-            return V.contiguous(), A
+    def fit_length(self, queries):
+        # inside reformer: assert N % (bucket_size * 2) == 0
+        B, N, C = queries.shape
+        if N % (self.bucket_size * 2) == 0:
+            return queries
         else:
-            return V.contiguous(), None
+            # fill the time series
+            fill_len = (self.bucket_size * 2) - (N % (self.bucket_size * 2))
+            return torch.cat(
+                [queries, torch.zeros([B, fill_len, C]).to(queries.device)], dim=1
+            )
+
+    def forward(self, queries, keys, values, attn_mask, tau, delta):
+        # in Reformer: defalut queries=keys
+        B, N, C = queries.shape
+        queries = self.attn(self.fit_length(queries))[:, :N, :]
+        return queries, None
+
+
+class TwoStageAttentionLayer(nn.Module):
+    """
+    The Two Stage Attention (TSA) Layer
+    input/output shape: [batch_size, Data_dim(D), Seg_num(L), d_model]
+    """
+
+    def __init__(
+        self, configs, seg_num, factor, d_model, n_heads, d_ff=None, dropout=0.1
+    ):
+        super(TwoStageAttentionLayer, self).__init__()
+        d_ff = d_ff or 4 * d_model
+        self.time_attention = AttentionLayer(
+            FullAttention(
+                False,
+                configs.factor,
+                attention_dropout=configs.dropout,
+                output_attention=configs.output_attention,
+            ),
+            d_model,
+            n_heads,
+        )
+        self.dim_sender = AttentionLayer(
+            FullAttention(
+                False,
+                configs.factor,
+                attention_dropout=configs.dropout,
+                output_attention=configs.output_attention,
+            ),
+            d_model,
+            n_heads,
+        )
+        self.dim_receiver = AttentionLayer(
+            FullAttention(
+                False,
+                configs.factor,
+                attention_dropout=configs.dropout,
+                output_attention=configs.output_attention,
+            ),
+            d_model,
+            n_heads,
+        )
+        self.router = nn.Parameter(torch.randn(seg_num, factor, d_model))
+
+        self.dropout = nn.Dropout(dropout)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+        self.norm4 = nn.LayerNorm(d_model)
+
+        self.MLP1 = nn.Sequential(
+            nn.Linear(d_model, d_ff), nn.GELU(), nn.Linear(d_ff, d_model)
+        )
+        self.MLP2 = nn.Sequential(
+            nn.Linear(d_model, d_ff), nn.GELU(), nn.Linear(d_ff, d_model)
+        )
+
+    def forward(self, x, attn_mask=None, tau=None, delta=None):
+        # Cross Time Stage: Directly apply MSA to each dimension
+        batch = x.shape[0]
+        time_in = rearrange(x, "b ts_d seg_num d_model -> (b ts_d) seg_num d_model")
+        time_enc, attn = self.time_attention(
+            time_in, time_in, time_in, attn_mask=None, tau=None, delta=None
+        )
+        dim_in = time_in + self.dropout(time_enc)
+        dim_in = self.norm1(dim_in)
+        dim_in = dim_in + self.dropout(self.MLP1(dim_in))
+        dim_in = self.norm2(dim_in)
+
+        # Cross Dimension Stage: use a small set of learnable vectors to aggregate and distribute messages to build the D-to-D connection
+        dim_send = rearrange(
+            dim_in, "(b ts_d) seg_num d_model -> (b seg_num) ts_d d_model", b=batch
+        )
+        batch_router = repeat(
+            self.router,
+            "seg_num factor d_model -> (repeat seg_num) factor d_model",
+            repeat=batch,
+        )
+        dim_buffer, attn = self.dim_sender(
+            batch_router, dim_send, dim_send, attn_mask=None, tau=None, delta=None
+        )
+        dim_receive, attn = self.dim_receiver(
+            dim_send, dim_buffer, dim_buffer, attn_mask=None, tau=None, delta=None
+        )
+        dim_enc = dim_send + self.dropout(dim_receive)
+        dim_enc = self.norm3(dim_enc)
+        dim_enc = dim_enc + self.dropout(self.MLP2(dim_enc))
+        dim_enc = self.norm4(dim_enc)
+
+        final_out = rearrange(
+            dim_enc, "(b seg_num) ts_d d_model -> b ts_d seg_num d_model", b=batch
+        )
+
+        return final_out
 
 
 class PositionalEmbedding(nn.Module):
@@ -308,17 +615,18 @@ class PositionalEmbedding(nn.Module):
         pe.requires_grad_(False)
 
         position = torch.arange(0, max_len).float().unsqueeze(1)
-        div_term = (torch.arange(0, d_model, 2).float()
-                    * -(math.log(10000.0) / d_model)).exp()
+        div_term = (
+            torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
+        ).exp()
 
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
 
         pe = pe.unsqueeze(0)
-        self.register_buffer('pe', pe)
+        self.register_buffer("pe", pe)
 
     def forward(self, x):
-        return self.pe[:, :x.size(1)]       # type: ignore
+        return self.pe[:, : x.size(1)]  # type: ignore
 
 
 class FixedEmbedding(nn.Module):
@@ -329,8 +637,9 @@ class FixedEmbedding(nn.Module):
         w.requires_grad_(False)
 
         position = torch.arange(0, c_in).float().unsqueeze(1)
-        div_term = (torch.arange(0, d_model, 2).float()
-                    * -(math.log(10000.0) / d_model)).exp()
+        div_term = (
+            torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
+        ).exp()
 
         w[:, 0::2] = torch.sin(position * div_term)
         w[:, 1::2] = torch.cos(position * div_term)
@@ -343,7 +652,7 @@ class FixedEmbedding(nn.Module):
 
 
 class TemporalEmbedding(nn.Module):
-    def __init__(self, d_model, embed_type='fixed', freq='h'):
+    def __init__(self, d_model, embed_type="fixed", freq="h"):
         super(TemporalEmbedding, self).__init__()
 
         minute_size = 4
@@ -352,8 +661,8 @@ class TemporalEmbedding(nn.Module):
         day_size = 32
         month_size = 13
 
-        Embed = FixedEmbedding if embed_type == 'fixed' else nn.Embedding
-        if freq == 't':
+        Embed = FixedEmbedding if embed_type == "fixed" else nn.Embedding
+        if freq == "t":
             self.minute_embed = Embed(minute_size, d_model)
         self.hour_embed = Embed(hour_size, d_model)
         self.weekday_embed = Embed(weekday_size, d_model)
@@ -362,8 +671,9 @@ class TemporalEmbedding(nn.Module):
 
     def forward(self, x):
         x = x.long()
-        minute_x = self.minute_embed(x[:, :, 4]) if hasattr(
-            self, 'minute_embed') else 0.
+        minute_x = (
+            self.minute_embed(x[:, :, 4]) if hasattr(self, "minute_embed") else 0.0
+        )
         hour_x = self.hour_embed(x[:, :, 3])
         weekday_x = self.weekday_embed(x[:, :, 2])
         day_x = self.day_embed(x[:, :, 1])
@@ -373,11 +683,10 @@ class TemporalEmbedding(nn.Module):
 
 
 class TimeFeatureEmbedding(nn.Module):
-    def __init__(self, d_model, embed_type='timeF', freq='h'):
+    def __init__(self, d_model, embed_type="timeF", freq="h"):
         super(TimeFeatureEmbedding, self).__init__()
 
-        freq_map = {'h': 4, 't': 5, 's': 6,
-                    'm': 1, 'a': 1, 'w': 2, 'd': 3, 'b': 3}
+        freq_map = {"h": 4, "t": 5, "s": 6, "m": 1, "a": 1, "w": 2, "d": 3, "b": 3}
         d_inp = freq_map[freq]
         self.embed = nn.Linear(d_inp, d_model, bias=False)
 
@@ -389,11 +698,17 @@ class SubjectEmbedding(nn.Module):
     def __init__(self, num_subjects, d_model):
         super(SubjectEmbedding, self).__init__()
         self.subject_embedding = nn.Embedding(num_subjects, d_model)
-        self.shared_embedding = nn.Parameter(torch.randn(1, d_model))  # Shared token for unknown subjects
-        self.mask_embedding = nn.Parameter(torch.randn(1, d_model))  # Mask token embedding
+        self.shared_embedding = nn.Parameter(
+            torch.randn(1, d_model)
+        )  # Shared token for unknown subjects
+        self.mask_embedding = nn.Parameter(
+            torch.randn(1, d_model)
+        )  # Mask token embedding
 
     def forward(self, subject_ids):
-        if subject_ids[0] is None or torch.any(subject_ids >= self.subject_embedding.num_embeddings):
+        if subject_ids[0] is None or torch.any(
+            subject_ids >= self.subject_embedding.num_embeddings
+        ):
             batch_size = subject_ids.size(0)
             return self.shared_embedding.expand(batch_size, 1, -1)
         else:
@@ -401,26 +716,48 @@ class SubjectEmbedding(nn.Module):
 
 
 class DataEmbedding(nn.Module):
-    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1, joint_train=False, num_subjects=None):
+    def __init__(
+        self,
+        c_in,
+        d_model,
+        embed_type="fixed",
+        freq="h",
+        dropout=0.1,
+        joint_train=False,
+        num_subjects=None,
+    ):
         super(DataEmbedding, self).__init__()
         if joint_train and num_subjects is not None:
-            self.value_embedding = nn.ModuleDict({
-                str(subject_id): nn.Linear(c_in, d_model) for subject_id in range(num_subjects)
-            })
+            self.value_embedding = nn.ModuleDict(
+                {
+                    str(subject_id): nn.Linear(c_in, d_model)
+                    for subject_id in range(num_subjects)
+                }
+            )
         else:
-            self.value_embedding = nn.Linear(c_in, d_model)  # 如果没有指定subjects，则使用单一的value embedding
+            self.value_embedding = nn.Linear(
+                c_in, d_model
+            )  # 如果没有指定subjects，则使用单一的value embedding
 
         self.position_embedding = PositionalEmbedding(d_model=d_model)
-        self.temporal_embedding = TemporalEmbedding(d_model=d_model, embed_type=embed_type, freq=freq) if embed_type != 'timeF' else TimeFeatureEmbedding(d_model=d_model, embed_type=embed_type, freq=freq)
+        self.temporal_embedding = (
+            TemporalEmbedding(d_model=d_model, embed_type=embed_type, freq=freq)
+            if embed_type != "timeF"
+            else TimeFeatureEmbedding(d_model=d_model, embed_type=embed_type, freq=freq)
+        )
         self.dropout = nn.Dropout(p=dropout)
-        self.subject_embedding = SubjectEmbedding(num_subjects, d_model) if num_subjects is not None else None
+        self.subject_embedding = (
+            SubjectEmbedding(num_subjects, d_model)
+            if num_subjects is not None
+            else None
+        )
         self.mask_token = nn.Parameter(torch.randn(1, d_model))  # Mask token embedding
         self.joint_train = joint_train
-        
+
     def forward(self, x, x_mark, subject_ids=None, mask=None):
         if self.joint_train:
             # 使用针对每个subject的特定value embedding
-            x = torch.stack([self.value_embedding[str(subject_id.item())](x[i]) for i, subject_id in enumerate(subject_ids)])   # type: ignore
+            x = torch.stack([self.value_embedding[str(subject_id.item())](x[i]) for i, subject_id in enumerate(subject_ids)])  # type: ignore
         else:
             x = self.value_embedding(x)
 
@@ -431,30 +768,41 @@ class DataEmbedding(nn.Module):
             x = x * (~mask.bool()) + self.mask_token * mask.float()
 
         if self.subject_embedding is not None:
-            subject_emb = self.subject_embedding(subject_ids)  # (batch_size, 1, d_model)
-            x = torch.cat([subject_emb, x], dim=1)  # 在序列维度上拼接 (batch_size, seq_len + 1, d_model)
+            subject_emb = self.subject_embedding(
+                subject_ids
+            )  # (batch_size, 1, d_model)
+            x = torch.cat(
+                [subject_emb, x], dim=1
+            )  # 在序列维度上拼接 (batch_size, seq_len + 1, d_model)
 
         return self.dropout(x)
-
 
 
 class TokenEmbedding(nn.Module):
     def __init__(self, c_in, d_model):
         super(TokenEmbedding, self).__init__()
-        padding = 1 if torch.__version__ >= '1.5.0' else 2
-        self.tokenConv = nn.Conv1d(in_channels=c_in, out_channels=d_model,
-                                   kernel_size=3, padding=padding, padding_mode='circular', bias=False)
+        padding = 1 if torch.__version__ >= "1.5.0" else 2
+        self.tokenConv = nn.Conv1d(
+            in_channels=c_in,
+            out_channels=d_model,
+            kernel_size=3,
+            padding=padding,
+            padding_mode="circular",
+            bias=False,
+        )
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
                 nn.init.kaiming_normal_(
-                    m.weight, mode='fan_in', nonlinearity='leaky_relu')
+                    m.weight, mode="fan_in", nonlinearity="leaky_relu"
+                )
 
     def forward(self, x):
         x = self.tokenConv(x.permute(0, 2, 1)).transpose(1, 2)
         return x
 
+
 class DataEmbedding_inverted(nn.Module):
-    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+    def __init__(self, c_in, d_model, embed_type="fixed", freq="h", dropout=0.1):
         super(DataEmbedding_inverted, self).__init__()
         self.value_embedding = nn.Linear(c_in, d_model)
         self.dropout = nn.Dropout(p=dropout)
@@ -471,14 +819,16 @@ class DataEmbedding_inverted(nn.Module):
 
 
 class DataEmbedding_wo_pos(nn.Module):
-    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+    def __init__(self, c_in, d_model, embed_type="fixed", freq="h", dropout=0.1):
         super(DataEmbedding_wo_pos, self).__init__()
 
         self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
         self.position_embedding = PositionalEmbedding(d_model=d_model)
-        self.temporal_embedding = TemporalEmbedding(d_model=d_model, embed_type=embed_type,
-                                                    freq=freq) if embed_type != 'timeF' else TimeFeatureEmbedding(
-            d_model=d_model, embed_type=embed_type, freq=freq)
+        self.temporal_embedding = (
+            TemporalEmbedding(d_model=d_model, embed_type=embed_type, freq=freq)
+            if embed_type != "timeF"
+            else TimeFeatureEmbedding(d_model=d_model, embed_type=embed_type, freq=freq)
+        )
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x, x_mark):
@@ -491,59 +841,81 @@ class DataEmbedding_wo_pos(nn.Module):
 
 class iTransformerConfig:
     def __init__(self):
-        self.task_name = 'classification'  # Example task name
-        self.seq_len = 250                 # Sequence length
-        self.pred_len = 250                # Prediction length
-        self.output_attention = False      # Whether to output attention weights
-        self.d_model = 250                 # Model dimension
-        self.embed = 'timeF'               # Time encoding method
-        self.freq = 'h'                    # Time frequency
-        self.dropout = 0.25                # Dropout rate
-        self.factor = 1                    # Attention scaling factor
-        self.n_heads = 4                   # Number of attention heads
-        self.e_layers = 1                  # Number of encoder layers
-        self.d_ff = 256                    # Dimension of the feedforward network
-        self.activation = 'gelu'           # Activation function
-        self.enc_in = 63                   # Encoder input dimension (example value)
+        self.task_name = "classification"  # Example task name
+        self.seq_len = 250  # Sequence length
+        self.pred_len = 250  # Prediction length
+        self.output_attention = False  # Whether to output attention weights
+        self.d_model = 250  # Model dimension
+        self.embed = "timeF"  # Time encoding method
+        self.freq = "h"  # Time frequency
+        self.dropout = 0.25  # Dropout rate
+        self.factor = 1  # Attention scaling factor
+        self.n_heads = 4  # Number of attention heads
+        self.e_layers = 1  # Number of encoder layers
+        self.d_ff = 256  # Dimension of the feedforward network
+        self.activation = "gelu"  # Activation function
+        self.enc_in = 63  # Encoder input dimension (example value)
+
 
 class iTransformer(nn.Module):
-    def __init__(self, configs: iTransformerConfig, joint_train=False,  num_subjects=10, num_channels=63):
+    def __init__(
+        self,
+        configs: iTransformerConfig,
+        joint_train=False,
+        num_subjects=10,
+        num_channels=63,
+    ):
         super(iTransformer, self).__init__()
         self.task_name = configs.task_name
         self.seq_len = configs.seq_len
         self.pred_len = configs.pred_len
         self.output_attention = configs.output_attention
         # Embedding
-        self.enc_embedding = DataEmbedding(configs.seq_len, configs.d_model, configs.embed, configs.freq, configs.dropout, joint_train=False, num_subjects=num_subjects)
+        self.enc_embedding = DataEmbedding(
+            configs.seq_len,
+            configs.d_model,
+            configs.embed,
+            configs.freq,
+            configs.dropout,
+            joint_train=False,
+            num_subjects=num_subjects,
+        )
         self.num_channels = num_channels
         # Encoder
         self.encoder = Encoder(
             [
                 EncoderLayer(
                     AttentionLayer(
-                        FullAttention(False, configs.factor, attention_dropout=configs.dropout, output_attention=configs.output_attention),
-                        configs.d_model, configs.n_heads
+                        FullAttention(
+                            False,
+                            configs.factor,
+                            attention_dropout=configs.dropout,
+                            output_attention=configs.output_attention,
+                        ),
+                        configs.d_model,
+                        configs.n_heads,
                     ),
                     configs.d_model,
                     configs.d_ff,
                     dropout=configs.dropout,
-                    activation=configs.activation
-                ) for l in range(configs.e_layers)
+                    activation=configs.activation,
+                )
+                for l in range(configs.e_layers)
             ],
-            norm_layer=torch.nn.LayerNorm(configs.d_model)
+            norm_layer=torch.nn.LayerNorm(configs.d_model),
         )
 
     def forward(self, x_enc, x_mark_enc, subject_ids=None):
         # Embedding
         enc_out = self.enc_embedding(x_enc, x_mark_enc, subject_ids)
         enc_out, attns = self.encoder(enc_out, attn_mask=None)
-        enc_out = enc_out[:, :self.num_channels, :]      
+        enc_out = enc_out[:, : self.num_channels, :]
         # print("enc_out", enc_out.shape)
         return enc_out
 
 
-
 from einops.layers.torch import Rearrange, Reduce
+
 
 class PatchEmbedding(nn.Module):
     def __init__(self, emb_size=40):
@@ -561,19 +933,20 @@ class PatchEmbedding(nn.Module):
         )
 
         self.projection = nn.Sequential(
-            nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),  
-            Rearrange('b e (h) (w) -> b (h w) e'),
+            nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),
+            Rearrange("b e (h) (w) -> b (h w) e"),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # b, _, _, _ = x.shape
-        x = x.unsqueeze(1)     
-        # print("x", x.shape)   
+        x = x.unsqueeze(1)
+        # print("x", x.shape)
         x = self.tsconv(x)
-        # print("tsconv", x.shape)   
+        # print("tsconv", x.shape)
         x = self.projection(x)
-        # print("projection", x.shape)  
+        # print("projection", x.shape)
         return x
+
 
 class ResidualAdd(nn.Module):
     def __init__(self, fn):
@@ -586,6 +959,7 @@ class ResidualAdd(nn.Module):
         x += res
         return x
 
+
 class FlattenHead(nn.Sequential):
     def __init__(self):
         super().__init__()
@@ -597,35 +971,47 @@ class FlattenHead(nn.Sequential):
 
 class Enc_eeg(nn.Sequential):
     def __init__(self, emb_size=40, **kwargs):
-        super().__init__(
-            PatchEmbedding(emb_size),
-            FlattenHead()
-        )
+        super().__init__(PatchEmbedding(emb_size), FlattenHead())
+
 
 class Proj_eeg(nn.Sequential):
     def __init__(self, embedding_dim=1440, proj_dim=1024, drop_proj=0.5):
         super().__init__(
             nn.Linear(embedding_dim, proj_dim),
-            ResidualAdd(nn.Sequential(
-                nn.GELU(),
-                nn.Linear(proj_dim, proj_dim),
-                nn.Dropout(drop_proj),
-            )),
+            ResidualAdd(
+                nn.Sequential(
+                    nn.GELU(),
+                    nn.Linear(proj_dim, proj_dim),
+                    nn.Dropout(drop_proj),
+                )
+            ),
             nn.LayerNorm(proj_dim),
         )
 
 
-
-class AtmsEEGEncoder(EEGEncoder):    
-    def __init__(self, num_channels=63, sequence_length=250, num_subjects=2, num_features=64, output_dim=768, num_blocks=1):
+class AtmsEEGEncoder(EEGEncoder):
+    def __init__(
+        self,
+        num_channels=63,
+        sequence_length=250,
+        num_subjects=2,
+        num_features=64,
+        output_dim=1024,
+        num_blocks=1,
+    ):
         super(AtmsEEGEncoder, self).__init__()
         default_config = iTransformerConfig()
-        self.encoder = iTransformer(default_config, num_channels=num_channels)   
-        self.subject_wise_linear = nn.ModuleList([nn.Linear(default_config.d_model, sequence_length) for _ in range(num_subjects)])
+        self.encoder = iTransformer(default_config, num_channels=num_channels)
+        self.subject_wise_linear = nn.ModuleList(
+            [
+                nn.Linear(default_config.d_model, sequence_length)
+                for _ in range(num_subjects)
+            ]
+        )
         self.enc_eeg = Enc_eeg()
-        self.proj_eeg = Proj_eeg(proj_dim=output_dim)        
+        self.proj_eeg = Proj_eeg(proj_dim=output_dim)
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
-         
+
     def forward(self, x, sub: torch.Tensor | None = None):
         x = self.encoder(x, None, sub)
         # print(f'After attention shape: {x.shape}')
@@ -633,6 +1019,6 @@ class AtmsEEGEncoder(EEGEncoder):
         # x = self.subject_wise_linear[0](x)
         # print(f'After subject-specific linear transformation shape: {x.shape}')
         eeg_embedding = self.enc_eeg(x)
-        
+
         out = self.proj_eeg(eeg_embedding)
-        return out  
+        return out
