@@ -26,6 +26,8 @@ def model_name_to_hf_name(model_name: str) -> str:
     match model_name:
         case "clip_vitl14":
             return "openai/clip-vit-large-patch14"
+        case "clip_vith14":
+            return "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
         case "sd_variations_v2":
             return "lambdalabs/sd-image-variations-diffusers"
         case "synclr_vitb16":
@@ -57,12 +59,13 @@ def load_image_encoder(
     **kwargs,
 ) -> BaseImageEncoder:
     match model_name:
-        case "clip_vitl14":
-            model = CLIPImageEncoder(*args, **kwargs)
+        case "clip_vitl14" | "clip_vith14":
+            model = CLIPImageEncoder(model_name, *args, **kwargs)
         case "sd_variations_v2":
-            model = VAEImageEncoder(*args, **kwargs)
+            model = VAEImageEncoder(model_name, *args, **kwargs)
         case "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
             model = SynCLRImageEncoder(
+                model_name,
                 *args,
                 models_path=models_path,
                 download_weights=download_weights,
