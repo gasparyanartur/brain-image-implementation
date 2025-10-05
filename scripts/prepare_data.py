@@ -16,16 +16,16 @@ class SampleType(TypedDict):
 
 
 def merge_data(
-    sub: int, img_paths: list[Path], eeg_data: Tensor
+    sub: int, img_paths: list[Path], eeg_data: Tensor, idxs: Tensor
 ) -> list[SampleType]:
     merged_data = []
 
-    assert eeg_data.size(0) == len(img_paths)
     for i in range(eeg_data.size(0)):
-        img_path = img_paths[i]
+        idx = idxs[i]
+        img_path = img_paths[int(idx)]
         eeg = eeg_data[i]
 
-        joined_object = {"img_path": str(img_path), "eeg": eeg, "sub": sub}
+        joined_object = {"img_path": str(img_path), "eeg": eeg, "sub": sub, "idx": idx}
 
         merged_data.append(joined_object)
 
@@ -63,12 +63,21 @@ def main(args: Arguments):
             split=split,
         )
         logging.info(f"Loaded {len(img_paths)} image paths")
-        eeg_data, *_ = load_all_eeg_data(eeg_paths=sub_paths)   # <sub, i, s, t>
+        
+        preprocess_configs = {
+            "unpack_repetitions": True,
+            "normalize": False
+        } if split == "train" else {
+            "unpack_repetitions": False, 
+            "normalize": False
+        }
+            
+        eeg_data, idxs, *_ = load_all_eeg_data(eeg_paths=sub_paths, preprocess_configs=preprocess_configs)   # <sub, i, s, t>
         logging.info(f"Loaded EEG data with shape: {eeg_data.shape}")
 
         for i_sub, sub in enumerate(args.subs):
             logging.info(f"Creating data for sub: {sub}")
-            merged_data = merge_data(sub, img_paths, eeg_data[i_sub])
+            merged_data = merge_data(sub, img_paths, eeg_data[i_sub], idxs[i_sub])
             dst_path = args.prepared_data_dir / f"sub-{sub:02}" / f"{split}.pt"
             dst_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -41,6 +41,9 @@ class BaseImageEncoder(nn.Module):
         super().__init__()
         self.model_name = model_name
 
+    def preprocess(self, img: torch.Tensor)-> torch.Tensor:
+        raise NotImplementedError
+
     def encode(self, img: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 
@@ -99,10 +102,13 @@ class CLIPImageEncoder(BaseImageEncoder):
 
         self.model.requires_grad_(False)
 
-    def encode(self, images: torch.Tensor) -> torch.Tensor:
-        img = self.processor(images, return_tensors="pt").pixel_values.to(
+    def preprocess(self, images: torch.Tensor) -> torch.Tensor:
+        return self.processor(images, return_tensors="pt").pixel_values.to(
             self.model.device
         )
+
+    def encode(self, images: torch.Tensor) -> torch.Tensor:
+        img = self.preprocess(images)
         return self.model(img).image_embeds
 
 
@@ -133,13 +139,17 @@ class VAEImageEncoder(BaseImageEncoder):
     def _to_image(self, img: torch.Tensor):
         return tv2.functional.to_image(img)
 
-    def encode(self, img: torch.Tensor) -> torch.Tensor:
+    def preprocess(self, img: torch.Tensor) -> torch.Tensor:
         img = self._to_image(img)   # type: ignore
         img = self.preprocessor(img)
         #img = self.feature_extractor(img, return_tensors="pt").pixel_values.to(
         #    self.vae.device
         #)
         img = self.processor.preprocess(img)
+        return img
+
+    def encode(self, img: torch.Tensor) -> torch.Tensor:
+        img = self.preprocess(img)
 
         latent = (
             self.vae.encode(img).latent_dist.sample()  # type: ignore
@@ -217,10 +227,13 @@ class SynCLRImageEncoder(BaseImageEncoder):
         self.processor = processor
         self.model.requires_grad_(False)
 
-    def encode(self, img: torch.Tensor) -> torch.Tensor:
+    def preprocess(self, img: torch.Tensor) -> torch.Tensor:
         img = self.processor(img, return_tensors="pt").pixel_values.to(
             self.model.device
         )
+
+    def encode(self, img: torch.Tensor) -> torch.Tensor:
+        img = self.preprocess(img)
         latent = self.model.embed(img)  # type: ignore
 
         return latent

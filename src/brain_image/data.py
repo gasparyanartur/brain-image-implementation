@@ -14,8 +14,11 @@ from torch.utils.data import Dataset, random_split, Subset
 import torchvision
 from torchvision.transforms import v2 as tv2
 from lightning.pytorch import LightningDataModule
+import tqdm
 
 from brain_image.configs import DEFAULT_BATCH_SIZE, BaseConfig, GlobalConfig
+import multiprocessing as mp
+
 
 
 def encode_keys(*keys: str, use_encrypt: bool = False) -> str:
@@ -89,7 +92,7 @@ class DataConfig(BaseConfig, ABC):
     limit_train_size: float = 1.0
     limit_val_size: float = 1.0
     limit_test_size: float = 1.0
-    num_workers: int = 32
+    num_workers: int | None  = None
 
     def create_datamodule(self) -> DataModule:
         raise NotImplementedError
@@ -130,7 +133,7 @@ class DataModule(LightningDataModule):
         if batch_size is None:
             batch_size = self.config.batch_size
         return torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=shuffle
+            dataset, batch_size=batch_size, shuffle=shuffle, 
         )
 
 
@@ -209,6 +212,7 @@ class EEGDataModule(DataModule):
             self.get_train_dataset(),
             batch_size=self.config.batch_size,
             shuffle=self.config.shuffle_train,
+            drop_last=True,
             **kwargs,
         )
 
@@ -238,12 +242,14 @@ class EEGDataModule(DataModule):
         if batch_size is None:
             batch_size = self.config.batch_size
 
+        num_workers = self.config.num_workers or mp.cpu_count()
+
         dataloader_args = {
             "batch_size": batch_size,
             "shuffle": shuffle,
-            "num_workers": self.config.num_workers,
+            "num_workers": num_workers,
             "pin_memory": True,
-            "persistent_workers": self.config.num_workers > 0,
+            "persistent_workers": num_workers > 0,
         }
         dataloader_args.update(kwargs)
 
@@ -283,7 +289,7 @@ class EEGDataset(Dataset):
         return {
             "img_path": str(item["img_path"]),
             "eeg_data": item["eeg"],
-            "idx": idx,
+            "idx": item["idx"],
             "sub": item["sub"],
         }
 
@@ -321,15 +327,20 @@ def load_image_from_path(path: Path) -> Tensor:
     return img
 
 
-def batch_load_images(paths: Iterable[Path]) -> Tensor:
-    imgs = [load_image_from_path(path) for path in paths]
+def batch_load_images(paths: Iterable[Path], parallel: bool = False, progressbar: bool = False) -> Tensor:
+    if parallel:
+        with mp.Pool() as pool:
+            imgs = pool.map(load_image_from_path, paths)
+    else:
+        imgs = [load_image_from_path(path) for path in tqdm.tqdm(list(paths), disable=not progressbar, desc="Loading images")]
+
     imgs = torch.stack(imgs, dim=0)
     return imgs
 
 
 def load_eeg_data(
     eeg_path: Path,
-) -> tuple[Tensor, Tensor, list[str]]:
+) -> tuple[Tensor, Tensor, Tensor, list[str]]:
     if not eeg_path.exists():
         raise FileNotFoundError(f"EEG data not found: {eeg_path}")
 
@@ -341,24 +352,18 @@ def load_eeg_data(
 
     raw_eeg = torch.from_numpy(raw_eeg).float()
     times = torch.from_numpy(times).float()
+    idxs = torch.arange(len(raw_eeg))
 
-    return raw_eeg, times, channel_names
-
-
-def preprocess_image(
-    image: torch.Tensor, img_size: list[int] = [224, 224]
-) -> torch.Tensor:
-    image = tv2.functional.resize(
-        image, list(img_size), interpolation=tv2.InterpolationMode.BICUBIC
-    )
-    image = image / 255.0
-    return image
+    return raw_eeg, idxs, times, channel_names
 
 
 def preprocess_eeg_data(
     eeg_data: Tensor,
+    idxs: Tensor,
     interpolate_size: tuple[int, int] | None = None,
-) -> Tensor:
+    normalize: bool = True,
+    unpack_repetitions: bool = True,
+) -> tuple[Tensor, Tensor]:
     """Preprocess the EEG data by averaging over the number of repetitions.
 
     Args:
@@ -375,9 +380,19 @@ def preprocess_eeg_data(
     else:
         preprocessed_data = eeg_data
 
-    preprocessed_data = torch.mean(preprocessed_data, dim=1)
+    if unpack_repetitions:
+        num_repetitions = preprocessed_data.size(1)
+        idxs = idxs.repeat_interleave(num_repetitions, dim=0)
+        preprocessed_data = preprocessed_data.reshape(-1, *preprocessed_data.shape[2:])
+    else:
+        preprocessed_data = torch.mean(preprocessed_data, dim=1)
 
-    return preprocessed_data
+    if normalize:
+        preprocessed_data = (
+            preprocessed_data - preprocessed_data.mean(dim=0, keepdim=True)
+        ) / (np.sqrt(2) * preprocessed_data.std(dim=0, keepdim=True))
+
+    return preprocessed_data, idxs
 
 
 def get_image_paths(
@@ -406,15 +421,19 @@ def get_image_paths(
 
 
 def load_all_eeg_data(
-    eeg_paths: list[Path],
-) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
+    eeg_paths: list[Path], preprocess_configs: dict | None = None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+    preprocess_configs = preprocess_configs or {}
+
+
     all_eeg_data = []
+    all_idxs = []
     all_times = None
     all_ch_names = []
 
     for eeg_path in eeg_paths:
-        eeg_data, times, ch_names = load_eeg_data(eeg_path)
-        eeg_data = preprocess_eeg_data(eeg_data)
+        eeg_data, idxs, times, ch_names = load_eeg_data(eeg_path)
+        eeg_data, idxs = preprocess_eeg_data(eeg_data, idxs, **preprocess_configs)
 
         all_eeg_data.append(eeg_data)
 
@@ -424,7 +443,9 @@ def load_all_eeg_data(
         if not all_ch_names:
             all_ch_names = ch_names
 
+        all_idxs.append(idxs)
+
     if all_times is None:
         all_times = torch.tensor([])
 
-    return torch.stack(all_eeg_data), all_times, all_ch_names
+    return torch.stack(all_eeg_data), torch.stack(all_idxs), all_times, all_ch_names

@@ -13,7 +13,6 @@ from brain_image.data import (
     TensorCache,
     batch_load_images,
     get_image_paths,
-    preprocess_image,
 )
 from brain_image.model.img_encoder import load_image_encoder
 from brain_image.utils import DTYPE, get_dtype, setup
@@ -79,7 +78,7 @@ def run_generation(
                 
             imgs = batch_load_images(paths).to(device=device)
 
-            latent = image_encoder(imgs).detach().cpu()
+            latent = image_encoder.encode(imgs).detach().cpu()
 
             if num_pad > 0:
                 # Remove padding

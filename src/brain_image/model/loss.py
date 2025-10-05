@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class CLIPLoss(nn.Module):
-    def __init__(self, init_temperature: float = 0.04, max_scale: float = 100):
+    def __init__(self, init_temperature: float = 0.07, max_scale: float = 100):
         super().__init__()
         self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / init_temperature)))
         self.max_scale = max_scale
@@ -12,15 +12,10 @@ class CLIPLoss(nn.Module):
         self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor | None = None, symmetric: bool = True, reduce: bool = True
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if labels is None:
-            labels = torch.zeros((z_i.size(0), z_i.size(0)), device=z_i.device)
-            for i in range(labels.shape[0]):
-                labels[i, i] = 1
+            labels = torch.arange(z_i.size(0), device=z_i.device).long()
 
-        labels = labels.float()
-
-        sim = z_e @ z_i.T
-        scale = self.logit_scale.exp().clamp(self.max_scale)
-        sim_scaled = sim * scale
+        sim = z_e @ z_i.T 
+        sim_scaled = sim * self.logit_scale.exp().clamp(self.max_scale)
 
         loss_e = torch.nn.functional.cross_entropy(
             sim_scaled, labels, reduction = "mean" if reduce else "none"
