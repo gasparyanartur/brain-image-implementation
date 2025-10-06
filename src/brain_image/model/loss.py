@@ -11,8 +11,14 @@ class CLIPLoss(nn.Module):
     def forward(
         self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor | None = None, symmetric: bool = True, reduce: bool = True
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if symmetric and not z_e.size(0) == z_i.size(0):
+            raise ValueError("Symmetric requires same batch sizes, received {} and {}".format(z_e.size(0), z_i.size(0)))
+
         if labels is None:
-            labels = torch.arange(z_i.size(0), device=z_i.device).long()
+            if not symmetric:
+                raise ValueError("Labels must be provided for asymmetric loss")
+            
+            labels = torch.arange(z_i.size(0), device=z_i.device, dtype=torch.long)
 
         sim = z_e @ z_i.T 
         sim_scaled = sim * self.logit_scale.exp().clamp(self.max_scale)

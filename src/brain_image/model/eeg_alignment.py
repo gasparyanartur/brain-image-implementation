@@ -60,7 +60,7 @@ class EEGAlignmentConfig(BaseConfig):
     do_low_recon: bool = False
     do_high_recon: bool = True
 
-    align_input_noise: float = 0.0015
+    align_input_noise: float = 0.0
 
     use_embed_adapter: bool = False
     use_prior_adapter: bool = False
@@ -1306,7 +1306,7 @@ class EEGAlignmentModel(pl.LightningModule):
         
 
         align_clip_loss, align_sim = self.align_loss(
-            proj_eeg_latent_normed, align_image_latent_normed, labels=None
+            proj_eeg_latent, align_image_latent_normed, labels=None
         )
         #align_clip_loss, align_sim = self.align_loss(
         #    proj_eeg_latent, align_image_latent, labels=None
@@ -1318,7 +1318,7 @@ class EEGAlignmentModel(pl.LightningModule):
             * (self.epoch >= self.config.align_loss_epoch)
         )
         align_mse_loss = (
-            torch.nn.functional.mse_loss(align_image_latent_normed, proj_eeg_latent)
+            torch.nn.functional.mse_loss(proj_eeg_latent, align_image_latent_normed)
             * self.config.align_mse_loss_factor
         )
         align_cos = align_sim.diag()
