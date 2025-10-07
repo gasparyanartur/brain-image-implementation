@@ -12,7 +12,6 @@ eeg_encoder_model: "atms"
 do_align: true
 do_high_recon: false
 do_low_recon: false
-do_prior: true
 prior_debug_mode: false
 log_gradients: false
 
@@ -23,7 +22,6 @@ project_dim: 1024
 eeg_latent_dim: 1440
 #img_latent_dim: 768
 img_latent_dim: 1024
-project_image: false
 
 skip_eval_first_epoch: true
 full_eval_every_epochs: 1
@@ -33,35 +31,16 @@ encoder_min_lr: 1e-5
 encoder_warmup_epochs: 1
 encoder_delay_epochs: 0
 
-projector_lr: 5e-4
-projector_min_lr: 1e-5
-projector_warmup_epochs: 1
-projector_delay_epochs: 0
-
 prior_lr: 3e-4
 prior_min_lr: 1e-6
 prior_warmup_epochs: 1
 prior_delay_epochs: 0
 
-embed_adapter_lr: 3e-4
-embed_adapter_min_lr: 1e-5
-embed_adapter_warmup_epochs: 1
-embed_adapter_delay_epochs: 1
-
-prior_adapter_lr: 3e-4
-prior_adapter_min_lr: 1e-5
-prior_adapter_warmup_epochs: 1
-prior_adapter_delay_epochs: 1
-
 lr_scheduler: "cosine_anneal"
 betas: [0.9, 0.999]
 
-warmup_start_frac: 0.05
+warmup_start_frac: 0.02
 max_epochs: 50
 
-temperature_init: 0.01
+temperature_init: 0.07
 data_seed: 42
-
-use_embed_adapter: false
-
-weight_decay: 0

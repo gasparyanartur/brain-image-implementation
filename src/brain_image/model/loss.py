@@ -9,30 +9,34 @@ class CLIPLoss(nn.Module):
         self.max_scale = max_scale
 
     def forward(
-        self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor | None = None, symmetric: bool = True, reduce: bool = True
+        self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor | None = None, ignore_mask: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if symmetric and not z_e.size(0) == z_i.size(0):
-            raise ValueError("Symmetric requires same batch sizes, received {} and {}".format(z_e.size(0), z_i.size(0)))
+        if z_e.size(0) != z_i.size(0):
+            raise ValueError(f"z_e and z_i should have the same batch size, but got {z_e.size(0)} and {z_i.size(0)}")
 
         if labels is None:
-            if not symmetric:
-                raise ValueError("Labels must be provided for asymmetric loss")
-            
-            labels = torch.arange(z_i.size(0), device=z_i.device, dtype=torch.long)
+            labels = torch.ones(z_i.size(0), device=z_i.device, dtype=torch.float).diag()
+
+        if labels.size(0) != z_i.size(0) or labels.size(1) != z_i.size(0):
+            raise ValueError(f"Labels shape should be ({z_i.size(0)}, {z_i.size(0)}), but got {labels.shape}")
 
         sim = z_e @ z_i.T 
-        sim_scaled = sim * self.logit_scale.exp().clamp(self.max_scale)
+        sim_scaled = sim * self.logit_scale.exp().clamp(max=self.max_scale)
 
-        loss_e = torch.nn.functional.cross_entropy(
-            sim_scaled, labels, reduction = "mean" if reduce else "none"
+        #lfunc = torch.nn.functional.binary_cross_entropy_with_logits
+        lfunc = torch.nn.functional.cross_entropy
+        loss_e = lfunc(
+            sim_scaled, labels, reduction="none"
         )
-        if not symmetric:
-            return loss_e, sim
-
-        loss_i = torch.nn.functional.cross_entropy(
-            sim_scaled.T, labels, reduction = "mean" if reduce else "none"
+        loss_i = lfunc(
+            sim_scaled.T, labels, reduction = "none" 
         )
         loss = (loss_e + loss_i) * 0.5
+
+        #if ignore_mask is not None:
+        #    loss[ignore_mask] = 0
+
+        loss = loss.mean()
 
         return loss, sim
 
@@ -62,7 +66,7 @@ class InfoNCELoss(nn.Module):
     def forward(self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor, symmetric: bool = True, reduce: bool = True):
         neg_mask = ~labels
         sim = z_e @ z_i.T
-        scale = self.logit_scale.exp().clamp(self.max_scale)
+        scale = self.logit_scale.exp().clamp(max=self.max_scale)
         logits = sim * scale
 
         loss_e = self._get_directional_loss(logits, neg_mask, reduce=reduce)

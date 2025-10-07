@@ -25,14 +25,12 @@ from brain_image.model.eeg_encoder import NiceEEGEncoder, AtmsEEGEncoder, NiceCo
 from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
 from brain_image.model.loss import CLIPLoss, InfoNCELoss
 from brain_image.model.model import (
-    LatentProjector,
-    ResidualAdapter,
     normalize_projection,
 )
 from brain_image.model.prior import BrainDiffusionPrior, BrainDiffusionPriorConfig
 
 
-from typing import Any, Literal, Mapping, TypedDict, cast
+from typing import Any, Literal, Mapping, Sequence, TypedDict, cast
 import logging
 from brain_image.reconstruction import ReconstructionPipeline
 from brain_image.utils import (
@@ -62,8 +60,6 @@ class EEGAlignmentConfig(BaseConfig):
 
     align_input_noise: float = 0.0
 
-    use_embed_adapter: bool = False
-    use_prior_adapter: bool = False
     plot_lowdim_proj: bool = True
     low_dim_proj_pca: int = 50
 
@@ -76,7 +72,6 @@ class EEGAlignmentConfig(BaseConfig):
     prior_sim_loss_factor: float = 1.0
     prior_len_loss_factor: float = 0.5
 
-    project_image: bool = False
     rescale_proj_by_mean: bool = False
     norm_eeg_latent: bool = True
 
@@ -98,31 +93,19 @@ class EEGAlignmentConfig(BaseConfig):
     prior_config: BrainDiffusionPriorConfig | None = BrainDiffusionPriorConfig()
 
     encoder_lr: float = 3e-4
-    projector_lr: float = 1e-3
     prior_lr: float = 3e-4
-    embed_adapter_lr: float = 1e-3
-    prior_adapter_lr: float = 1e-3
     align_loss_lr: float = 3e-4
 
     encoder_min_lr: float = 1e-5
-    projector_min_lr: float = 1e-5
     prior_min_lr: float = 1e-6
-    embed_adapter_min_lr: float = 1e-5
-    prior_adapter_min_lr: float = 1e-5
     align_loss_min_lr: float = 1e-7
 
     encoder_warmup_epochs: int = 1
-    projector_warmup_epochs: int = 1
     prior_warmup_epochs: int = 1
-    embed_adapter_warmup_epochs: int = 1
-    prior_adapter_warmup_epochs: int = 1
     align_loss_warmup_epochs: int = 1
 
     encoder_delay_epochs: int = 0
-    projector_delay_epochs: int = 0
     prior_delay_epochs: int = 0
-    embed_adapter_delay_epochs: int = 0
-    prior_adapter_delay_epochs: int = 0
     align_loss_delay_epochs: int = 0
 
     lr_scheduler: Literal["none", "cosine_anneal"] = "cosine_anneal"
@@ -157,23 +140,26 @@ class DataBatchT(TypedDict):
     prior_pred_single: torch.Tensor | None
 
 
-def get_belong_group(img_path: list[str], to_float: bool = False) -> torch.Tensor:
-    unique_ids = {v: k for k, v in enumerate(img_path)}
+def get_belong_group(items: Sequence[Any]) -> torch.Tensor:
+    if isinstance(items, torch.Tensor):
+        items = list(items)
 
-    belonings = [[] for _ in range(len(img_path))]
-    for i, p in enumerate(img_path):
-        belonings[unique_ids[p]].append(i)
+    B = len(items)
+    unique_ids = {items[k]: k for k in range(B)}
 
-    path_groups = torch.zeros((len(img_path), len(img_path)), dtype=torch.bool)
-    for i, p in enumerate(img_path):
-        uid = unique_ids[p]
-        for op in belonings[uid]:
-            path_groups[i, op] = True
+    occurances = [[] for _ in range(B)]
+    for i in range(B):
+        uid = unique_ids[items[i]]
+        occurances[uid].append(i)
 
-    if to_float:
-        path_groups = path_groups.float()
+    path_groups = torch.zeros(B, B, dtype=torch.float)
+    for i in range(B):
+        uid = unique_ids[items[i]]
+        for occ in occurances[uid]:
+            path_groups[i, occ] = 1.
 
     return path_groups
+
 
 def create_eeg_encoder(name: str, config = None, checkpoint_path: Path | None = None) -> EEGEncoder:
     match name:
@@ -203,16 +189,12 @@ class EEGAlignmentModel(pl.LightningModule):
         config: EEGAlignmentConfig | dict[str, Any],
         dataset_config: EEGDatasetConfig | dict[str, Any],
         dtype: torch.dtype = DTYPE,
-        init_weights: bool = True,
+        init_weights: bool = False,
         preload_latents: bool = True,
         compile: bool = True,
         modules_to_compile: list[str] = [
             "eeg_encoder",
-            "eeg_projector",
-            "align_img_projector",
             "prior",
-            "embed_adapter",
-            "prior_adapter",
         ],
         cache_dir: Path = Path("cache/tensorcache"),
         eeg_encoder_path: Path | None = None,
@@ -260,18 +242,6 @@ class EEGAlignmentModel(pl.LightningModule):
             self._init_normal_weights()
 
         self.prior: BrainDiffusionPrior | None = None
-        self.embed_adapter: ResidualAdapter | None = (
-            ResidualAdapter(latent_dim=self.config.img_latent_dim)
-            if self.config.do_high_recon and self.config.use_embed_adapter
-            else None
-        )
-
-        self.prior_adapter: ResidualAdapter | None = (
-            ResidualAdapter(latent_dim=self.config.img_latent_dim)
-            if self.config.do_high_recon and self.config.use_prior_adapter
-            else None
-        )
-
         if self.config.do_high_recon:
             assert self.config.prior_config, "Prior config must be provided"
             self.prior = BrainDiffusionPrior(self.config.prior_config).to(dtype)
@@ -284,13 +254,6 @@ class EEGAlignmentModel(pl.LightningModule):
         if preload_latents:
             self._preload_latents()
 
-        if not self.config.project_image and (
-            self.config.project_dim != self.config.img_latent_dim
-        ):
-            raise ValueError(
-                "Projected dimension must match the image latent dimension if project_image is False"
-            )
-
         if self.config.prior_debug_mode:
             self.eeg_encoder = None
         else:
@@ -299,17 +262,6 @@ class EEGAlignmentModel(pl.LightningModule):
                 checkpoint_path=eeg_encoder_path,
             )
 
-
-
-        self.eeg_projector: LatentProjector | None = None
-        self.align_img_projector: LatentProjector | None = (
-            LatentProjector(
-                embed_dim=self.config.img_latent_dim,
-                proj_dim=self.config.project_dim,
-            )
-            if self.config.project_image and not self.config.prior_debug_mode
-            else None
-        )
 
         if self.config.do_align:
             if self.config.align_loss_type == "clip":
@@ -333,21 +285,9 @@ class EEGAlignmentModel(pl.LightningModule):
                     case "eeg_encoder":
                         if self.eeg_encoder is not None:
                             self.eeg_encoder.compile(**compile_kwargs)
-                    case "eeg_projector":
-                        if self.eeg_projector is not None:
-                            self.eeg_projector.compile(**compile_kwargs)
-                    case "align_img_projector":
-                        if self.align_img_projector is not None:
-                            self.align_img_projector.compile(**compile_kwargs)
                     case "prior":
                         if self.prior is not None:
                             self.prior.compile(**compile_kwargs)
-                    case "prior_adapter":
-                        if self.prior_adapter is not None:
-                            self.prior_adapter.compile(**compile_kwargs)
-                    case "embed_adapter":
-                        if self.embed_adapter is not None:
-                            self.embed_adapter.compile(**compile_kwargs)
                     case "align_loss":
                         if self.align_loss is not None:
                             self.align_loss.compile(**compile_kwargs)
@@ -388,44 +328,12 @@ class EEGAlignmentModel(pl.LightningModule):
                 delay_epochs=self.config.encoder_delay_epochs,
             ),
             OptimizerConfig(
-                name="eeg_projector",
-                model=self.eeg_projector,
-                lr=self.config.projector_lr,
-                min_lr=self.config.projector_min_lr,
-                warmup_epochs=self.config.projector_warmup_epochs,
-                delay_epochs=self.config.projector_delay_epochs,
-            ),
-            OptimizerConfig(
-                name="align_img_projector",
-                model=self.align_img_projector,
-                lr=self.config.projector_lr,
-                min_lr=self.config.projector_min_lr,
-                warmup_epochs=self.config.projector_warmup_epochs,
-                delay_epochs=self.config.projector_delay_epochs,
-            ),
-            OptimizerConfig(
                 name="prior",
                 model=self.prior,
                 lr=self.config.prior_lr,
                 min_lr=self.config.prior_min_lr,
                 warmup_epochs=self.config.prior_warmup_epochs,
                 delay_epochs=self.config.prior_delay_epochs,
-            ),
-            OptimizerConfig(
-                name="embed_adapter",
-                model=self.embed_adapter,
-                lr=self.config.embed_adapter_lr,
-                min_lr=self.config.embed_adapter_min_lr,
-                warmup_epochs=self.config.embed_adapter_warmup_epochs,
-                delay_epochs=self.config.embed_adapter_delay_epochs,
-            ),
-            OptimizerConfig(
-                name="prior_adapter",
-                model=self.prior_adapter,
-                lr=self.config.prior_adapter_lr,
-                min_lr=self.config.prior_adapter_min_lr,
-                warmup_epochs=self.config.prior_adapter_warmup_epochs,
-                delay_epochs=self.config.prior_adapter_delay_epochs,
             ),
             OptimizerConfig(
                 name="align_loss",
@@ -638,42 +546,19 @@ class EEGAlignmentModel(pl.LightningModule):
     def get_brain_encoder(self) -> nn.Module:
         raise NotImplementedError
 
-    @abstractmethod
-    def get_brain_projector(self) -> nn.Module:
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_img_align_projector(self) -> nn.Module:
-        raise NotImplementedError
-
     def set_mode(self, mode: Literal["train", "val", "test"]):
         if mode == "train":
-            if self.embed_adapter is not None:
-                self.embed_adapter.train()
-            if self.prior_adapter is not None:
-                self.prior_adapter.train()
             if self.prior is not None:
                 self.prior.train()
             if self.eeg_encoder is not None:
                 self.eeg_encoder.train()
-            if self.eeg_projector is not None:
-                self.eeg_projector.train()
-            if self.align_img_projector is not None:
-                self.align_img_projector.train()
+
 
         elif mode == "val" or mode == "test":
-            if self.embed_adapter is not None:
-                self.embed_adapter.eval()
-            if self.prior_adapter is not None:
-                self.prior_adapter.eval()
             if self.prior is not None:
                 self.prior.eval()
             if self.eeg_encoder is not None:
                 self.eeg_encoder.eval()
-            if self.eeg_projector is not None:
-                self.eeg_projector.eval()
-            if self.align_img_projector is not None:
-                self.align_img_projector.eval()
 
     def training_step(self, batch, batch_idx):
         self.set_mode("train")
@@ -718,11 +603,7 @@ class EEGAlignmentModel(pl.LightningModule):
             with torch.no_grad():
                 grad_modules_to_log = [
                     ("eeg_encoder", self.eeg_encoder),
-                    ("eeg_projector", self.eeg_projector),
-                    ("align_img_projector", self.align_img_projector),
                     ("prior", self.prior),
-                    ("embed_adapter", self.embed_adapter),
-                    ("prior_adapter", self.prior_adapter),
                 ]
                 grad_modules_to_log = [
                     x for x in grad_modules_to_log if x[1] is not None
@@ -777,7 +658,6 @@ class EEGAlignmentModel(pl.LightningModule):
         batch: DataBatchT,
         device,
         dtype,
-        eps: float = 1e-8,
         use_align_if_debug: bool = True,
         normalize: bool = False,
     ) -> torch.Tensor:
@@ -797,16 +677,10 @@ class EEGAlignmentModel(pl.LightningModule):
             subs = subs.to(device) 
             proj_eeg_latent = self.eeg_encoder(eeg_data, subs)
 
-            if self.eeg_projector is not None:
-                proj_eeg_latent = self.eeg_projector(proj_eeg_latent)
-
         if normalize:
             proj_eeg_latent = normalize_projection(
-                proj_eeg_latent, self.config.rescale_proj_by_mean, eps
+                proj_eeg_latent, self.config.rescale_proj_by_mean
             )
-
-        if self.embed_adapter is not None:
-            proj_eeg_latent = self.embed_adapter(proj_eeg_latent)
 
         return proj_eeg_latent
 
@@ -825,7 +699,6 @@ class EEGAlignmentModel(pl.LightningModule):
     def get_all_prior_preds(
         self,
         all_data: DataBatchT,
-        eps: float = 1e-8,
         batch_size: int = 512,
         progress_bar: bool = True,
         generator: torch.Generator | None = None,
@@ -846,7 +719,7 @@ class EEGAlignmentModel(pl.LightningModule):
         device, dtype = self._get_device_dtype()
         if not key_in_dict("eeg_latent", all_data):
             all_data["eeg_latent"] = self.get_all_eeg_latents(
-                all_data, batch_size=batch_size, progress_bar=progress_bar, eps=eps
+                all_data, batch_size=batch_size, progress_bar=progress_bar
             )
 
         assert (
@@ -880,9 +753,6 @@ class EEGAlignmentModel(pl.LightningModule):
                     image_embedding=target_batch,
                 )
                 prior_pred_single = prior_prep_single / self.prior.image_embed_scale
-                if self.prior_adapter:
-                    prior_pred = self.prior_adapter(prior_pred)
-                    prior_pred_single = self.prior_adapter(prior_prep_single)
 
                 all_prior_preds_.append(prior_pred.detach().cpu())
                 all_prior_preds_single_.append(prior_pred_single.detach().cpu())
@@ -899,7 +769,6 @@ class EEGAlignmentModel(pl.LightningModule):
         all_data: DataBatchT,
         batch_size: int = 512,
         progress_bar: bool = True,
-        eps: float = 1e-8,
     ) -> torch.Tensor | None:
         assert (
             "idx" in all_data and all_data["idx"] is not None
@@ -925,7 +794,6 @@ class EEGAlignmentModel(pl.LightningModule):
                     batch_data,
                     device,
                     dtype,
-                    eps=eps,
                     use_align_if_debug=True,
                 )
                 all_latents.append(proj_eeg_latent.detach().cpu())
@@ -1060,11 +928,6 @@ class EEGAlignmentModel(pl.LightningModule):
         device, dtype = self._get_device_dtype()
 
         if self.config.do_align:
-            if self.config.project_image:
-                assert (
-                    self.align_img_projector is not None
-                ), "Image projector is not initialized"
-                align_image_latent = self.align_img_projector(align_image_latent)
 
             eeg_latent_normed = normalize_projection(
                 eeg_latents, self.config.rescale_proj_by_mean
@@ -1168,7 +1031,6 @@ class EEGAlignmentModel(pl.LightningModule):
         batch,
         batch_idx,
         stage: Literal["train", "val", "test"],
-        eps: float = 1e-8,
     ) -> tuple[torch.Tensor, dict[str, Any], dict[str, Any]]:
         batch = self.prepare_batch(batch, stage)
 
@@ -1187,12 +1049,11 @@ class EEGAlignmentModel(pl.LightningModule):
             batch,
             device,
             self.dtype,
-            eps=eps,
             use_align_if_debug=False,
             normalize=False,
         )
         proj_eeg_latent_normed = normalize_projection(
-            proj_eeg_latent, self.config.rescale_proj_by_mean, eps
+            proj_eeg_latent, self.config.rescale_proj_by_mean
         )
 
         losses: dict[str, torch.Tensor] = {}
@@ -1215,7 +1076,6 @@ class EEGAlignmentModel(pl.LightningModule):
                     cache=cache,
                     device=device,
                     stage=stage,
-                    eps=eps,
                 )
 
             if self.config.do_high_recon and (
@@ -1232,7 +1092,6 @@ class EEGAlignmentModel(pl.LightningModule):
                     cache=cache,
                     stage=stage,
                     device=device,
-                    eps=eps,
                 )
 
         loss = torch.stack(list(losses.values())).sum()
@@ -1259,7 +1118,6 @@ class EEGAlignmentModel(pl.LightningModule):
         cache: dict[str, Any],
         stage,
         device,
-        eps=1e-8,
     ):
         assert (
             proj_eeg_latent := cache.get("proj_eeg_latent")
@@ -1273,17 +1131,12 @@ class EEGAlignmentModel(pl.LightningModule):
         assert (
             img_path := batch.get("img_path")
         ) is not None, "Img Path is not initialized"
+        assert (
+            idx := batch.get("idx")
+        ) is not None, "Index is not initialized"
         assert self.align_loss is not None, "Align loss is not initialized"
 
         align_image_latent = batch["align_image_latent"].to(device)
-
-        if self.config.project_image:
-            assert (
-                self.align_img_projector is not None
-            ), "Image projector is not initialized"
-            align_image_latent = self.align_img_projector(align_image_latent)
-
-        
 
         if stage == "train" and self.config.align_input_noise > 0:
             align_image_latent = align_image_latent + (
@@ -1293,20 +1146,17 @@ class EEGAlignmentModel(pl.LightningModule):
             )
 
         align_image_latent_normed = normalize_projection(
-            align_image_latent, self.config.rescale_proj_by_mean, eps
+            align_image_latent, self.config.rescale_proj_by_mean
         )
 
-        #with torch.no_grad():
+        with torch.no_grad():
             # There might be duplicates (different subjects, same image)
             # So we will look at the img_path to make sure
-            #labels = get_belong_group(img_path, to_float=False).to(
-            #    align_image_latent.device
-            #)
-
-        
+            labels = get_belong_group(idx)
+            labels = labels.to(device)
 
         align_clip_loss, align_sim = self.align_loss(
-            proj_eeg_latent, align_image_latent_normed, labels=None
+            proj_eeg_latent_normed, align_image_latent_normed, labels=labels
         )
         #align_clip_loss, align_sim = self.align_loss(
         #    proj_eeg_latent, align_image_latent, labels=None
@@ -1322,13 +1172,11 @@ class EEGAlignmentModel(pl.LightningModule):
             * self.config.align_mse_loss_factor
         )
         align_cos = align_sim.diag()
-        #align_cos_loss = (1 - align_cos).mean() * self.config.align_cos_loss_factor
 
         losses.update(
             {
                 "align_mse_loss": align_mse_loss,
                 "align_clip_loss": align_clip_loss,
-                #"align_cos_loss": align_cos_loss,
             }
         )
 
@@ -1358,7 +1206,6 @@ class EEGAlignmentModel(pl.LightningModule):
         cache: dict[str, Any],
         stage,
         device,
-        eps=1e-8,
     ):
         assert self.prior is not None, "Prior is not initialized"
         assert (
@@ -1372,7 +1219,7 @@ class EEGAlignmentModel(pl.LightningModule):
         ) is not None, "proj_eeg_latent is not defined"
 
         target_latent_norm = target_latent.norm(dim=-1, keepdim=True)
-        target_latent_dir = target_latent / (target_latent_norm + eps)
+        target_latent_dir = target_latent / (target_latent_norm + 1e-8)
 
         # Note: We use the projected EEG latent here because the original latent is not same dim as images
         prior_loss, prior_pred = self.prior(
@@ -1382,11 +1229,8 @@ class EEGAlignmentModel(pl.LightningModule):
         prior_pred = prior_pred / self.prior.image_embed_scale
         prior_loss = prior_loss * self.config.prior_loss_factor
 
-        if self.prior_adapter is not None:
-            prior_pred = self.prior_adapter(prior_pred)
-
         prior_pred_norm = prior_pred.norm(dim=-1, keepdim=True)
-        prior_pred_dir = prior_pred / (prior_pred_norm + eps)
+        prior_pred_dir = prior_pred / (prior_pred_norm + 1e-8)
 
         prior_pred_cos = torch.linalg.vecdot(prior_pred_dir, target_latent_dir, dim=-1)
 
@@ -1492,7 +1336,6 @@ class EEGAlignmentModel(pl.LightningModule):
         batch,
         stage: Literal["val", "test"],
         num_reconstructions: int = 5,
-        eps: float = 1e-8,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         # Imgs Reconstructed: Conditioning on Aligned Brain Latent, Predicting Target Latent with Prior
         # Target Latent: Conditioning on Target Latent, Predicting Target Latent with Prior (Does prior do anything with target?)

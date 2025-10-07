@@ -6,11 +6,11 @@ import torch.nn as nn
 
 @torch.compile()
 def normalize_projection(
-    x: torch.Tensor, rescale_norm_by_mean: bool = False, eps: float = 1e-8
+    x: torch.Tensor, rescale_norm_by_mean: bool = False
 ) -> torch.Tensor:
     if rescale_norm_by_mean:
         x = x - x.mean(dim=-1, keepdim=True)
-    return nn.functional.normalize(x, dim=-1, p=2, eps=eps)
+    return nn.functional.normalize(x, dim=-1, p=2)
 
 
 class DebugLayer(nn.Module):
