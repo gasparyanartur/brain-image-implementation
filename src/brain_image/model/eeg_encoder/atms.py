@@ -482,24 +482,13 @@ class AtmsEEGEncoder(EEGEncoder):
         num_blocks=1,
     ):
         super(AtmsEEGEncoder, self).__init__()
-        default_config = iTransformerConfig()
-        self.encoder = iTransformer(default_config)
-        #self.subject_wise_linear = nn.ModuleList(
-        #    [
-        #        nn.Linear(default_config.d_model, sequence_length)
-        #        for _ in range(num_subjects) if
-        #    ]
-        #)
+        self.encoder = iTransformer(iTransformerConfig())
         self.enc_eeg = Enc_eeg()
         self.proj_eeg = Proj_eeg(proj_dim=output_dim)
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
     def forward(self, x, sub: torch.Tensor | None = None):
         x = self.encoder(x, None, sub)
-        # print(f'After attention shape: {x.shape}')
-        # print("x", x.shape)
-        # x = self.subject_wise_linear[0](x)
-        # print(f'After subject-specific linear transformation shape: {x.shape}')
         eeg_embedding = self.enc_eeg(x)
 
         out = self.proj_eeg(eeg_embedding)

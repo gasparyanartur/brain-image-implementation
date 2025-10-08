@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import functools
 import hashlib
 import logging
 from abc import ABC, abstractmethod
@@ -319,20 +320,29 @@ def prepare_datasets(
     return train_dataset, val_dataset, test_dataset
 
 
-def load_image_from_path(path: Path) -> Tensor:
+def load_image_from_path(path: Path, mode: str | None = None) -> Tensor:
     if not path.exists():
         raise FileNotFoundError(f"Image not found: {path}")
 
-    img = torchvision.io.decode_image(str(path))
+    match mode:
+        case "rgb":
+            mode_value = torchvision.io.ImageReadMode.RGB
+        case None:
+            mode_value = torchvision.io.ImageReadMode.UNCHANGED
+        case _:
+            raise ValueError(f"Unknown mode: {mode}")
+
+
+    img = torchvision.io.decode_image(str(path), mode=mode_value)
     return img
 
 
-def batch_load_images(paths: Iterable[Path], parallel: bool = False, progressbar: bool = False) -> Tensor:
+def batch_load_images(paths: Iterable[Path], parallel: bool = False, progressbar: bool = False, mode: str | None = None) -> Tensor:
     if parallel:
         with mp.Pool() as pool:
-            imgs = pool.map(load_image_from_path, paths)
+            imgs = pool.map(functools.partial(load_image_from_path, mode=mode), paths)
     else:
-        imgs = [load_image_from_path(path) for path in tqdm.tqdm(list(paths), disable=not progressbar, desc="Loading images")]
+        imgs = [load_image_from_path(path, mode=mode) for path in tqdm.tqdm(list(paths), disable=not progressbar, desc="Loading images")]
 
     imgs = torch.stack(imgs, dim=0)
     return imgs
