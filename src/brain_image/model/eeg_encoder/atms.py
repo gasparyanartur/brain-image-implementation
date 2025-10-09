@@ -464,7 +464,7 @@ class Proj_eeg(nn.Sequential):
                 nn.Sequential(
                     nn.GELU(),
                     nn.Linear(proj_dim, proj_dim),
-                    nn.Dropout(drop_proj),
+                    #nn.Dropout(drop_proj),
                 )
             ),
             nn.LayerNorm(proj_dim),

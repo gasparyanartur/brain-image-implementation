@@ -36,7 +36,7 @@ class BrainDiffusionPriorConfig(BaseConfig):
     dim_head: int = 64
     attn_dropout: float = 0.5
     ff_dropout: float = 0.5
-    cond_drop_prob: float = 0.0
+    cond_drop_prob: float = 0.1
     image_cond_drop_prob: float = 0.0
     num_timesteps: int = 1000
     num_time_embeds: int = 1
@@ -172,7 +172,6 @@ class DiffusionPriorNetwork(nn.Module):
         if text_embed is None:
             raise NotImplementedError("text_embed is required in the prior network")
 
-
         batch, dim, device, dtype = (
             *image_embed.shape,
             image_embed.device,
@@ -266,7 +265,7 @@ class BrainDiffusionPrior(DiffusionPrior):
             num_image_embeds=config.num_image_embeds,
             num_text_embeds=config.num_text_embeds,
             max_text_len=config.max_text_len,
-            self_cond=config.self_cond, 
+            self_cond=config.self_cond,
             depth=config.depth,
             num_output_tokens=config.num_output_tokens,
             rotary_emb=config.rotary_emb,
@@ -293,7 +292,7 @@ class BrainDiffusionPrior(DiffusionPrior):
             image_embed_scale=config.image_embed_scale,
             init_image_embed_l2norm=config.init_image_embed_l2norm,
             *args,
-            **kwargs
+            **kwargs,
         )
         self.net = net
 
@@ -498,3 +497,271 @@ class BrainDiffusionPrior(DiffusionPrior):
         )
 
         return loss, pred  # , text_embed
+
+
+from dataclasses import dataclass
+
+from typing import Any, Literal
+from torch import nn
+from torch import Tensor
+
+from diffusers.models.embeddings import TimestepEmbedding, Timesteps
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+
+from brain_image.configs import get_device
+
+
+def get_activation(name: str):
+    match name:
+        case "silu":
+            return nn.SiLU
+        case "elu":
+            return nn.ELU
+        case "gelu":
+            return nn.GELU
+        case "relu":
+            return nn.ReLU
+        case _:
+            raise NotImplementedError(f"No activation function for {name}")
+
+
+@dataclass
+class DiffusionPriorConfig:
+    d_input: int = 1024
+    d_cond: int = 1024
+    d_time: int = 256
+    d_embed: int = 1024
+    d_hidden_start: int = 1024
+    d_hidden_scale: float = 0.5
+    depth: int = 5
+    act_func: Literal["silu", "elu", "gelu", "relu"] = "silu"
+    dropout: float = 0.1
+
+    cond_drop_prob: float = 0.1
+
+    num_training_timesteps: int = 1000
+
+
+class SimpleDiffusionPrior(nn.Module):
+    class EncoderLayer(nn.Module):
+        def __init__(
+            self,
+            input_encoder: nn.Module,
+            time_encoder: nn.Module,
+            cond_encoder: nn.Module,
+        ):
+            super().__init__()
+            self.input_encoder = input_encoder
+            self.time_encoder = time_encoder
+            self.cond_encoder = cond_encoder
+
+        def forward(
+            self,
+            x,
+            time_latent: Tensor,
+            cond_latent: Tensor | None = None,
+            cond_keep_mask: Tensor | None = None,
+        ) -> Tensor:
+            time_embed = self.time_encoder(time_latent)
+            latent = x + time_embed
+
+            if cond_latent is not None:
+                cond_embed = self.cond_encoder(cond_latent)
+
+                if cond_keep_mask is not None:
+                    cond_embed = cond_embed * cond_keep_mask
+
+                latent += cond_embed
+
+            return self.input_encoder(latent)
+
+    def __init__(self, config: DiffusionPriorConfig = DiffusionPriorConfig()):
+        super().__init__()
+        self._dummy_param = nn.Parameter(torch.empty(0))
+        self.config = config
+        act_func = get_activation(config.act_func)
+
+        self.time_proj = Timesteps(
+            config.d_time, flip_sin_to_cos=True, downscale_freq_shift=0
+        )
+        self.input_proj = nn.Sequential(
+            nn.Linear(config.d_embed, config.d_hidden_start),
+            nn.LayerNorm(config.d_hidden_start),
+            act_func(),
+        )
+
+        encoder_layers = []
+        decoder_layers = []
+
+        self.hidden_dims = [
+            int(config.d_hidden_start * config.d_hidden_scale**d)
+            for d in range(config.depth)
+        ]
+        self.time_encoders = nn.ModuleList(
+            [
+                TimestepEmbedding(config.d_time, hidden_dim)
+                for hidden_dim in self.hidden_dims
+            ]
+        )
+        self.cond_encoders = nn.ModuleList(
+            [nn.Linear(config.d_cond, hidden_dim) for hidden_dim in self.hidden_dims]
+        )
+
+        for d in range(config.depth - 1):
+            hidden_dim = self.hidden_dims[d]
+            next_hidden_dim = self.hidden_dims[d + 1]
+
+            encode_layer = nn.Sequential(
+                nn.Linear(hidden_dim, next_hidden_dim),
+                nn.LayerNorm(next_hidden_dim),
+                act_func(),
+                nn.Dropout(config.dropout),
+            )
+            decode_layer = nn.Sequential(
+                nn.Linear(next_hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                act_func(),
+                nn.Dropout(config.dropout),
+            )
+
+            encoder_layers.append(
+                self.EncoderLayer(
+                    encode_layer, self.time_encoders[d], self.cond_encoders[d]
+                )
+            )
+            decoder_layers.insert(
+                0,
+                self.EncoderLayer(
+                    decode_layer, self.time_encoders[d + 1], self.cond_encoders[d + 1]
+                ),
+            )
+
+        self.encoder_layers = nn.ModuleList(encoder_layers)
+        self.decoder_layers = nn.ModuleList(decoder_layers)
+
+        self.out_proj = nn.Linear(config.d_hidden_start, config.d_input)
+
+        self.scheduler = DDPMScheduler(self.config.num_training_timesteps)
+
+    def forward(
+        self,
+        x: Tensor,  # <B, D>
+        timestep: torch.Tensor,  # <B> or scalar
+        conditioning: torch.Tensor | None = None,  # <B, E>
+        cond_drop_prob: float = 0,
+    ) -> Tensor:
+        x = self.input_proj(x)
+        batch_size = x.size(0)
+
+        cond_keep_mask = torch.rand(batch_size) >= cond_drop_prob
+        cond_keep_mask = cond_keep_mask.unsqueeze(1).to(x.device)
+
+        if timestep.dim() == 0:
+            time_is_scalar = True
+            timestep = timestep.view(1)
+        elif timestep.size(0) != x.size(0):
+            raise ValueError(
+                f"Expected batch size {batch_size}, received timestep with batch size {timestep.size(0)}"
+            )
+        else:
+            time_is_scalar = False
+
+        if conditioning is not None and conditioning.size(0) != batch_size:
+            raise ValueError(
+                f"Expected batch size {batch_size}, received conditioning with batch size {conditioning.size(0)}"
+            )
+
+        t = self.time_proj(timestep)
+
+        if time_is_scalar:
+            t = t.expand(batch_size, -1)
+
+        activations = []
+        for encoder_layer in self.encoder_layers:
+            activations.append(x)
+            x = encoder_layer(x, t, conditioning, cond_keep_mask=cond_keep_mask)
+
+        for decoder_layer, activation in zip(
+            self.decoder_layers, reversed(activations)
+        ):
+            x = (
+                decoder_layer(x, t, conditioning, cond_keep_mask=cond_keep_mask)
+                + activation
+            )
+
+        x = self.out_proj(x)
+
+        return x
+
+    @torch.no_grad()
+    def generate(
+        self,
+        num_steps: int | None = 50,
+        guidance_scale: float = 5.0,
+        conditioning: Tensor | None = None,
+        batch_size: int | None = None,
+        scheduler_timesteps: list[int] | None = None,
+        scheduler_kwargs: dict[str, Any] = {},
+        generator: torch.Generator | None = None,
+        use_progress_bar: bool = False,
+    ) -> Tensor:
+        device = self._dummy_param.device
+
+        # Validate inputs
+        if conditioning is None:
+            if batch_size is None:
+                raise ValueError(
+                    f"Need to define either 'conditioning' or 'batch_size'"
+                )
+
+            latent_dim = self.config.d_embed
+
+        else:
+            batch_size = conditioning.size(0)
+            latent_dim = conditioning.size(1)
+
+            if latent_dim != self.config.d_embed:
+                raise ValueError(
+                    f"Expected conditioning with dim {self.config.d_embed}, received dim {latent_dim}"
+                )
+
+        if num_steps is None and scheduler_timesteps is None:
+            raise ValueError(
+                f"Need to define either 'num_steps' or 'scheduler_timesteps'"
+            )
+
+        if scheduler_timesteps is not None:
+            num_steps = None
+
+        # Prepare latents and timesteps
+        self.scheduler.set_timesteps(
+            num_inference_steps=num_steps,
+            timesteps=scheduler_timesteps,
+            device=device,
+            **scheduler_kwargs,
+        )
+        timesteps = self.scheduler.timesteps
+        num_steps = len(timesteps)
+
+        latent = torch.randn(batch_size, latent_dim, generator=generator, device=device)
+
+        # Reverse diffusion
+        for t in tqdm.tqdm(
+            timesteps, desc="Denoising latent", disable=not use_progress_bar
+        ):
+            if conditioning is None or guidance_scale == 0:
+                noise_pred = self.forward(latent, t)
+
+            else:  # Classifier Free Guidance
+                noise_pred_cond = self.forward(latent, t, conditioning)
+                noise_pred_uncond = self.forward(latent, t)
+                noise_pred = (
+                    noise_pred_uncond
+                    + (noise_pred_cond - noise_pred_uncond) * guidance_scale
+                )
+
+            latent = self.scheduler.step(
+                noise_pred, int(t), latent, generator=generator
+            ).prev_sample
+
+        return latent

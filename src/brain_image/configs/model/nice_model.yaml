@@ -1,17 +1,17 @@
 # NICE Model Configuration
 
 # Model architecture and reconstruction settings
-#align_target_model: "unaligned_synclr_vitb16"
-align_target_model: "clip_vith14"
-low_recon_model: "sd_variations_v2"
-#high_recon_model: "clip_vitl14"
-high_recon_model: "clip_vith14"
-#eeg_encoder_model: "nice"
-eeg_encoder_model: "atms"
+#align_target_encoder: "unaligned_synclr_vitb16"
+align_target_encoder: "clip_vith14"
+recon_latent_encoder: "sd_variations_v2"
+prior_img_encoder: "clip_vith14"
+#eeg_encoder: "nice"
+eeg_encoder: "atms"
 
 do_align: true
-do_high_recon: false
-do_low_recon: false
+do_recon: false
+do_recon_low: false
+
 prior_debug_mode: false
 log_gradients: false
 
@@ -23,7 +23,7 @@ eeg_latent_dim: 1440
 #img_latent_dim: 768
 img_latent_dim: 1024
 
-skip_eval_first_epoch: true
+skip_eval_first_epoch: False
 full_eval_every_epochs: 1
 
 encoder_lr: 3e-4

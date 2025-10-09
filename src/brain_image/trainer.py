@@ -281,13 +281,13 @@ class EEGAlignTrainer(Trainer):
 
         if self.model.config.do_align:
             tags.append("align")
-        if self.model.config.do_high_recon:
+        if self.model.config.do_recon:
             tags.append("recon")
-        if self.model.config.do_low_recon:
+        if self.model.config.do_recon_low:
             tags.append("lowrec")
 
-        tags.append(self.model.config.align_target_model)
-        tags.append(self.model.config.eeg_encoder_model)
+        tags.append(self.model.config.align_target_encoder)
+        tags.append(self.model.config.eeg_encoder)
 
         return tags
 
