@@ -32,7 +32,7 @@ def test_nice_trainer_checkpoint_saving_and_loading(mock_nice_trainer):
 
         # Create a new trainer and load the checkpoint
         new_trainer = EEGAlignTrainer(
-            config=trainer_config,
+            trainer_config=trainer_config,
             model_config=nice_config,
             dataset_config=dataset_config,
         )

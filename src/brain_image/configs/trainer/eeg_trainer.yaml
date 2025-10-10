@@ -1,22 +1,15 @@
-# NICE Trainer Configuration
-
-# Training settings
 run_name: "train_eeg"
 
-# Model compilation and initialization
 compile_model: true
 init_weights: true
 debug_mode: false
 
 dtype: "float32"
 
-eeg_encoder_path: null
-
-# Logging and checkpointing
 log_dir: logs
 checkpoint_dir: null
 enable_barebones: false
-checkpoint_monitor: "VAL__loss"
+checkpoint_monitor: "val/loss"
 checkpoint_monitor_mode: "min"
 checkpoint_monitor_early_stop: 20
 
@@ -29,12 +22,10 @@ enable_model_summary: true
 save_checkpoints: true
 save_top_k: 1
 
-# Wandb settings
 enable_wandb: true
 wandb_project: "brain-image"
 wandb_entity: null  # Set to your wandb username or team name
 wandb_log_model: true
 wandb_mode: "online"
 
-# Device settings
 accelerator: "auto" 

@@ -1,12 +1,15 @@
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+import io
 import logging
 from pathlib import Path
 from typing import Any, Mapping
 import dotenv
 from huggingface_hub import login
+from pydantic import BaseModel
 import torch
 import os
+import PIL.Image
 
 import matplotlib.pyplot as plt
 
@@ -37,6 +40,15 @@ def gather_dataloader(
 
     return all_samples
 
+def current_fig_to_img():
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches='tight', dpi=300)
+    plt.close()
+
+    buf.seek(0)
+    img = PIL.Image.open(buf).convert("RGB")
+
+    return img
 
 def investigate_tensor(name: str, v: torch.Tensor) -> None:
     items = {
@@ -205,6 +217,40 @@ def setup():
     logging.info(f"Using directory: {os.getcwd()}")
     login(token=tok)
 
+def flatten_configs(configs: dict[str, Any] | BaseModel, prefix="") -> dict[str, Any]:
+    flat_configs = {}
+
+    if isinstance(configs, BaseModel):
+        configs = configs.model_dump(mode="json")
+
+    for key, value in configs.items():
+        if isinstance(value, dict):
+            value_dict = value
+            flat_configs[prefix + key] = type(value)
+            flattened_dict = flatten_configs(value_dict, prefix=f"{key}.")
+            flat_configs.update(
+                flattened_dict
+            )
+        else:
+            flat_configs[prefix + key] = value
+
+    return flat_configs
+
+def init_wandb():
+    try:
+        import wandb
+
+        if "WANDB_API_KEY" in os.environ:
+            logging.info("WANDB_API_KEY found, attempting to login to wandb...")
+            wandb.login(key=os.environ["WANDB_API_KEY"])
+            logging.info("Successfully logged in to wandb")
+        else:
+            logging.warning("WANDB_API_KEY not found in environment")
+    except ImportError:
+        logging.warning("wandb not available")
+    except Exception as e:
+        logging.warning(f"Failed to login to wandb: {e}")
+
 
 def get_mean_gradients(model: torch.nn.Module) -> torch.Tensor | None:
     grads = [
@@ -254,6 +300,7 @@ class NormDirLen:
     norm: torch.Tensor
     dir: torch.Tensor
     len: torch.Tensor
+
 
 def get_norm_dir_len(vec: torch.Tensor, eps: float = 1e-8) -> NormDirLen:
     norm = vec.norm(dim=-1, keepdim=True).detach()

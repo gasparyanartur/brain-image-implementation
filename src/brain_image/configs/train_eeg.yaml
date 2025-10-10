@@ -1,0 +1,8 @@
+defaults:
+  - dataset: eeg_dataset
+  - model: eeg_model
+  - trainer: eeg_trainer
+  - _self_
+
+checkpoint_path: null
+resume_training: false

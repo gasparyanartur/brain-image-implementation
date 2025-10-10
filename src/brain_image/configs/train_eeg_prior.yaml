@@ -1,0 +1,36 @@
+defaults:
+  - dataset: eeg_dataset
+  - model: eeg_model
+  - trainer: eeg_trainer
+  - _self_
+
+model:
+  do_align: false
+  do_recon: true
+  do_recon_low: false
+  eeg_encoder_path: checkpoints/align-atms-clip_vith14-local-train/epoch_16-loss_0.2161.ckpt
+
+  #encoder_lr: 1e-7
+  #encoder_min_lr: 1e-8
+  encoder_warmup_epochs: 1
+  #encoder_delay_epochs: 100
+
+  encoder_delay_epochs: 0
+  encoder_lr: 3e-4
+  encoder_min_lr: 1e-7
+
+  prior_lr: 1e-3
+  prior_min_lr: 1e-5
+  prior_warmup_epochs: 1
+  prior_delay_epochs: 0
+
+  max_epochs: 150
+
+trainer:
+  checkpoint_monitor_early_stop: 50
+
+dataset:
+  batch_size: 128
+
+checkpoint_path: null
+resume_training: false

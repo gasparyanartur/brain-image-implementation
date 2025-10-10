@@ -14,7 +14,7 @@ from brain_image.trainer import EEGAlignTrainer
 if str(GlobalConfig.WORKSPACE_DIR) not in sys.path:
     sys.path.insert(0, str(GlobalConfig.WORKSPACE_DIR))
 
-from scripts.train_nice import train_nice
+from scripts.train_eeg import train_nice
 
 
 train_configs = {
@@ -78,7 +78,7 @@ def train_with_sweep_config():
     try:
         # Create trainer with the properly configured components
         trainer = EEGAlignTrainer(
-            config=new_train_configs["trainer"],
+            trainer_config=new_train_configs["trainer"],
             model_config=new_train_configs["model"],
             dataset_config=new_train_configs["dataset"],
         )

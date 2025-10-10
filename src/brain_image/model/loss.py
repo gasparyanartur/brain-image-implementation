@@ -7,9 +7,11 @@ class CLIPLoss(nn.Module):
         super().__init__()
         self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / init_temperature)))
         self.max_scale = max_scale
+        self.loss_func = nn.CrossEntropyLoss()
+
 
     def forward(
-        self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor | None = None, ignore_mask: torch.Tensor | None = None
+        self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if z_e.size(0) != z_i.size(0):
             raise ValueError(f"z_e and z_i should have the same batch size, but got {z_e.size(0)} and {z_i.size(0)}")
@@ -23,20 +25,13 @@ class CLIPLoss(nn.Module):
         sim = z_e @ z_i.T 
         sim_scaled = sim * self.logit_scale.exp().clamp(max=self.max_scale)
 
-        #lfunc = torch.nn.functional.binary_cross_entropy_with_logits
-        lfunc = torch.nn.functional.cross_entropy
-        loss_e = lfunc(
-            sim_scaled, labels, reduction="none"
+        loss_e = self.loss_func(
+            sim_scaled, labels
         )
-        loss_i = lfunc(
-            sim_scaled.T, labels, reduction = "none" 
+        loss_i = self.loss_func(
+            sim_scaled.T, labels
         )
         loss = (loss_e + loss_i) * 0.5
-
-        #if ignore_mask is not None:
-        #    loss[ignore_mask] = 0
-
-        loss = loss.mean()
 
         return loss, sim
 

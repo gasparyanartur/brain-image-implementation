@@ -1,0 +1,22 @@
+defaults:
+  - dataset: eeg_dataset
+  - model: nice_model
+  - trainer: nice_trainer
+  - _self_
+
+model:
+  do_align: true
+  do_recon: false
+  do_recon_low: false
+
+  encoder_lr: 3e-4
+  encoder_min_lr: 1e-5
+  encoder_warmup_epochs: 1
+
+  max_epochs: 40
+
+trainer:
+  checkpoint_monitor_early_stop: 10
+
+checkpoint_path: null
+resume_training: false

@@ -8,13 +8,9 @@ from pydantic import BaseModel
 import torch
 
 
-DEFAULT_BATCH_SIZE = 32
-
-
 class BaseConfig(BaseModel, ABC):
     @classmethod
     def from_hydra_config(cls, cfg):
-        """Create an instance of the config class from a Hydra config."""
         return cls(**cfg)
 
 

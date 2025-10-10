@@ -14,8 +14,8 @@ subs: [8]
 
 # DataLoader parameters
 batch_size: 256
-val_batch_size: 256
-eval_batch_size: 256
+val_batch_size: null
+test_batch_size: null
 shuffle_train: true
 limit_train_size: 1.0
 limit_val_size: 1.0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 import functools
 import hashlib
@@ -10,33 +11,81 @@ from typing import Iterable, Literal, TypedDict, cast
 
 import numpy as np
 import torch
-from torch import Tensor, manual_seed
-from torch.utils.data import Dataset, random_split, Subset
+from torch import Tensor
+from torch.utils.data import Dataset, Subset
 import torchvision
 from torchvision.transforms import v2 as tv2
 from lightning.pytorch import LightningDataModule
 import tqdm
 
-from brain_image.configs import DEFAULT_BATCH_SIZE, BaseConfig, GlobalConfig
+from brain_image.configs import BaseConfig, GlobalConfig
 import multiprocessing as mp
 
 
+class DataConfig(BaseConfig, ABC):
+    data_path: Path
 
-def encode_keys(*keys: str, use_encrypt: bool = False) -> str:
-    if use_encrypt:
-        h = hashlib.sha1()
-        for key in keys:
-            h.update(key.encode())
-        return h.hexdigest()
-    else:
-        return "/".join(keys)
+    batch_size: int = 128
+    val_batch_size: int | None = None
+    test_batch_size: int | None = None
+
+    limit_train_size: float = 1.0
+    limit_val_size: float = 1.0
+    limit_test_size: float = 1.0
+
+    num_workers: int | None = None
+
+    def create_datamodule(self) -> DataModule:
+        raise NotImplementedError
+
+    def get_shuffle(self, split: Literal["train", "val", "test"]):
+        match split:
+            case "train":
+                return True
+            case "val":
+                return False
+            case "test":
+                return False
+            
+    def get_limit_size(self, split: Literal["train", "val", "test"]):
+        match split:
+            case "train":
+                return self.limit_train_size
+            case "val":
+                return self.limit_val_size
+            case "test":
+                return self.limit_test_size
+
+    def get_batch_size(self, split: Literal["train", "val", "test"]):
+        match split:
+            case "train":
+                return self.batch_size
+            case "val":
+                return self.val_batch_size or self.batch_size
+            case "test":
+                return self.test_batch_size or self.batch_size
+
+
+class EEGDatasetConfig(DataConfig):
+    data_path: Path = GlobalConfig.DATA_DIR / "things-eeg2"
+
+    imgs_dir: str = "imgs"
+    eeg_dir: str = "prepared"
+
+    train_imgs_per_concept: int = 10
+    test_imgs_per_concept: int = 1
+    subs: list[int] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    preload_cache: bool = True
+
+    seed: int = 42
 
 
 class TensorCache:
     def __init__(
         self,
         cache_path: Path = Path("cache/tensorcache"),
-        memory_cache_size: int = 65536,
+        memory_cache_size: int = 512000,
         use_encrypt: bool = False,
         overwrite: bool = True,
     ):
@@ -50,7 +99,7 @@ class TensorCache:
         self.overwrite = overwrite
 
     def _get_tensor_path(self, *keys: str) -> Path:
-        encoded_path = encode_keys(*keys, use_encrypt=self.use_encrypt)
+        encoded_path = self._encode_keys(*keys, use_encrypt=self.use_encrypt)
         full_path = self.cache_path / encoded_path
         return full_path.with_suffix(".pt")
 
@@ -83,170 +132,139 @@ class TensorCache:
             oldest_key = self.memory_cache_keys.pop(0)
             self.memory_cache.pop(oldest_key)
 
-
-class DataConfig(BaseConfig, ABC):
-    data_path: Path
-    batch_size: int = DEFAULT_BATCH_SIZE
-    val_batch_size: int = DEFAULT_BATCH_SIZE
-    eval_batch_size: int = DEFAULT_BATCH_SIZE
-    shuffle_train: bool = True
-    limit_train_size: float = 1.0
-    limit_val_size: float = 1.0
-    limit_test_size: float = 1.0
-    num_workers: int | None  = None
-
-    def create_datamodule(self) -> DataModule:
-        raise NotImplementedError
+    @staticmethod
+    def _encode_keys(*keys: str, use_encrypt: bool = False) -> str:
+        if use_encrypt:
+            h = hashlib.sha1()
+            for key in keys:
+                h.update(key.encode())
+            return h.hexdigest()
+        else:
+            return "/".join(keys)
 
 
-class DataModule(LightningDataModule):
+class DataModule(LightningDataModule, ABC):
     def __init__(self, config: DataConfig):
         super().__init__()
 
         self.config = config
+        self.num_batches: dict[str, int | None] = {"train": None, "val": None, "test": None}
+
+        self.datasets: dict[str, Dataset] = {split: self._create_dataset(split) for split in ["train", "val", "test"]}
+        self.dataloaders: dict[str, torch.utils.data.DataLoader | None] = {}
 
     @abstractmethod
     def get_metadata(self) -> dict:
         raise NotImplementedError
 
-    @abstractmethod
-    def get_train_dataset(self) -> torch.utils.data.Dataset:
-        raise NotImplementedError
+    def get_dataloader(self, split: Literal["train", "val", "test"]):
+        if (dataloader := self.dataloaders.get(split)) is not None:
+            return dataloader
 
-    @abstractmethod
-    def get_val_dataset(self) -> torch.utils.data.Dataset:
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_test_dataset(self) -> torch.utils.data.Dataset:
-        raise NotImplementedError
+        dataloader = self._create_dataloader(split)
+        self.dataloaders[split] = dataloader
+        return dataloader
 
     def train_dataloader(self):
-        return self._create_dataloader(self.get_train_dataset())
+        return self.get_dataloader("train")
 
     def val_dataloader(self):
-        return self._create_dataloader(self.get_val_dataset(), shuffle=False)
+        return self.get_dataloader("val")
 
     def test_dataloader(self):
-        return self._create_dataloader(self.get_test_dataset(), shuffle=False)
+        return self.get_dataloader("test")
 
-    def _create_dataloader(self, dataset, shuffle=True, batch_size=None):
-        if batch_size is None:
-            batch_size = self.config.batch_size
-        return torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=shuffle, 
-        )
+    def get_num_batches(self, split: Literal["train", "val", "test"]) -> int:
+        if (num_batches := self.num_batches.get(split)) is not None:
+            return num_batches
+
+        dataloader = self.get_dataloader(split)
+        num_batches = len(dataloader)
+        self.num_batches[split] = num_batches
+
+        return num_batches
+
+    def _get_dataset(self, split: Literal["train", "val", "test"]) -> Dataset:
+        if (dataset := self.datasets.get(split)) is not None:
+            return dataset
+
+        dataset = self._create_dataset(split)
+        self.datasets[split] = dataset
+        return dataset
+
+    @abstractmethod
+    def _create_dataset(self, split) -> Dataset:
+        raise NotImplementedError
+
+    @abstractmethod
+    def _create_dataloader(self, split) -> torch.utils.data.DataLoader:
+        raise NotImplementedError
 
 
-class EEGDatasetConfig(DataConfig):
-    data_path: Path = GlobalConfig.DATA_DIR / "things-eeg2"
 
-    imgs_dir: str = "imgs"
-    eeg_dir: str = "prepared"
-
-    train_imgs_per_concept: int = 10
-    test_imgs_per_concept: int = 1
-    subs: list[int] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+class EmbeddingsMap(TypedDict):
+    align_img_latent: str | None
+    prior_img_latent: str | None
+    recon_latent: str | None
 
 
-def get_subset_dataset(
-    rng: np.random.Generator, dataset: Dataset, subset_frac: float
-) -> Dataset:
-    subset_size = int(len(dataset) * subset_frac)
-    indices = list(range(len(dataset)))
-    subset_indices = rng.choice(indices, subset_size, replace=False)
-    return Subset(dataset, subset_indices.tolist())
+class SampleType(TypedDict):
+    img_path: str
+    idx: int
+    sub: int
+    eeg_data: torch.Tensor
+    align_img_latent: torch.Tensor | None
+    prior_img_latent: torch.Tensor | None
+    recon_img_latent: torch.Tensor | None
 
 
 class EEGDataModule(DataModule):
-    def __init__(self, config: EEGDatasetConfig):
-        super().__init__(config)
+    def __init__(
+        self,
+        config: EEGDatasetConfig,
+        tensor_cache: TensorCache,
+        embeddings_map: EmbeddingsMap,
+    ):
         self.config: EEGDatasetConfig = config
-        self.rng = np.random.default_rng(42)
+        self.rng = np.random.default_rng(config.seed)
+        self.tensor_cache = tensor_cache
+        self.embeddings_map = embeddings_map
+        super().__init__(config)
 
     def get_metadata(self) -> dict:
         return {}
 
-    def get_train_dataset(self) -> EEGDataset:
-        dataset = EEGDataset(
+    def _create_dataset(
+        self, split: Literal["train", "val", "test"]
+    ) -> EEGDataset:
+        return EEGDataset(
             self.config,
-            split="train",
-        )
-
-        # Apply train size limit if specified
-        if self.config.limit_train_size < 1.0:
-            dataset = get_subset_dataset(
-                self.rng, dataset, self.config.limit_train_size
-            )
-            logging.info(
-                f"Limited train dataset to {len(dataset)} samples ({self.config.limit_train_size * 100:.1f}%)"
-            )
-
-        return dataset
-
-    def get_val_dataset(self) -> EEGDataset:
-        dataset = EEGDataset(self.config, split="test")
-
-        # Apply validation size limit if specified
-        if self.config.limit_val_size < 1.0:
-            dataset = get_subset_dataset(self.rng, dataset, self.config.limit_val_size)
-            logging.info(
-                f"Limited validation dataset to {len(dataset)} samples ({self.config.limit_val_size * 100:.1f}%)"
-            )
-
-        return dataset
-
-    def get_test_dataset(self) -> EEGDataset:
-        dataset = EEGDataset(self.config, split="test")
-
-        # Apply test size limit if specified
-        if self.config.limit_test_size < 1.0:
-            dataset = get_subset_dataset(self.rng, dataset, self.config.limit_test_size)
-            logging.info(
-                f"Limited test dataset to {len(dataset)} samples ({self.config.limit_test_size * 100:.1f}%)"
-            )
-
-        return dataset
-
-    def train_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
-        return self._create_dataloader(
-            self.get_train_dataset(),
-            batch_size=self.config.batch_size,
-            shuffle=self.config.shuffle_train,
-            drop_last=True,
-            **kwargs,
-        )
-
-    def val_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
-        return self._create_dataloader(
-            self.get_val_dataset(),
-            batch_size=self.config.val_batch_size,
-            shuffle=False,
-            **kwargs,
-        )
-
-    def test_dataloader(self, **kwargs) -> torch.utils.data.DataLoader:
-        return self._create_dataloader(
-            self.get_test_dataset(),
-            batch_size=self.config.val_batch_size,
-            shuffle=False,
-            **kwargs,
+            split=split,
+            tensor_cache=self.tensor_cache,
+            embeddings_map=self.embeddings_map,
+            limit_size=self.config.get_limit_size(split),
+            preload_cache=self.config.preload_cache
         )
 
     def _create_dataloader(
         self,
-        dataset: EEGDataset,
-        shuffle: bool = True,
-        batch_size: int | None = None,
+        split: Literal["train", "val", "test"],
         **kwargs,
     ) -> torch.utils.data.DataLoader:
-        if batch_size is None:
-            batch_size = self.config.batch_size
+
+        match split:
+            case "train":
+                shuffle = True
+                
+            case "val":
+                shuffle = False
+
+            case "test":
+                shuffle = False 
 
         num_workers = self.config.num_workers or mp.cpu_count()
-
         dataloader_args = {
-            "batch_size": batch_size,
+            "batch_size": self.config.get_batch_size(split),
             "shuffle": shuffle,
             "num_workers": num_workers,
             "pin_memory": True,
@@ -254,6 +272,7 @@ class EEGDataModule(DataModule):
         }
         dataloader_args.update(kwargs)
 
+        dataset = self.datasets[split]
         return torch.utils.data.DataLoader(
             dataset,
             **dataloader_args,
@@ -264,22 +283,45 @@ class EEGDataset(Dataset):
     def __init__(
         self,
         config: EEGDatasetConfig,
-        split: Literal["train", "test"],
+        split: Literal["train", "val", "test"],
+        tensor_cache: TensorCache,
+        embeddings_map: EmbeddingsMap = cast(EmbeddingsMap, {}),
+        limit_size: float = 1.0,
+        preload_cache: bool = True,
     ):
         self.config = config
-        self.split = split
-
-        self.prepared_data: list[dict] = []
+        self.split: Literal["train", "val", "test"] = split
+        self.tensor_cache = tensor_cache
+        self.embeddings_map = embeddings_map
+        self.limit_size = limit_size
+ 
+        logging.info(f"Loading {split} dataset")
+        prepared_data: list[dict] = []
+        split_dir = "train" if split == "train" else "test"
         for sub in self.config.subs:
-            self.prepared_data.extend(
+            prepared_data.extend(
                 torch.load(
                     self.config.data_path
                     / self.config.eeg_dir
                     / f"sub-{sub:02}"
-                    / f"{split}.pt"
+                    / f"{split_dir}.pt"
                 )
             )
-        
+        self.prepared_data = prepared_data
+        logging.info(f"Loaded {len(self.prepared_data)} samples")
+
+        if self.limit_size < 1.0:
+            logging.info(f"Limiting dataset size to {self.limit_size * 100:.1f}%")
+            idxs = np.random.choice(
+                len(self.prepared_data),
+                int(len(self.prepared_data) * self.limit_size),
+                replace=False,
+            )
+            self.prepared_data = [self.prepared_data[i] for i in idxs]
+
+        if preload_cache:
+            self._preload_cache()
+
 
     def __len__(self):
         return len(self.prepared_data)
@@ -287,37 +329,41 @@ class EEGDataset(Dataset):
     def __getitem__(self, idx: int):
         item = self.prepared_data[idx]
 
-        return {
+        sample = {
             "img_path": str(item["img_path"]),
             "eeg_data": item["eeg"],
             "idx": item["idx"],
             "sub": item["sub"],
+            **self._get_embeddings(item["img_path"])
         }
 
+        return sample
 
-def prepare_datasets(
-    config: EEGDatasetConfig,
-    seed: int = 42,
-    train_val_split: float = 0.8,
-    use_test_as_val: bool = True,
-) -> tuple[EEGDataset, EEGDataset, EEGDataset]:
-    train_dataset = EEGDataset(config, split="train")
-    test_dataset = EEGDataset(config, split="test")
+    def _get_embeddings(self, img_path: Path):
+        return {
+            key: self._get_image_latent_from_cache(img_path, str(value), self.split)
+            for key, value in self.embeddings_map.items()
+            if value is not None
+        }
 
-    if use_test_as_val:
-        val_dataset = EEGDataset(config, split="test")
+    def _get_image_latent_from_cache(
+        self, img_path: Path, model_name: str, split: Literal["train", "val", "test"]
+    ) -> torch.Tensor:
+        split = "train" if split == "train" else "test"
+        return self.tensor_cache.get(str(img_path), model_name, split)
 
-    else:
-        split_rng = manual_seed(seed)
-        train_dataset, val_dataset = random_split(
-            train_dataset, [train_val_split, 1 - train_val_split], generator=split_rng
-        )
-
-    train_dataset = cast(EEGDataset, train_dataset)
-    val_dataset = cast(EEGDataset, val_dataset)
-    test_dataset = cast(EEGDataset, test_dataset)
-
-    return train_dataset, val_dataset, test_dataset
+    def _preload_cache(self, parallel: bool = True):
+        if parallel:
+            with ThreadPoolExecutor() as executor:
+                logging.info(
+                    f"Preloading latents in parallel with {executor._max_workers} workers"
+                )
+                outs = executor.map(self.__getitem__, range(len(self)))
+                num_items = sum(1 for _ in outs)
+                logging.info(f"Preloaded {num_items} latents")
+        else:
+            for i in tqdm.tqdm(range(len(self)), desc="Preloading latents"):
+                self.__getitem__(i)
 
 
 def load_image_from_path(path: Path, mode: str | None = None) -> Tensor:
@@ -332,17 +378,26 @@ def load_image_from_path(path: Path, mode: str | None = None) -> Tensor:
         case _:
             raise ValueError(f"Unknown mode: {mode}")
 
-
     img = torchvision.io.decode_image(str(path), mode=mode_value)
     return img
 
 
-def batch_load_images(paths: Iterable[Path], parallel: bool = False, progressbar: bool = False, mode: str | None = None) -> Tensor:
+def batch_load_images(
+    paths: Iterable[Path],
+    parallel: bool = False,
+    progressbar: bool = False,
+    mode: str | None = None,
+) -> Tensor:
     if parallel:
         with mp.Pool() as pool:
             imgs = pool.map(functools.partial(load_image_from_path, mode=mode), paths)
     else:
-        imgs = [load_image_from_path(path, mode=mode) for path in tqdm.tqdm(list(paths), disable=not progressbar, desc="Loading images")]
+        imgs = [
+            load_image_from_path(path, mode=mode)
+            for path in tqdm.tqdm(
+                list(paths), disable=not progressbar, desc="Loading images"
+            )
+        ]
 
     imgs = torch.stack(imgs, dim=0)
     return imgs
@@ -434,7 +489,6 @@ def load_all_eeg_data(
     eeg_paths: list[Path], preprocess_configs: dict | None = None
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
     preprocess_configs = preprocess_configs or {}
-
 
     all_eeg_data = []
     all_idxs = []
