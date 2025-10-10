@@ -286,6 +286,7 @@ class EEGDataset(Dataset):
         split: Literal["train", "val", "test"],
         tensor_cache: TensorCache,
         embeddings_map: EmbeddingsMap = cast(EmbeddingsMap, {}),
+        standardize_embeddings: list[str] = ["prior_img_latent"],
         limit_size: float = 1.0,
         preload_cache: bool = True,
     ):
@@ -293,6 +294,7 @@ class EEGDataset(Dataset):
         self.split: Literal["train", "val", "test"] = split
         self.tensor_cache = tensor_cache
         self.embeddings_map = embeddings_map
+        self.standardize_embeddings = standardize_embeddings
         self.limit_size = limit_size
  
         logging.info(f"Loading {split} dataset")

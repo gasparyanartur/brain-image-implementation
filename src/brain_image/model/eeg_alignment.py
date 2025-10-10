@@ -124,6 +124,12 @@ class EEGAlignmentConfig(BaseConfig):
         "val/prior/loss",
     ]
 
+    embeddings_to_compute_stats: list[str] = ["prior_img_latent"]
+    modules_to_compile: list[str] = [
+        "eeg_encoder",
+        "prior",
+    ]
+
 
 class DataBatchT(TypedDict):
     img_path: list[str] | None
@@ -147,10 +153,6 @@ class EEGAlignmentModel(pl.LightningModule):
         dtype: torch.dtype = DTYPE,
         init_weights: bool = False,
         compile: bool = True,
-        modules_to_compile: list[str] = [
-            "eeg_encoder",
-            "prior",
-        ],
         cache_dir: Path = Path("cache/tensorcache"),
         eeg_encoder_path: Path | None = None,
         **kwargs,
@@ -224,7 +226,7 @@ class EEGAlignmentModel(pl.LightningModule):
 
             logging.info(f"Compiling model with kwargs: {compile_kwargs}")
 
-            for module in modules_to_compile:
+            for module in self.config.modules_to_compile:
                 match module:
                     case "eeg_encoder":
                         if self.eeg_encoder is not None:
@@ -246,11 +248,12 @@ class EEGAlignmentModel(pl.LightningModule):
         )
 
         self.compile: bool = compile
-        self.modules_to_compile: list[str] = modules_to_compile
 
         self.learning_rate_options: list[dict[str, Any]] = []
 
         self.atleast_one_training_step: bool = False
+        self.embedding_stats = self._get_embeddings_stats()
+        
 
     def configure_optimizers(self):
         def _iter_params(*models: nn.Module | None):
@@ -663,10 +666,12 @@ class EEGAlignmentModel(pl.LightningModule):
             target_latent := batch["prior_img_latent"]
         ) is not None, "Prior image latent is not defined"
         assert (
-            eeg_latent := cache["eeg_latent"]
+            eeg_latent_normed := cache["eeg_latent"]
         ) is not None, "Normed eeg latent is not defined"
 
-        target_latent = (target_latent - target_latent.mean(dim=0, keepdim=True)) / target_latent.std(dim=0, keepdim=True)
+        stats = self.embedding_stats["prior_img_latent"]
+        target_latent = (target_latent - stats["mean"].to(target_latent.device)) / stats["std"].to(target_latent.device)
+
         batch_size = target_latent.size(0)
 
         noise = torch.randn_like(target_latent)
@@ -683,7 +688,7 @@ class EEGAlignmentModel(pl.LightningModule):
         noise_pred = self.prior.forward(
             noisy_latent,
             timesteps,
-            eeg_latent,
+            eeg_latent_normed,
             self.config.prior_config.cond_drop_prob,
         )
         prior_loss = (
@@ -836,6 +841,8 @@ class EEGAlignmentModel(pl.LightningModule):
         ).mean()
         metrics.update(
             {
+                "eval/prior/pred_mean": all_data["prior_pred"].mean(dim=0).mean().cpu(),
+                "eval/prior/pred_std": all_data["prior_pred"].std(dim=0).mean().cpu(),
                 "eval/prior/recon_cos": prior_img_latent_cos.cpu(),
                 "eval/prior/pred_len_ratio": (
                     prior_img_latent.len / prior_pred_info.len
@@ -1048,12 +1055,12 @@ class EEGAlignmentModel(pl.LightningModule):
             return None
 
         assert (
-            eeg_latent := all_data.get("eeg_latent")
+            eeg_latent_normed := all_data.get("eeg_latent_normed")
         ) is not None, "EEG latent is not in batch"
 
         device, dtype = self._get_device_dtype()
 
-        n = eeg_latent.size(0)
+        n = eeg_latent_normed.size(0)
         all_prior_preds_ = []
         with tqdm.tqdm(
             total=n,
@@ -1061,8 +1068,7 @@ class EEGAlignmentModel(pl.LightningModule):
             disable=not progress_bar,
         ) as pbar:
             for i in range(0, n, batch_size):
-                eeg_values = eeg_latent[i : i + batch_size].to(device)
-                latent_batch = eeg_values
+                eeg_values = eeg_latent_normed[i : i + batch_size].to(device)
 
                 prior_pred = self.prior.generate(
                     conditioning=eeg_values,
@@ -1070,8 +1076,11 @@ class EEGAlignmentModel(pl.LightningModule):
                     **prior_kwargs,
                 )
 
+                stats = self.embedding_stats["prior_img_latent"]
+                prior_pred = prior_pred * stats["std"].to(prior_pred.device) + stats["mean"].to(prior_pred.device)
+
                 all_prior_preds_.append(prior_pred.detach().cpu())
-                pbar.update(latent_batch.size(0))
+                pbar.update(prior_pred.size(0))
 
         prior_preds = torch.cat(all_prior_preds_, dim=0)
         return prior_preds
@@ -1116,3 +1125,23 @@ class EEGAlignmentModel(pl.LightningModule):
                 pbar.update(len(eeg_latent))
 
         return torch.cat(all_latents, dim=0), torch.cat(all_latents_normed, dim=0)
+
+    @torch.no_grad()
+    def _get_embeddings_stats(self):
+        logging.info(f"Getting embedding stats for {self.config.embeddings_to_compute_stats}")
+        _running_embeddings = {}
+
+        for batch in self.train_dataloader():
+            for emb_name in self.config.embeddings_to_compute_stats:
+                if emb_name not in batch:
+                    continue
+
+                if emb_name not in _running_embeddings:
+                    _running_embeddings[emb_name] = []
+
+                _running_embeddings[emb_name].append(batch[emb_name])
+
+        _running_latents = {k: torch.cat(v, dim=0) for k, v in _running_embeddings.items()}
+        embedding_stats: dict[str, dict[str, torch.Tensor]] = {k: {"mean": v.mean(dim=0), "std": v.std(dim=0)} for k, v in _running_latents.items()}
+        logging.info(f"Finished getting embedding stats")
+        return embedding_stats

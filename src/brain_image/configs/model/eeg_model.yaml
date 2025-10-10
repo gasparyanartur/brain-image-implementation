@@ -10,7 +10,7 @@ do_recon: false
 do_recon_low: false
 
 prior_debug_mode: false
-log_gradients: false
+log_gradients: true
 
 align_loss_type: clip
 
