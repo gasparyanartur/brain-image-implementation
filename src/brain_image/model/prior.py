@@ -529,7 +529,7 @@ def get_activation(name: str):
 class DiffusionPriorConfig:
     d_input: int = 1024
     d_cond: int = 1024
-    d_time: int = 256
+    d_time: int = 512
     d_embed: int = 1024
     d_hidden_start: int = 1024
     d_hidden_scale: float = 0.5
@@ -705,6 +705,8 @@ class SimpleDiffusionPrior(nn.Module):
         generator: torch.Generator | None = None,
         use_progress_bar: bool = False,
     ) -> Tensor:
+        self.eval()
+
         device = self._dummy_param.device
 
         # Validate inputs
@@ -765,3 +767,48 @@ class SimpleDiffusionPrior(nn.Module):
             ).prev_sample
 
         return latent
+
+    def predict_step(self, noisy_latent: Tensor, timestep: Tensor, conditioning: Tensor | None = None, *args, **kwargs) -> Tensor:
+        # x: <B, D>
+        noisy_pred = self.forward(noisy_latent, timestep, conditioning, *args, **kwargs) # <B, D>
+
+        prediction_type = cast(str, self.scheduler.config.prediction_type)   # type: ignore
+        alpha_prod_t = self.scheduler.alphas_cumprod[timestep].unsqueeze(1).expand(-1, noisy_latent.size(1))  # <B, D>
+        beta_prod_t = 1 - alpha_prod_t      # <B, 1>
+
+        match prediction_type:
+            case "epsilon":        
+                clean_pred = (noisy_latent - beta_prod_t**0.5 * noisy_pred) / alpha_prod_t**0.5
+            case "sample":
+                clean_pred = noisy_pred
+            case "v_prediction":
+                clean_pred = (alpha_prod_t**0.5) * noisy_latent - (beta_prod_t**0.5) * noisy_pred
+
+            case _:
+                raise ValueError(
+                    f"prediction_type given as {prediction_type} must be one of `epsilon`, `sample` or"
+                    " `v_prediction`  for the DDPMScheduler."
+                )
+
+        return clean_pred
+    
+    def remove_noise(self, noisy_latent: Tensor, noise_pred: Tensor, timestep: Tensor, *args, **kwargs) -> Tensor:
+        prediction_type = cast(str, self.scheduler.config.prediction_type)   # type: ignore
+        alpha_prod_t = self.scheduler.alphas_cumprod[timestep].unsqueeze(1).expand(-1, noisy_latent.size(1))  # <B, D>
+        beta_prod_t = 1 - alpha_prod_t      # <B, 1>
+
+        match prediction_type:
+            case "epsilon":        
+                clean_pred = (noisy_latent - beta_prod_t**0.5 * noise_pred) / alpha_prod_t**0.5
+            case "sample":
+                clean_pred = noise_pred
+            case "v_prediction":
+                clean_pred = (alpha_prod_t**0.5) * noisy_latent - (beta_prod_t**0.5) * noise_pred
+
+            case _:
+                raise ValueError(
+                    f"prediction_type given as {prediction_type} must be one of `epsilon`, `sample` or"
+                    " `v_prediction`  for the DDPMScheduler."
+                )
+
+        return clean_pred

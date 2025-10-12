@@ -51,7 +51,6 @@ class TrainConfig(BaseConfig):
 
 class EEGAlignTrainerConfig(TrainConfig):
     run_name: str = "eeg_alignment"
-    num_epochs: int = 100
 
     compile_model: bool = True
     init_weights: bool = False

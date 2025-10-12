@@ -8,29 +8,34 @@ model:
   do_align: false
   do_recon: true
   do_recon_low: false
-  eeg_encoder_path: checkpoints/align-atms-clip_vith14-local-train/epoch_16-loss_0.2161.ckpt
+  #eeg_encoder_path: checkpoints/align-atms-clip_vith14-local-train/train_eeg-epoch_37-val-loss_0.2236.ckpt
+  eeg_encoder_path: null
 
-  encoder_lr: 1e-5
-  encoder_min_lr: 1e-8
-  encoder_warmup_epochs: 1
-  encoder_delay_epochs: 50
+  encoder_lr: 1e-3
+  encoder_min_lr: 1e-7
+  encoder_warmup_epochs: 5
+  encoder_delay_epochs: 0
+
+  modules_to_train:
+    - eeg_encoder
+    - prior
 
   #encoder_delay_epochs: 0
   #encoder_lr: 3e-4
   #encoder_min_lr: 1e-7
 
   prior_lr: 1e-3
-  prior_min_lr: 1e-5
-  prior_warmup_epochs: 1
+  prior_min_lr: 1e-7
+  prior_warmup_epochs: 5
   prior_delay_epochs: 0
 
-  max_epochs: 200
+  max_epochs: 500
 
 trainer:
-  checkpoint_monitor_early_stop: 200
+  checkpoint_monitor_early_stop: 150
 
 dataset:
-  batch_size: 128
+  batch_size: 1024
   val_batch_size: 256
   test_batch_size: 256
 
