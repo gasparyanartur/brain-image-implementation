@@ -115,5 +115,4 @@ if __name__ == "__main__":
     )
 
     args = Arguments(**vars(parser.parse_args()))
-    print(args.subs)
     main(args)

@@ -1,15 +1,24 @@
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
 defaults:
   - dataset: eeg_dataset
   - model: eeg_model
   - trainer: eeg_trainer
+  - wandb: wandb
+  - override hydra/job_logging: disabled
+  - override hydra/hydra_logging: disabled
   - _self_
 
 model:
   do_align: false
   do_recon: true
   do_recon_low: false
-  #eeg_encoder_path: checkpoints/align-atms-clip_vith14-local-train/train_eeg-epoch_37-val-loss_0.2236.ckpt
+  
   eeg_encoder_path: null
+  #eeg_encoder_path: checkpoints/align-atms-clip_vith14-local-train/train_eeg-epoch_37-val-loss_0.2236.ckpt
 
   encoder_lr: 1e-3
   encoder_min_lr: 1e-7
@@ -30,9 +39,11 @@ model:
   prior_delay_epochs: 0
 
   max_epochs: 500
+  #max_epochs: 150
 
 trainer:
   checkpoint_monitor_early_stop: 150
+
 
 dataset:
   batch_size: 1024

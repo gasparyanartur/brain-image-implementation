@@ -112,6 +112,7 @@ class EEGAlignmentConfig(BaseConfig):
     weight_decay: float = 0.01
 
     debug_metrics: bool = False
+    eeg_encoder_path: Path | None = None
 
     max_epochs: int = 100
 
@@ -210,6 +211,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 "Cannot do low level reconstruction in without high level reconstruction"
             )
 
+        eeg_encoder_path = eeg_encoder_path or self.config.eeg_encoder_path
         self.eeg_encoder = create_eeg_encoder(
             self.config.eeg_encoder,
             checkpoint_path=eeg_encoder_path,

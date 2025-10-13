@@ -8,11 +8,19 @@ import torch
 from torch.utils.data import DataLoader
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
-from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger
+from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger, CSVLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
 from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
 from brain_image.utils import get_dtype, init_wandb
+
+class WandbConfig(BaseConfig):
+    enabled: bool = True
+    project: str = "brain-image"
+    entity: Optional[str] = None
+    log_model: bool = False
+    wandb_tags: List[str] = []
+    mode: Literal["online", "offline"] = "online"
 
 
 class TrainConfig(BaseConfig):
@@ -23,7 +31,6 @@ class TrainConfig(BaseConfig):
     debug_mode: bool = False
 
     log_dir: Path = Path("logs")
-    checkpoint_dir: Path | None = None
     enable_barebones: bool = False
     checkpoint_monitor: str = "val/loss"
     checkpoint_monitor_mode: Literal["min", "max"] = "max"
@@ -39,12 +46,7 @@ class TrainConfig(BaseConfig):
     save_checkpoints: bool = True
     save_top_k: int = 1
 
-    enable_wandb: bool = True
-    wandb_project: str = "brain-image"
-    wandb_entity: Optional[str] = None
-    wandb_log_model: bool = False
-    wandb_tags: List[str] = []
-    wandb_mode: Literal["online", "offline"] = "online"
+    wandb: WandbConfig = WandbConfig()
 
     accelerator: str | None = None
 
@@ -67,7 +69,7 @@ class Trainer:
         self.pl_trainer = self.create_pl_trainer()
 
     def get_tags(self):
-        wandb_tags = ["train", *self.config.wandb_tags]
+        wandb_tags = ["train", *self.config.wandb.wandb_tags]
 
         if "SLURM_JOB_ID" in os.environ:
             wandb_tags.append("slurm")
@@ -119,6 +121,12 @@ class Trainer:
         tags = sorted(self.get_tags())
 
         loggers.append(
+            CSVLogger(
+                save_dir=self.config.log_dir,
+                name="-".join(tags),
+            )
+        )
+        loggers.append(
             TensorBoardLogger(
                 save_dir=self.config.log_dir,
                 name="-".join(tags),
@@ -126,17 +134,17 @@ class Trainer:
             )
         )
 
-        if self.config.enable_wandb:
+        if self.config.wandb.enabled:
             init_wandb()
 
             name = self.get_train_title()
             wandb_logger = WandbLogger(
-                project=self.config.wandb_project,
-                entity=self.config.wandb_entity,
+                project=self.config.wandb.project,
+                entity=self.config.wandb.entity,
                 name=name,
-                log_model=self.config.wandb_log_model,
+                log_model=self.config.wandb.log_model,
                 tags=tags,
-                offline=self.config.wandb_mode == "offline",
+                offline=self.config.wandb.mode == "offline",
             )
             loggers.append(wandb_logger)
 

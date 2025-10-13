@@ -1,18 +1,14 @@
-# EEG Dataset Configuration
-
-# Data paths
 data_path: data/things-eeg2
-imgs_dir: imgs
-eeg_dir: prepared
+imgs_dir: imgs    # Relative to data_path
+prepared_eeg_dir: prepared
 latents_dir: img-latents
+cachedir: cache/tensorcache
 
-# Dataset parameters
 train_imgs_per_concept: 10
 test_imgs_per_concept: 1
 #subs: [1,2,3,4,5,6,7,8,9,10]
 subs: [8]
 
-# DataLoader parameters
 batch_size: 256
 val_batch_size: null
 test_batch_size: null

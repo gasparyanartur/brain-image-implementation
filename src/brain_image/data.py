@@ -70,7 +70,8 @@ class EEGDatasetConfig(DataConfig):
     data_path: Path = GlobalConfig.DATA_DIR / "things-eeg2"
 
     imgs_dir: str = "imgs"
-    eeg_dir: str = "prepared"
+    
+    prepared_eeg_dir: str = "prepared"      # Needs to be generated with "prepare_data.py"
 
     train_imgs_per_concept: int = 10
     test_imgs_per_concept: int = 1
@@ -304,7 +305,7 @@ class EEGDataset(Dataset):
             prepared_data.extend(
                 torch.load(
                     self.config.data_path
-                    / self.config.eeg_dir
+                    / self.config.prepared_eeg_dir
                     / f"sub-{sub:02}"
                     / f"{split_dir}.pt"
                 )

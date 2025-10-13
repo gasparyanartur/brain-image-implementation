@@ -38,7 +38,10 @@ dependencies = [
     "huggingface_hub",
     "sentencepiece",
     "python-dotenv",
-    "reformer_pytorch"
+    "reformer_pytorch",
+
+    "gdown",
+    "mne"
 ]
 
 [project.optional-dependencies]

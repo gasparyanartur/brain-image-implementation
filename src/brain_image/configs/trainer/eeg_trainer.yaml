@@ -1,3 +1,7 @@
+defaults:
+  - /wandb: wandb
+  - _self_
+
 run_name: "train_eeg"
 
 compile_model: true
@@ -21,11 +25,5 @@ enable_progress_bar: true
 enable_model_summary: true
 save_checkpoints: true
 save_top_k: 1
-
-enable_wandb: true
-wandb_project: "brain-image"
-wandb_entity: null  # Set to your wandb username or team name
-wandb_log_model: true
-wandb_mode: "online"
 
 accelerator: "auto" 

@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 import torch
 from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
@@ -11,15 +12,19 @@ def create_eeg_encoder(
 ) -> EEGEncoder:
     match name:
         case "nice":
+            model_name = "nice"
             encoder = NiceEEGEncoder(config if config is not None else NiceConfig())
         case "atms":
+            model_name = "atms"
             encoder = AtmsEEGEncoder()
         case _:
             raise ValueError(f"Unknown encoder name: {name}")
 
+    logging.info(f"Using {model_name} EEG encoder")
     if checkpoint_path is None:
         return encoder
 
+    logging.info(f"Loading EEG checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path)
 
     eeg_encoder_state_dict = find_module_content_in_state_dict(

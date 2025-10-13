@@ -227,7 +227,7 @@ def flatten_configs(configs: dict[str, Any] | BaseModel, prefix="") -> dict[str,
         if isinstance(value, dict):
             value_dict = value
             flat_configs[prefix + key] = type(value)
-            flattened_dict = flatten_configs(value_dict, prefix=f"{key}.")
+            flattened_dict = flatten_configs(value_dict, prefix=f"{prefix}{key}.")
             flat_configs.update(
                 flattened_dict
             )
