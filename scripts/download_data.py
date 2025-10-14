@@ -70,7 +70,7 @@ def _download_to_file(
 
 
 class Args(BaseModel):
-    sub: int
+    subs: list[int]
     data_path: Path
     raw_dir: str
     img_dir: str
@@ -97,6 +97,12 @@ def main(args: Args):
         args.get_eeg = True
         args.get_img = True
 
+    logging.info(f"Preparing data, arguments:")
+    for k, v in vars(args).items():
+        logging.info(f"{k}: {v}")
+
+    
+
 
     logging.basicConfig(
         level=logging.INFO,
@@ -107,81 +113,85 @@ def main(args: Args):
     (args.data_path / args.preprocessed_eeg_dir).mkdir(exist_ok=True)
 
     if args.get_eeg:
-        sub_name = f"sub-{args.sub:02d}"
+        logging.info(f"Processing EEG data for subs: {args.subs}")
+        for sub in args.subs:
+            logging.info(f"Processing subject {sub}")
+            sub_name = f"sub-{sub:02d}"
 
-        if args.data_source == "things":
-            raw_file_path = args.data_path / args.raw_dir / f"{sub_name}.zip"
-            extracted_path = args.data_path / args.raw_dir / sub_name
+            if args.data_source == "things":
+                raw_file_path = args.data_path / args.raw_dir / f"{sub_name}.zip"
+                extracted_path = args.data_path / args.raw_dir / sub_name
 
-            url = _THINGS_DATA_URL[sub_name]
+                url = _THINGS_DATA_URL[sub_name]
 
-            if args.download_file and not raw_file_path.exists():
-                logging.info(f"Downloading file from {url} to {raw_file_path}")
-                gdown.download(output=str(raw_file_path), id=url)
-            elif raw_file_path.exists():
-                logging.info(f"File already exists: {raw_file_path}, skipping this step...")
-            else:
-                raise FileNotFoundError(f"File not found: {raw_file_path}")
-
-            if args.extract_file and not extracted_path.exists():
-                logging.info(f"Extracting file to {extracted_path}")
-                with zipfile.ZipFile(raw_file_path, "r") as zf:
-                    zf.extractall(extracted_path.parent)
-            elif extracted_path.exists():
-                logging.info(
-                    f"Directory already exists: {extracted_path}, skipping this step..."
-                )
-            else:
-                raise FileNotFoundError(f"Directory not found: {extracted_path}")
-
-            if args.preprocess_data:
-                generate_preprocessed_dataset(args.data_path, args.sub, seed=args.seed)
-
-            if args.remove_extracted:
-                raw_file_path.unlink()
-
-
-        elif args.data_source == "alignvis":
-            url_train = _get_alignvis_hf_url(args.sub, "train")
-            url_test = _get_alignvis_hf_url(args.sub, "test")
-
-            raw_file_train_path = args.data_path / args.raw_dir / f"{sub_name}_train.tar"
-            raw_file_test_path = args.data_path / args.raw_dir / f"{sub_name}_test.tar"
-
-            if args.download_file:
-                if not raw_file_train_path.exists():
-                    _download_to_file(url_train, raw_file_train_path)
+                if args.download_file and not raw_file_path.exists():
+                    logging.info(f"Downloading file from {url} to {raw_file_path}")
+                    gdown.download(output=str(raw_file_path), id=url)
+                elif raw_file_path.exists():
+                    logging.info(f"File already exists: {raw_file_path}, skipping this step...")
                 else:
-                    logging.info(f"File already exists: {raw_file_train_path}, skipping this step...")
+                    raise FileNotFoundError(f"File not found: {raw_file_path}")
 
-                if not raw_file_test_path.exists():
-                    _download_to_file(url_test, raw_file_test_path)
+                if args.extract_file and not extracted_path.exists():
+                    logging.info(f"Extracting file to {extracted_path}")
+                    with zipfile.ZipFile(raw_file_path, "r") as zf:
+                        zf.extractall(extracted_path.parent)
+                elif extracted_path.exists():
+                    logging.info(
+                        f"Directory already exists: {extracted_path}, skipping this step..."
+                    )
                 else:
-                    logging.info(f"File already exists: {raw_file_test_path}, skipping this step...")
+                    raise FileNotFoundError(f"Directory not found: {extracted_path}")
+
+                if args.preprocess_data:
+                    generate_preprocessed_dataset(args.data_path, sub, seed=args.seed)
+
+                if args.remove_extracted:
+                    raw_file_path.unlink()
+
+
+            elif args.data_source == "alignvis":
+                url_train = _get_alignvis_hf_url(sub, "train")
+                url_test = _get_alignvis_hf_url(sub, "test")
+
+                raw_file_train_path = args.data_path / args.raw_dir / f"{sub_name}_train.tar"
+                raw_file_test_path = args.data_path / args.raw_dir / f"{sub_name}_test.tar"
+
+                if args.download_file:
+                    if not raw_file_train_path.exists():
+                        _download_to_file(url_train, raw_file_train_path)
+                    else:
+                        logging.info(f"File already exists: {raw_file_train_path}, skipping this step...")
+
+                    if not raw_file_test_path.exists():
+                        _download_to_file(url_test, raw_file_test_path)
+                    else:
+                        logging.info(f"File already exists: {raw_file_test_path}, skipping this step...")
+
+                else:
+                    logging.info(f"Files already exist for {sub_name}, skipping download...")
+
+                if args.extract_file:
+                    extracted_path = args.data_path / args.preprocessed_eeg_dir
+                    extracted_path.mkdir(parents=True, exist_ok=True)
+
+                    logging.info(f"Extracting train file to {extracted_path}")
+                    with tarfile.open(raw_file_train_path, "r") as tar:
+                        tar.extractall(extracted_path)
+                    logging.info(f"Extracting test file to {extracted_path}")
+                    with tarfile.open(raw_file_test_path, "r") as tar:
+                        tar.extractall(extracted_path)
+                else:
+                    logging.info(f"Skipping extraction for {sub_name}...")
+
+                if args.remove_extracted:
+                    raw_file_train_path.unlink()
+                    raw_file_test_path.unlink()
 
             else:
-                logging.info(f"Files already exist for {sub_name}, skipping download...")
+                raise ValueError(f"Unknown data source: {args.data_source}")
 
-            if args.extract_file:
-                extracted_path = args.data_path / args.preprocessed_eeg_dir
-                extracted_path.mkdir(parents=True, exist_ok=True)
-
-                logging.info(f"Extracting train file to {extracted_path}")
-                with tarfile.open(raw_file_train_path, "r") as tar:
-                    tar.extractall(extracted_path)
-                logging.info(f"Extracting test file to {extracted_path}")
-                with tarfile.open(raw_file_test_path, "r") as tar:
-                    tar.extractall(extracted_path)
-            else:
-                logging.info(f"Skipping extraction for {sub_name}...")
-
-            if args.remove_extracted:
-                raw_file_train_path.unlink()
-                raw_file_test_path.unlink()
-
-        else:
-            raise ValueError(f"Unknown data source: {args.data_source}")
-
+            logging.info(f"Finished processing subject {sub}")
 
     # Get image
     if args.get_img:
@@ -215,12 +225,13 @@ def main(args: Args):
 
 
 
-    logging.info(f"Finished processing subject {args.sub}")
 
 
 if __name__ == "__main__":
     parser = ArgumentParser("Downloads and preprocesses image and EEG data. Run with -all and -s* to run the full pipeline")
-    parser.add_argument("--sub", type=int, default=8)
+    parser.add_argument(
+        "--subs", "-s", type=int, nargs="*", default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    )
     parser.add_argument("--data_path", type=Path, default="data/things-eeg2")
     parser.add_argument("--raw_dir", type=str, default="raw_eeg")
     parser.add_argument("--img_dir", type=str, default="imgs")

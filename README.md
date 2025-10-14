@@ -1,8 +1,12 @@
 # Brain Image Implementation
 
+(TODO: Update this)
+
 In this project, I reimplement the code for the paper [Human-Aligned Image Models Improve Visual Decoding from the Brain](https://arxiv.org/abs/2502.03081).
 
 ## Project Description
+
+(TODO: Update this)
 
 The paper tackles the problem of decoding images from brain activity. 
 Recent approaches do this by aligning embeddings from EEG signals to embeddings of images.
@@ -15,6 +19,8 @@ To do this, three components are required:
 This paper proposes a method to better decode EEG signals into visual images by using human-aligned image encoders rather than more generic versions. They find that doing so increases the cosine similarity of similar samples, and decreases it for differing ones, which verifies that the mapping is indeed better.
 
 ### Data
+
+(TODO: Update this)
 
 For data, they use the [Things2 EEG dataset](https://www.sciencedirect.com/science/article/pii/S1053811922008758) for training and evaluation. 
 In my recreation, I use the preprocessed data available on [osf](https://osf.io/3jk45/), along with the image pairs. 
@@ -67,6 +73,25 @@ Alternativly, perhaps my particular choice of parameters happen to work better o
 
 
 ## How to run this
+
+First, setup the following folders in your repository:
+
+```
+data/
+cache/tensorcache/
+logs/
+```
+
+If you are working on a cluster, make sure to symlink these to your storage volume, as they will contain large volumes of data.
+
+```
+storage_path=$PATH_TO_VOLUME_STORAGE
+symlink $storage_path/data data
+symlink $storage_path/cache cache/cache
+symlink $storage_path/logs logs
+mkdir cache/tensorcache
+```
+
 
 Download the preprocessed eeg and imgs-latents from [Things-EEG2](https://osf.io/3jk45/). By default, the folder structure is expected to be:
 
