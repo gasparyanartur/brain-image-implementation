@@ -30,8 +30,6 @@ if [ -n "$WANDB_API_KEY" ]; then
     export_env_args+=("--env WANDB_API_KEY=$WANDB_API_KEY")
 fi
 
-export_env_args+=("PYTHONUNBUFFERED=1")
-
 CLI_ARGS="$@"
 echo "CLI_ARGS: $CLI_ARGS"
 
@@ -45,8 +43,3 @@ apptainer run \
 ${export_env_args[*]} \
 ${mount_point[*]} \
 $image_path $CLI_ARGS
-#$(
-#    for mount_point in "${mount_points[@]}"; do
-#        echo "--bind $mount_point:$mount_point"
-#    done
-#) \
