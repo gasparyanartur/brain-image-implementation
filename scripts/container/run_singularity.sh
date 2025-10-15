@@ -33,17 +33,50 @@ fi
 CLI_ARGS="$@"
 echo "CLI_ARGS: $CLI_ARGS"
 
-apptainer run \
---nv \
---bind $PWD:/workspace \
---home /workspace \
---workdir /workspace \
---pwd /workspace \
---env PROJECT_WORKSPACE_DIR=/workspace \
-$export_env_args \
-$(
-    for mount_point in "${mount_points[@]}"; do
-        echo "--bind $mount_point:$mount_point"
-    done
-) \
-$image_path $CLI_ARGS
+#apptainer run \
+#--nv \
+#--bind $PWD:/workspace \
+#--home /workspace \
+#--workdir /workspace \
+#--pwd /workspace \
+#--env PROJECT_WORKSPACE_DIR=/workspace \
+#$export_env_args \
+#$(
+#    for mount_point in "${mount_points[@]}"; do
+#        echo "--bind $mount_point:$mount_point"
+#    done
+#) \
+#$image_path $CLI_ARGS
+
+
+
+cmd=(apptainer run
+  --nv
+  --bind "$PWD:/workspace"
+  --home /workspace
+  --workdir /workspace
+  --pwd /workspace
+  --env PROJECT_WORKSPACE_DIR=/workspace
+)
+
+# Append environment args if any
+if [ -n "$export_env_args" ]; then
+  cmd+=($export_env_args)
+fi
+
+# Append mounts
+for mount_point in "${mount_points[@]}"; do
+  cmd+=(--bind "$mount_point:$mount_point")
+done
+
+# Append image and args
+cmd+=("$image_path")
+cmd+=($CLI_ARGS)
+
+# Print for debugging
+echo "Running command:"
+printf '%q ' "${cmd[@]}"
+echo
+
+# Run safely (no eval)
+"${cmd[@]}"
