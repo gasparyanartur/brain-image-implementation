@@ -100,14 +100,14 @@ def main(args: Args):
     if args.subs is None:
         args.subs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-    logging.info(f"Preparing data, arguments:")
-    for k, v in vars(args).items():
-        logging.info(f"{k}: {v}")
-
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
+
+    logging.info(f"Preparing data, arguments:")
+    for k, v in vars(args).items():
+        logging.info(f"{k}: {v}")
 
     args.data_path.mkdir(parents=True, exist_ok=True)
     (args.data_path / args.preprocessed_eeg_dir).mkdir(exist_ok=True)

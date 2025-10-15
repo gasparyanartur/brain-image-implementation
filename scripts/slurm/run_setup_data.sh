@@ -33,9 +33,9 @@ echo "CLI_ARGS: $CLI_ARGS"
 
 # Check exit status
 if [ $? -eq 0 ]; then
-    echo "NICE training completed successfully"
+    echo "Completed successfully"
 else
-    echo "NICE training failed with exit code $?"
+    echo "Failed with exit code $?"
     exit 1
 fi
 
