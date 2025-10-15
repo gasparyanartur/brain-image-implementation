@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 from collections.abc import Callable
 from pathlib import Path
 import typing
@@ -22,7 +25,9 @@ import dreamsim
 from dreamsim.model import PerceptualModel
 
 
-def model_name_to_hf_name(model_name: str) -> str:
+IMAGE_ENCODER = typing.Literal["clip_vitl14", "clip_vith14", "sd_variations_v2", "synclr_vitb16", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
+
+def model_name_to_hf_name(model_name: IMAGE_ENCODER) -> str:
     match model_name:
         case "clip_vitl14":
             return "openai/clip-vit-large-patch14"
@@ -30,7 +35,7 @@ def model_name_to_hf_name(model_name: str) -> str:
             return "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
         case "sd_variations_v2":
             return "lambdalabs/sd-image-variations-diffusers"
-        case "synclr_vitb16":
+        case "synclr_vitb16" | "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
             return "facebook/dino-vitb16"
         case _:
             raise ValueError(f"Unknown model name: {model_name}")
@@ -52,7 +57,7 @@ class BaseImageEncoder(nn.Module):
 
 
 def load_image_encoder(
-    model_name: str,
+    model_name: IMAGE_ENCODER,
     models_path: Path = Path("models"),
     download_weights: bool = True,
     compile: bool = True,
@@ -66,8 +71,8 @@ def load_image_encoder(
             model = CLIPImageEncoder(model_name, *args, **kwargs)
         case "sd_variations_v2":
             model = VAEImageEncoder(model_name, *args, **kwargs)
-        case "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
-            model = SynCLRImageEncoder(
+        case "synclr_vitb16" | "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
+            model = DreamsimImageEncoder(
                 model_name,
                 *args,
                 models_path=models_path,
@@ -92,7 +97,7 @@ def load_image_encoder(
 
 
 class CLIPImageEncoder(BaseImageEncoder):
-    def __init__(self, model_name: str = "clip_vitl14", *args, **kwargs):
+    def __init__(self, model_name: IMAGE_ENCODER = "clip_vitl14", *args, **kwargs):
         super().__init__(model_name=model_name)
 
         hf_name = model_name_to_hf_name(model_name)
@@ -113,7 +118,7 @@ class CLIPImageEncoder(BaseImageEncoder):
 
 
 class VAEImageEncoder(BaseImageEncoder):
-    def __init__(self, model_name: str = "sd_variations_v2", *args, **kwargs):
+    def __init__(self, model_name: IMAGE_ENCODER = "sd_variations_v2", *args, **kwargs):
         super().__init__(model_name=model_name)
         hf_name = model_name_to_hf_name(model_name)
 
@@ -166,11 +171,11 @@ class VAEImageEncoder(BaseImageEncoder):
         return img
 
 
-class SynCLRImageEncoder(BaseImageEncoder):
+class DreamsimImageEncoder(BaseImageEncoder):
     def __init__(
         self,
         model_name: typing.Literal[
-            "unaligned_synclr_vitb16", "aligned_synclr_vitb16"
+            "synclr_vitb16", "unaligned_synclr_vitb16", "aligned_synclr_vitb16"
         ] = "unaligned_synclr_vitb16",
         download_weights: bool = True,
         models_path: Path = Path("models"),
@@ -181,23 +186,31 @@ class SynCLRImageEncoder(BaseImageEncoder):
 
         models_path_str = str(models_path)
         model_name_parts = model_name.split("_")
-        if model_name_parts[0] == "unaligned":
-            self.aligned = False
-        elif model_name_parts[1] == "aligned":
-            self.aligned = True
-        else:
-            raise ValueError(
-                f"Invalid model name: {model_name} - Could not recognize 'aligned' variable {model_name_parts[0]}"
-            )
 
-        if model_name_parts[-1] == "vitb16":
-            self.patch_size = 16
-        elif model_name_parts[-1] == "vitl14":
-            self.patch_size = 14
-        else:
-            raise ValueError(
-                f"Invalid model name: {model_name} - Could not recognize 'patch_size' variable {model_name_parts[-1]}"
-            )
+        if len(model_name_parts) == 2:
+            model_name_parts = ["unaligned"] + model_name_parts
+
+        aligned, _, patch_size = model_name_parts
+        
+        match aligned:
+            case "unaligned":
+                self.aligned = False
+            case "aligned":
+                self.aligned = True
+            case _:
+                raise ValueError(
+                    f"Invalid model name: {model_name} - Could not recognize 'aligned' variable {aligned}"
+                )
+
+        match patch_size:
+            case "vitb16":
+                self.patch_size = 16
+            case "vitl14":
+                self.patch_size = 14
+            case _:
+                raise ValueError(
+                    f"Invalid model name: {model_name} - Could not recognize 'patch_size' variable {model_name_parts[-1]}"
+                )
 
         model_url = "_".join(model_name_parts[1:])
         if download_weights:
@@ -205,10 +218,10 @@ class SynCLRImageEncoder(BaseImageEncoder):
                 cache_dir=models_path_str, dreamsim_type=model_url
             )
 
-        hf_name = model_name_to_hf_name(model_url)
+        hf_name = model_name_to_hf_name(model_name)
         processor = ViTImageProcessor.from_pretrained(hf_name)
 
-        if self.aligned:
+        if not self.aligned:
             self.model = PerceptualModel(
                 model_type=model_url,
                 normalize_embeds=False,
@@ -231,6 +244,7 @@ class SynCLRImageEncoder(BaseImageEncoder):
         img = self.processor(img, return_tensors="pt").pixel_values.to(
             self.model.device
         )
+        return img
 
     def encode(self, img: torch.Tensor) -> torch.Tensor:
         img = self.preprocess(img)

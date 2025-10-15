@@ -2,7 +2,7 @@ data_path: data/things-eeg2
 imgs_dir: imgs    # Relative to data_path
 prepared_eeg_dir: prepared
 latents_dir: img-latents
-cachedir: cache/tensorcache
+cachedir: tensorcache
 
 train_imgs_per_concept: 10
 test_imgs_per_concept: 1

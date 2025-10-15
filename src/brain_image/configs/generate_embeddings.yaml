@@ -4,18 +4,18 @@
 defaults:
   - _self_
 
-# Model configuration
-model_name: aligned_synclr_vitb16  # Options: aligned_synclr_vitb16, unaligned_synclr_vitb16, clip_vitl14, sd_variations_v2
+model_names: aligned_synclr_vitb16  
 
 # Generation settings
 batch_size: 128
 splits:
   - train
   - test
+
 models_path: models
 dtype: float32
 device: null
 download_weights: true
-output_dir: cache/tensorcache
+output_dir: tensorcache
 img_dir: data/things-eeg2/imgs
 compile: true

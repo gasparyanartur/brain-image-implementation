@@ -1875,7 +1875,7 @@ class EEGAlignmentModel(pl.LightningModule):
             "embed_adapter",
             "prior_adapter",
         ],
-        cache_dir: Path = Path("cache/tensorcache"),
+        cache_dir: Path = Path("tensorcache"),
         eeg_encoder_path: Path | None = None,
         **kwargs,
     ):
@@ -4400,7 +4400,7 @@ def encode_keys(*keys: str, use_encrypt: bool = False) -> str:
 class TensorCache:
     def __init__(
         self,
-        cache_path: Path = Path("cache/tensorcache"),
+        cache_path: Path = Path("tensorcache"),
         memory_cache_size: int = 65536,
         use_encrypt: bool = False,
         overwrite: bool = True,

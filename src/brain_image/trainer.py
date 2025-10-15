@@ -56,7 +56,7 @@ class EEGAlignTrainerConfig(TrainConfig):
 
     compile_model: bool = True
     init_weights: bool = False
-    cache_dir: Path = Path("cache/tensorcache")
+    cache_dir: Path = Path("tensorcache")
 
     checkpoint_monitor: str = "val_loss"
     checkpoint_monitor_mode: Literal["min", "max"] = "min"

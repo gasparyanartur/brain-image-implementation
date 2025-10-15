@@ -1,23 +1,26 @@
 #!/bin/bash
-#SBATCH --job-name=gen_embeddings
+#SBATCH --job-name=generate_embeddings
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=100G
 #SBATCH --gpus=1
 #SBATCH --time=2-00:00:00
-#SBATCH --output=logs/gen_embeddings/slurm/%j.out
+#SBATCH --output=logs/slurm/generate_embeddings/%j.out
 #SBATCH --account=berzelius-2025-35
 
 
-# Print job information
 echo "Job ID: $SLURM_JOB_ID"
 echo "Job Name: $SLURM_JOB_NAME"
 echo "Node: $SLURM_NODELIST"
 echo "Working Directory: $(pwd)"
 echo "Date: $(date)"
 
-image_path=${APPTAINER_IMAGE_PATH:-/home/x_artga/projdir/images/brain_2025_07_03.sif}
+image_path=${APPTAINER_IMAGE_PATH}
+# if image_path is not set, use the latest image path
+if [ -z "$image_path" ]; then
+    image_path=$(ls -t images/brain_*.sif | head -n 1)
+fi
 
 # Get CLI arguments (all arguments passed to this script)
 CLI_ARGS="$@"

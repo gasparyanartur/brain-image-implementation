@@ -160,7 +160,7 @@ class EEGAlignmentModel(pl.LightningModule):
         dtype: torch.dtype = DTYPE,
         init_weights: bool = False,
         compile: bool = True,
-        cache_dir: Path = Path("cache/tensorcache"),
+        cache_dir: Path = Path("tensorcache"),
         eeg_encoder_path: Path | None = None,
         **kwargs,
     ):

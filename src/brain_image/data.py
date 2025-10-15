@@ -85,7 +85,7 @@ class EEGDatasetConfig(DataConfig):
 class TensorCache:
     def __init__(
         self,
-        cache_path: Path = Path("cache/tensorcache"),
+        cache_path: Path = Path("tensorcache"),
         memory_cache_size: int = 512000,
         use_encrypt: bool = False,
         overwrite: bool = True,
