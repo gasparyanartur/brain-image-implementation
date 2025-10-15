@@ -70,7 +70,7 @@ def _download_to_file(
 
 
 class Args(BaseModel):
-    subs: list[int]
+    subs: list[int] | None
     data_path: Path
     raw_dir: str
     img_dir: str
@@ -97,12 +97,12 @@ def main(args: Args):
         args.get_eeg = True
         args.get_img = True
 
+    if args.subs is None:
+        args.subs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
     logging.info(f"Preparing data, arguments:")
     for k, v in vars(args).items():
         logging.info(f"{k}: {v}")
-
-    
-
 
     logging.basicConfig(
         level=logging.INFO,
@@ -230,7 +230,7 @@ def main(args: Args):
 if __name__ == "__main__":
     parser = ArgumentParser("Downloads and preprocesses image and EEG data. Run with -all and -s* to run the full pipeline")
     parser.add_argument(
-        "--subs", "-s", type=int, nargs="*", default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        "--subs", "-s", type=int, nargs="*", default=None
     )
     parser.add_argument("--data_path", type=Path, default="data/things-eeg2")
     parser.add_argument("--raw_dir", type=str, default="raw_eeg")

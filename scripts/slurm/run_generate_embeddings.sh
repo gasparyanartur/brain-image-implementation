@@ -27,10 +27,9 @@ CLI_ARGS="$@"
 
 echo "CLI_ARGS: $CLI_ARGS"
 
-
 # Run the embedding generation script
 ./scripts/container/run_singularity.sh \
-    python /workspace/scripts/gen_embeddings.py $CLI_ARGS
+    python /workspace/scripts/generate_embeddings.py $CLI_ARGS
 
 # Check exit status
 if [ $? -eq 0 ]; then
