@@ -15,24 +15,28 @@ class BaseConfig(BaseModel, ABC):
 
 
 def _resolve_workspace_dir() -> Path:
-    curr_file = Path(__file__)
+    curr_path = Path(__file__)
+    logging.info(f"Resolving workspace directory, traversing up from starting from {curr_path}")
 
     # Find the root of the project
-    while curr_file.parent != curr_file:
-        if (curr_file / "pyproject.toml").exists():
-            with open(curr_file / "pyproject.toml", "rb") as f:
+    while curr_path.parent != curr_path:
+        curr_path = curr_path.parent
+        logging.info(f"Current directory: {curr_path}")
+
+        if (curr_path / "pyproject.toml").exists():
+            logging.info("Found pyproject.toml")
+            with open(curr_path / "pyproject.toml", "rb") as f:
                 project_info = tomllib.load(f)
 
             if (
                 "name" in project_info["project"]
                 and project_info["project"]["name"] == "brain_image"
             ):
-                return curr_file
+                return curr_path
             else:
                 logging.warning(
                     f"Found pyproject.toml but it does not contain the correct project name. Expected 'brain_image' but got '{project_info['project']['name']}'"
                 )
-        curr_file = curr_file.parent
 
     raise RuntimeError("Could not find the root of the project")
 

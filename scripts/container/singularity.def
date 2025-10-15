@@ -2,7 +2,7 @@ Bootstrap: localimage
 From: images/singularity_base.sif
 
 %labels
-    Author Your Name
+    Author Artur Gasparyan
     Version v1.0
     Description Brain Image Implementation with uv
 
