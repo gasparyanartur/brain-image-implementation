@@ -54,13 +54,19 @@ Try importing torch in a Python shell to confirm installation.
 
 * Option B (SLURM): Singularity
 
-I've setup utility scripts to make installation and configuration of images easier. They can be found under `scripts/container/`. Start by running the build script:
+I've setup utility scripts to make installation and configuration of images easier. They can be found under `scripts/container/`. 
+The build script `scripts/build_singularity.sh` is a utility script that automatically chooses reasonable defaults. Your images will be build under `images/` unless specified otherwise.
+
+First, you'll need to setup the base image (takes a while):
 
 ```
-scripts/build_singularity.sh
+DEFINITION_FILE=scripts/container/singularity_base.def ./scripts/container/build_singularity.sh
 ```
 
-One the image is found, you should find it under `images/`
+Once that is done, you'll setup the main image.
+
+
+ 
 
 To use 
 
