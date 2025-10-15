@@ -225,7 +225,7 @@ class DreamsimImageEncoder(BaseImageEncoder):
             self.model = PerceptualModel(
                 model_type=model_url,
                 normalize_embeds=False,
-                stride=self.patch_size,  # type: ignore
+                stride=str(self.patch_size),  # type: ignore
                 load_dir=models_path_str,
                 baseline=True,
             )
