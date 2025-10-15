@@ -30,10 +30,8 @@ if [ -n "$WANDB_API_KEY" ]; then
     export_env_args="$export_env_args --env WANDB_API_KEY=$WANDB_API_KEY"
 fi
 
-CLI_ARGS = "$@"
+CLI_ARGS="$@"
 echo "CLI_ARGS: $CLI_ARGS"
-
-
 
 apptainer run \
 --nv \
