@@ -26,7 +26,7 @@ class EmbeddingGenerationConfig(BaseConfig):
     compile: bool = True
     download_weights: bool = True
     img_dir: Path = Path("data/things-eeg2/imgs")
-    output_dir: Path = Path("tensorcache")
+    cache_dir: Path = Path("tensorcache")
 
 def run_generation(
     img_dir: Path,
@@ -97,7 +97,7 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
         for split in config.splits:
                 run_generation(
                     config.img_dir,
-                    output_dir=config.output_dir,
+                    output_dir=config.cache_dir,
                     batch_size=config.batch_size,
                     model_name=model_name,
                     split=split,

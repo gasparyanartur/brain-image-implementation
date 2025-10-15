@@ -134,13 +134,6 @@ def main(args: SetupDataArguments):
     if args.subs is None:
         args.subs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s | %(levelname)-8s | %(message)s",
-        datefmt="%H:%M:%S",
-        stream=sys.stdout,
-        force=True,
-    )
 
     logging.info(f"Preparing data, arguments:")
     for k, v in vars(args).items():

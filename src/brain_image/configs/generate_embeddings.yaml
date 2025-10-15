@@ -2,6 +2,7 @@
 
 # Default components
 defaults:
+  - base
   - _self_
 
 model_names: 
@@ -19,6 +20,6 @@ models_path: models
 dtype: float32
 device: null
 download_weights: true
-output_dir: tensorcache
+cache_dir: tensorcache
 img_dir: data/things-eeg2/imgs
 compile: true

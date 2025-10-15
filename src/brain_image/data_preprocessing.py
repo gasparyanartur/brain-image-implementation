@@ -149,7 +149,7 @@ def mvnn(args, epoched_test, epoched_train):
 
 	import numpy as np
 	from tqdm import tqdm
-	from sklearn.discriminant_analysis import _cov
+	from sklearn.discriminant_analysis import _cov		# type: ignore
 	import scipy
 
 	### Loop across data collection sessions ###
@@ -243,7 +243,7 @@ def save_prepr(args, whitened_test, whitened_train, img_conditions_train,
 	del whitened_test
 	# Shuffle the repetitions of different sessions
 	idx = shuffle(np.arange(0, merged_test.shape[1]), random_state=seed)
-	merged_test = merged_test[:,idx]
+	merged_test = merged_test[:,idx]		# type: ignore
 	# Insert the data into a dictionary
 	test_dict = {
 		'preprocessed_eeg_data': merged_test,
@@ -289,7 +289,7 @@ def save_prepr(args, whitened_test, whitened_train, img_conditions_train,
 		merged_train[i] = ordered_data
 	# Shuffle the repetitions of different sessions
 	idx = shuffle(np.arange(0, merged_train.shape[1]), random_state=seed)
-	merged_train = merged_train[:,idx]
+	merged_train = merged_train[:,idx]		# type: ignore
 	# Insert the data into a dictionary
 	train_dict = {
 		'preprocessed_eeg_data': merged_train,

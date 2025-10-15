@@ -1,9 +1,5 @@
-hydra:
-  run:
-    dir: .
-  output_subdir: null
-
 defaults:
+  - base
   - dataset: eeg_dataset
   - model: eeg_model
   - trainer: eeg_trainer

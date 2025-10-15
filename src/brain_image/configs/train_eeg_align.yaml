@@ -1,15 +1,8 @@
-hydra:
-  run:
-    dir: .
-  output_subdir: null
-
 defaults:
+  - base
   - dataset: eeg_dataset
   - model: eeg_model
   - trainer: eeg_trainer
-  - wandb: wandb
-  - override hydra/job_logging: disabled
-  - override hydra/hydra_logging: disabled
   - _self_
 
 model:
@@ -23,7 +16,6 @@ model:
 
   modules_to_train:
     - eeg_encoder
-
 
   max_epochs: 40
 

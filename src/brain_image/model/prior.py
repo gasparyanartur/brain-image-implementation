@@ -206,9 +206,9 @@ class DiffusionPriorNetwork(nn.Module):
 
         # mask out text embeddings with null text embeddings
 
-        null_text_embeds = self.null_text_embeds.to(text_embed.dtype)
+        null_text_embeds = self.null_text_embeds.to(text_embed.dtype)       # type: ignore
 
-        text_embed = torch.where(text_keep_mask, text_embed, null_text_embeds)
+        text_embed = torch.where(text_keep_mask, text_embed, null_text_embeds)       # type: ignore
 
         # mask out image embeddings with null image embeddings
 
@@ -227,7 +227,7 @@ class DiffusionPriorNetwork(nn.Module):
         learned_queries = repeat(self.learned_query, "d -> b 1 d", b=batch)
 
         if self.self_cond:
-            learned_queries = torch.cat((self_cond, learned_queries), dim=-2)
+            learned_queries = torch.cat((self_cond, learned_queries), dim=-2)       # type: ignore
 
         input_stack = [text_embed, time_embed, image_embed, learned_queries]
         if text_encodings is not None:

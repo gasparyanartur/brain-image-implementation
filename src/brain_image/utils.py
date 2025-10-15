@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import io
 import logging
 from pathlib import Path
+import sys
 from typing import Any, Mapping
 import dotenv
 from huggingface_hub import login
@@ -13,6 +14,16 @@ import PIL.Image
 import yaml
 
 import matplotlib.pyplot as plt
+
+
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)-8s | %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stdout,
+        force=True,
+    )
 
 
 def gather_dataloader(
@@ -202,9 +213,7 @@ def show_image(
 
 
 def setup():
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+    setup_logging()
     dotenv.load_dotenv()
 
     torch.set_float32_matmul_precision("high")
