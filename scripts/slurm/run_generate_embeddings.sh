@@ -7,7 +7,7 @@
 #SBATCH --gpus=1
 #SBATCH --time=2-00:00:00
 #SBATCH --output=logs/slurm/generate_embeddings/%j.out
-#SBATCH --account=berzelius-2025-35
+#SBATCH --account=berzelius-2025-278
 
 
 echo "Job ID: $SLURM_JOB_ID"

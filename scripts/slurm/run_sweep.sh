@@ -7,8 +7,7 @@
 #SBATCH --gpus=1
 #SBATCH --time=2-00:00:00
 #SBATCH --output=logs/sweep_nice/slurm/%j.out
-#SBATCH --account=berzelius-2025-35
-
+#SBATCH --account=berzelius-2025-278
 
 # Print job information
 echo "Job ID: $SLURM_JOB_ID"
