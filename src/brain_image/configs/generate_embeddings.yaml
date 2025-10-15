@@ -4,7 +4,10 @@
 defaults:
   - _self_
 
-model_names: aligned_synclr_vitb16  
+model_names: 
+- aligned_synclr_vitb16
+- unaligned_synclr_vitb16
+- clip_vith14  
 
 # Generation settings
 batch_size: 128

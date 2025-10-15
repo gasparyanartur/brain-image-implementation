@@ -10,6 +10,7 @@ from pydantic import BaseModel
 import torch
 import os
 import PIL.Image
+import yaml
 
 import matplotlib.pyplot as plt
 
@@ -242,13 +243,22 @@ def init_wandb():
 
         if "WANDB_API_KEY" in os.environ:
             logging.info("WANDB_API_KEY found, attempting to login to wandb...")
-            wandb.login(key=os.environ["WANDB_API_KEY"])
+            api_key = os.environ["WANDB_API_KEY"]
             logging.info("Successfully logged in to wandb")
+        elif (config_path := Path("src/brain_image/configs/wandb/wandb.yaml")).exists:
+            with open(config_path, "r") as f:
+                config = yaml.load(f, Loader=yaml.FullLoader)
+                if "api_key" in config:
+                    logging.info("WANDB_API_KEY found in config, attempting to login to wandb...")
+                    api_key = config["api_key"]
         else:
-            logging.warning("WANDB_API_KEY not found in environment")
+            logging.warning("WANDB_API_KEY not found in environment and config not found.")
+
+        wandb.login(key=api_key)
+        logging.info("Successfully logged in to wandb")
     except ImportError:
         logging.warning("wandb not available")
-    except Exception as e:
+    except BaseException as e:
         logging.warning(f"Failed to login to wandb: {e}")
 
 
