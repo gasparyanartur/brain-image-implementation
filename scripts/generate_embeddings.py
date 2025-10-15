@@ -92,7 +92,7 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
     logging.info(f"Generating all embeddings using device: {device}")
 
     for model_name in config.model_names:
-        logging.info(f"Generating embeddings for model {model_name}"))
+        logging.info(f"Generating embeddings for model {model_name}")
 
         for split in config.splits:
                 run_generation(
