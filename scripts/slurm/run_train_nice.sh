@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=train_nice
+#SBATCH --job-name=train_eeg
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=32G
 #SBATCH --gpus=1
-#SBATCH --time=1-00:00:00
-#SBATCH --output=logs/train_nice/slurm/%j.out
-#SBATCH --account=berzelius-2025-278
+#SBATCH --time=2-00:00:00
+#SBATCH --output=logs/slurm/train_eeg/%j.out
+#SBATCH --account=Berzelius-2025-278
 
 # Print job information
 echo "Job ID: $SLURM_JOB_ID"
@@ -22,20 +22,17 @@ if [ -z "$image_path" ]; then
     image_path=$(ls -t images/brain_*.sif | head -n 1)
 fi
 
-# Get CLI arguments (all arguments passed to this script)
 CLI_ARGS="$@"
 
 echo "CLI_ARGS: $CLI_ARGS"
 
-# Run the training script with CLI arguments
 ./scripts/container/run_singularity.sh \
     python /workspace/scripts/train_nice.py $CLI_ARGS 
 
-# Check exit status
 if [ $? -eq 0 ]; then
-    echo "NICE training completed successfully"
+    echo "Training completed successfully"
 else
-    echo "NICE training failed with exit code $?"
+    echo "Training failed with exit code $?"
     exit 1
 fi
 

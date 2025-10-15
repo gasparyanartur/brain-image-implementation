@@ -4,10 +4,10 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=32G
-#SBATCH --gpus=1
+#SBATCH --partition=berzelius-cpu
 #SBATCH --time=1-00:00:00
 #SBATCH --output=logs/slurm/setup_data/%j.out
-#SBATCH --account=berzelius-2025-278
+#SBATCH --account=Berzelius-2025-278
 
 # Print job information
 echo "Job ID: $SLURM_JOB_ID"
