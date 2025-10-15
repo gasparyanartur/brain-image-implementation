@@ -33,6 +33,8 @@ fi
 CLI_ARGS="$@"
 echo "CLI_ARGS: $CLI_ARGS"
 
+unset PYTHONSTARTUP
+
 apptainer run \
 --nv \
 --bind $PWD:/workspace \

@@ -29,7 +29,7 @@ echo "CLI_ARGS: $CLI_ARGS"
 
 # Run the training script with CLI arguments
 ./scripts/container/run_singularity.sh \
-    python /workspace/scripts/download_data.py $CLI_ARGS 
+    python /workspace/scripts/setup_data.py $CLI_ARGS 
 
 # Check exit status
 if [ $? -eq 0 ]; then
