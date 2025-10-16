@@ -22,16 +22,13 @@ if [ -z "$image_path" ]; then
     image_path=$(ls -t images/brain_*.sif | head -n 1)
 fi
 
-# Get CLI arguments (all arguments passed to this script)
 CLI_ARGS="$@"
 
 echo "CLI_ARGS: $CLI_ARGS"
 
-# Run the embedding generation script
 ./scripts/container/run_singularity.sh \
     python /workspace/scripts/generate_embeddings.py $CLI_ARGS
 
-# Check exit status
 if [ $? -eq 0 ]; then
     echo "Embedding generation completed successfully"
 else

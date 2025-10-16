@@ -22,6 +22,7 @@ wheels/
 /experiments
 /outputs
 /cache
+/tensorcache
 
 # Build
 *.egg-info*

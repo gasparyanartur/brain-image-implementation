@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=train_nice
+#SBATCH --job-name=setup_data
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
@@ -9,7 +9,7 @@
 #SBATCH --output=logs/slurm/setup_data/%j.out
 #SBATCH --account=Berzelius-2025-278
 
-# Print job information
+
 echo "Job ID: $SLURM_JOB_ID"
 echo "Job Name: $SLURM_JOB_NAME"
 echo "Node: $SLURM_NODELIST"
@@ -22,16 +22,13 @@ if [ -z "$image_path" ]; then
     image_path=$(ls -t images/brain_*.sif | head -n 1)
 fi
 
-# Get CLI arguments (all arguments passed to this script)
 CLI_ARGS="$@"
 
 echo "CLI_ARGS: $CLI_ARGS"
 
-# Run the training script with CLI arguments
 ./scripts/container/run_singularity.sh \
     python /workspace/scripts/setup_data.py $CLI_ARGS 
 
-# Check exit status
 if [ $? -eq 0 ]; then
     echo "Completed successfully"
 else
