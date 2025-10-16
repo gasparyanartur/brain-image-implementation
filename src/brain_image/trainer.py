@@ -120,6 +120,9 @@ class Trainer:
 
         tags = sorted(self.get_tags())
 
+        log_path = self.config.log_dir / "-".join(tags)
+        log_path.mkdir(parents=True, exist_ok=True)
+
         loggers.append(
             CSVLogger(
                 save_dir=self.config.log_dir,
