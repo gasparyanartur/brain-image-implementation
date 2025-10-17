@@ -121,8 +121,9 @@ class Trainer:
         tags = sorted(self.get_tags())
 
         log_path = self.config.log_dir / "-".join(tags)
-        log_path.mkdir(parents=True, exist_ok=True)
         logging.info(f"Logging to path {log_path}...")
+        if not log_path.exists():
+            log_path.mkdir(parents=True, exist_ok=True)
 
         loggers.append(
             CSVLogger(
