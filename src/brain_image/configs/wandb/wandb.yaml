@@ -1,4 +1,4 @@
-enabled: false
+enabled: true
 project: brain-image 
 entity: null # Set username or team name here or in .env
 log_model: false

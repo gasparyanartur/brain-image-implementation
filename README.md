@@ -31,6 +31,7 @@ symlink $storage_path/data data
 symlink $storage_path/tensorcache tensorcache
 symlink $storage_path/logs logs
 symlink $storage_path/models models
+symlink $storage_path/.cache .cache
 ```
 
 * Option B: Go into src/brain_image/configs/ and update the paths in each configuration file to point to the directories you want to use.
