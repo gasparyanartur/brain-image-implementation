@@ -60,15 +60,16 @@ The build script `scripts/build_singularity.sh` is a utility script that automat
 First, you'll need to setup the base image (takes a while):
 
 ```
-DEFINITION_FILE=scripts/container/singularity_base.def ./scripts/container/build_singularity.sh
+DEFINITION_FILE=scripts/container/singularity_base.def IMAGE_FILE=images/singularity_base.sif  ./scripts/container/build_singularity.sh
 ```
 
-Once that is done, you'll setup the main image.
+Once that is done, you should see a new image under `images/singularity_base.sif`. Next, you'll setup the main image.
 
-
+```
+./scripts/container/build_singularity.sh
+```
  
-
-To use 
+The output should be an image named something like `images/brain_{datetime}.sif`. This is the image you will use for the slurm jobs.
 
 
 
