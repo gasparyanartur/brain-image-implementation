@@ -120,9 +120,6 @@ class Trainer:
 
         tags = sorted(self.get_tags())
 
-        if not self.config.log_dir.exists():
-            self.config.log_dir.mkdir(parents=True, exist_ok=True)
-
         log_path = self.config.log_dir / "-".join(tags)
         logging.info(f"Logging to path {log_path}...")
 
