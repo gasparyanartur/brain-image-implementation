@@ -18,7 +18,7 @@ from torchvision.transforms import v2 as tv2
 from lightning.pytorch import LightningDataModule
 import tqdm
 
-from brain_image.configs import BaseConfig, GlobalConfig
+from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
 import multiprocessing as mp
 
 
@@ -264,11 +264,12 @@ class EEGDataModule(DataModule):
                 shuffle = False 
 
         num_workers = self.config.num_workers or mp.cpu_count()
+        device = get_device_str()
         dataloader_args = {
             "batch_size": self.config.get_batch_size(split),
             "shuffle": shuffle,
             "num_workers": num_workers,
-            "pin_memory": True,
+            "pin_memory": device != "cpu",
             "persistent_workers": num_workers > 0,
         }
         dataloader_args.update(kwargs)
