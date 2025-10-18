@@ -695,10 +695,19 @@ class EEGAlignmentModel(pl.LightningModule):
 
         # target_latent = F.normalize(target_latent)
         with torch.no_grad():
-            stats = self.embedding_stats["prior_img_latent"]
-            target_latent = (
-                target_latent - stats["mean"].to(target_latent.device)
-            ) / stats["std"].to(target_latent.device)
+            match self.config.prior_config.norm_scheme:
+                case "none":
+                    pass
+                case "z_scale":
+                    stats = self.embedding_stats["prior_img_latent"]
+                    target_latent = (
+                        target_latent - stats["mean"].to(target_latent.device)
+                    ) / stats["std"].to(target_latent.device)
+                case "l2_scale":
+                    target_latent = F.normalize(target_latent) * (
+                        target_latent.dim(-1) ** 0.5
+                    )
+
 
         if self.config.debug_prior_use_target_as_cond:
             eeg_latent_normed = F.normalize(-target_latent)
@@ -1179,7 +1188,6 @@ class EEGAlignmentModel(pl.LightningModule):
             assert (
                 "idx" in all_data and all_data["idx"] is not None
             ), "Index is not in batch"
-            # eeg_latent_normed = F.normalize(_index_encoding(all_data["idx"]))
             eeg_latent_normed = F.normalize(-target_latent)
 
         device, dtype = self._get_device_dtype()
@@ -1199,8 +1207,15 @@ class EEGAlignmentModel(pl.LightningModule):
                     generator=generator,
                     **prior_kwargs,
                 )
-                stats = self.embedding_stats["prior_img_latent"]
-                prior_pred = prior_pred * stats["std"].to(prior_pred.device) + stats["mean"].to(prior_pred.device)
+                
+                match self.prior.config.norm_scheme:
+                    case "none":
+                        pass
+                    case "z_scale":
+                        stats = self.embedding_stats["prior_img_latent"]
+                        prior_pred = prior_pred * stats["std"].to(prior_pred.device) + stats["mean"].to(prior_pred.device)
+                    case "l2_scale":
+                        prior_pred = F.normalize(prior_pred, dim=-1) * (prior_pred.size(-1) ** 0.5)
 
                 all_prior_preds_.append(prior_pred.detach().cpu())
                 pbar.update(prior_pred.size(0))

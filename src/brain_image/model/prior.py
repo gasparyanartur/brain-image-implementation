@@ -538,6 +538,7 @@ class DiffusionPriorConfig:
     dropout: float = 0.1
 
     cond_drop_prob: float = 0.1
+    norm_scheme: Literal["z_scale", "l2_scale", "none"] = "none"
 
     num_training_timesteps: int = 1000
 
