@@ -93,7 +93,7 @@ class EEGAlignmentConfig(BaseConfig):
     temperature_init: float = 0.07
     log_gradients: bool = False
 
-    prior_config: DiffusionPriorConfig | None = DiffusionPriorConfig()
+    prior: DiffusionPriorConfig | None = DiffusionPriorConfig()
 
     encoder_lr: float = 3e-4
     prior_lr: float = 3e-4
@@ -203,8 +203,8 @@ class EEGAlignmentModel(pl.LightningModule):
 
         self.prior: SimpleDiffusionPrior | None = None
         if self.config.do_recon:
-            assert self.config.prior_config, "Prior config must be provided"
-            self.prior = SimpleDiffusionPrior(self.config.prior_config).to(dtype)
+            assert self.config.prior, "Prior config must be provided"
+            self.prior = SimpleDiffusionPrior(self.config.prior).to(dtype)
 
         elif self.config.do_recon_low:
             raise ValueError(
@@ -684,7 +684,7 @@ class EEGAlignmentModel(pl.LightningModule):
         stage,
         device,
     ):
-        assert self.config.prior_config is not None, "Prior config is not initialized"
+        assert self.config.prior is not None, "Prior config is not initialized"
         assert self.prior is not None, "Prior is not initialized"
         assert (
             target_latent := batch["prior_img_latent"]
@@ -695,7 +695,7 @@ class EEGAlignmentModel(pl.LightningModule):
 
         # target_latent = F.normalize(target_latent)
         with torch.no_grad():
-            match self.config.prior_config.norm_scheme:
+            match self.config.prior.norm_scheme:
                 case "none":
                     pass
                 case "z_scale":
@@ -718,7 +718,7 @@ class EEGAlignmentModel(pl.LightningModule):
         noise = torch.randn_like(target_latent)
         timesteps = torch.randint(
             0,
-            self.config.prior_config.num_training_timesteps,
+            self.config.prior.num_training_timesteps,
             size=(batch_size,),
             device=device,
         )
@@ -730,7 +730,7 @@ class EEGAlignmentModel(pl.LightningModule):
             noisy_latent,
             timesteps,
             eeg_latent_normed,
-            self.config.prior_config.cond_drop_prob,
+            self.config.prior.cond_drop_prob,
         )
         prior_loss = (
             torch.nn.functional.mse_loss(noise_pred, noise)

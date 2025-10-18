@@ -30,7 +30,13 @@ class TrainEEGConfig(BaseConfig):
 def main(cfg: DictConfig):
     setup()
 
-    config = TrainEEGConfig.from_hydra_config(cfg)
+    try:
+        config = TrainEEGConfig.from_hydra_config(cfg)
+    except BaseException as e:
+        logging.error("Failed to parse config:")
+        for key, value in flatten_configs(cfg).items():
+            logging.error(f"  {key}: {value}")
+        raise e
 
     logging.info(f"Training with config:")
     for key, value in flatten_configs(config).items():

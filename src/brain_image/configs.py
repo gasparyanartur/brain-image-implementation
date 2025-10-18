@@ -1,17 +1,36 @@
+from __future__ import annotations
+
 from abc import ABC
 from functools import lru_cache
 import logging
 import os
 from pathlib import Path
 import tomllib
+from typing import Any, Generic, TypeVar, cast
+from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
 import torch
 
 
-class BaseConfig(BaseModel, ABC):
+C = TypeVar("C", bound=BaseModel)
+
+
+
+class BaseConfig(BaseModel, ABC, Generic[C]):
     @classmethod
-    def from_hydra_config(cls, cfg):
-        return cls(**cfg)
+    def from_hydra_config(cls, cfg: DictConfig) -> C:
+        raw_dict = OmegaConf.to_container(cfg, resolve=True)
+        if not isinstance(raw_dict, dict):
+            raise ValueError("Config must be a dictionary")
+        if not all(isinstance(k, str) for k in raw_dict):
+            raise ValueError("Config keys must be strings")
+        raw_dict = cast(dict[str, Any], raw_dict)
+        return cls.construct(**raw_dict)
+
+
+    @classmethod
+    def construct(cls, **kwargs: Any) -> C:
+        return cast(C, cls(**kwargs))
 
 
 def _resolve_workspace_dir() -> Path:

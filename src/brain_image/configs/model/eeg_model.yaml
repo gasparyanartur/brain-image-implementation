@@ -24,6 +24,9 @@ img_latent_dim: 1024
 skip_eval_first_epoch: true
 full_eval_every_epochs: 5
 
+prior: 
+  norm_scheme: null
+
 encoder_lr: 3e-4
 encoder_min_lr: 1e-6
 encoder_warmup_epochs: 1

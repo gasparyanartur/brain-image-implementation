@@ -4,7 +4,8 @@ import io
 import logging
 from pathlib import Path
 import sys
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 import dotenv
 from huggingface_hub import login
 from pydantic import BaseModel
@@ -227,14 +228,14 @@ def setup():
     logging.info(f"Using directory: {os.getcwd()}")
     login(token=tok)
 
-def flatten_configs(configs: dict[str, Any] | BaseModel, prefix="") -> dict[str, Any]:
+def flatten_configs(configs: Mapping[str, Any] | BaseModel, prefix="") -> dict[str, Any]:
     flat_configs = {}
 
     if isinstance(configs, BaseModel):
         configs = configs.model_dump(mode="json")
 
     for key, value in configs.items():
-        if isinstance(value, dict):
+        if isinstance(value, Mapping):
             value_dict = value
             flat_configs[prefix + key] = type(value)
             flattened_dict = flatten_configs(value_dict, prefix=f"{prefix}{key}.")
