@@ -41,7 +41,8 @@ dependencies = [
     "reformer_pytorch",
 
     "gdown",
-    "mne"
+    "mne",
+    "scikit-image"
 ]
 
 [project.optional-dependencies]

@@ -11,7 +11,7 @@ import requests
 import torch
 import tqdm
 
-from brain_image.data import SampleType, get_image_paths, load_all_eeg_data
+from brain_image.data import EEGDataset, SampleType, get_image_paths, load_all_eeg_data
 
 
 """
@@ -105,6 +105,7 @@ class SetupDataArguments(BaseModel):
     preprocess_data: bool
     remove_extracted: bool
     prepare_data: bool
+    get_stats: bool
     all_stages: bool
     skip_existing: bool
     seed: int
@@ -134,7 +135,6 @@ def main(args: SetupDataArguments):
     if args.subs is None:
         args.subs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-
     logging.info(f"Preparing data, arguments:")
     for k, v in vars(args).items():
         logging.info(f"\t{k}: {v}")
@@ -157,21 +157,25 @@ def main(args: SetupDataArguments):
 
                 url = _THINGS_DATA_URL[sub_name]
 
-                if args.download_file and not (args.skip_existing and raw_file_path.exists()):
+                if args.download_file and not (
+                    args.skip_existing and raw_file_path.exists()
+                ):
                     logging.info(f"Downloading file from {url} to {raw_file_path}")
                     gdown.download(output=str(raw_file_path), id=url)
-                elif (args.skip_existing and raw_file_path.exists()):
+                elif args.skip_existing and raw_file_path.exists():
                     logging.info(
                         f"File already exists: {raw_file_path}, skipping this step..."
                     )
                 else:
                     raise FileNotFoundError(f"File not found: {raw_file_path}")
 
-                if args.extract_file and not (args.skip_existing and extracted_path.exists()):
+                if args.extract_file and not (
+                    args.skip_existing and extracted_path.exists()
+                ):
                     logging.info(f"Extracting file to {extracted_path}")
                     with zipfile.ZipFile(raw_file_path, "r") as zf:
                         zf.extractall(extracted_path.parent)
-                elif (args.skip_existing and extracted_path.exists()):
+                elif args.skip_existing and extracted_path.exists():
                     logging.info(
                         f"Directory already exists: {extracted_path}, skipping this step..."
                     )

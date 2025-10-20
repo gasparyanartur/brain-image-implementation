@@ -397,7 +397,7 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
         # See: https://github.com/huggingface/diffusers/discussions/7933
         # As a workaround, we generate the images one-by-one
         outputs = []
-        for i in range(conditioning_latent.size(0)):
+        for i in tqdm.tqdm(range(conditioning_latent.size(0)), disable=not progress_bar, desc="Reconstructing latents"):
             cond_latent = [conditioning_latent[i].unsqueeze(0)]
             base_latent = low_image_latent[i] if low_image_latent is not None else None # TODO
             recon = self.generate_ip_adapter_embeds(

@@ -21,6 +21,9 @@ import tqdm
 from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
 import multiprocessing as mp
 
+from brain_image.model.img_encoder import IMAGE_ENCODER
+from brain_image.utils import flatten_configs
+
 
 class DataConfig(BaseConfig, ABC):
     data_path: Path
@@ -115,6 +118,18 @@ class TensorCache:
 
         torch.save(tensor, path)
 
+    def batch_get(self, items: Iterable[Iterable[str]], parallel: bool = True) -> torch.Tensor:
+        def _get(key_list: list[str]) -> torch.Tensor:
+            return self.get(*key_list)
+
+        if parallel:
+            with ThreadPoolExecutor() as executor:
+                item_list = list(executor.map(_get, items))
+        else:
+            item_list = [self.get(*item) for item in items]
+
+        return torch.stack(item_list, dim=0)
+
     def get(self, *keys: str) -> torch.Tensor:
         path = self._get_tensor_path(*keys)
         if path in self.memory_cache:
@@ -145,14 +160,16 @@ class TensorCache:
 
 
 class DataModule(LightningDataModule, ABC):
-    def __init__(self, config: DataConfig):
+    def __init__(self, config: DataConfig, embedding_stats: dict = {}):
         super().__init__()
 
         self.config = config
         self.num_batches: dict[str, int | None] = {"train": None, "val": None, "test": None}
 
-        self.datasets: dict[str, Dataset] = {split: self._create_dataset(split) for split in ["train", "val", "test"]}
+        self.datasets: dict[str, Dataset | None] = {split: None for split in ["train", "val", "test"]}
         self.dataloaders: dict[str, torch.utils.data.DataLoader | None] = {}
+
+        self.embedding_stats = embedding_stats or {}
 
     @abstractmethod
     def get_metadata(self) -> dict:
@@ -204,9 +221,9 @@ class DataModule(LightningDataModule, ABC):
 
 
 class EmbeddingsMap(TypedDict):
-    align_img_latent: str | None
-    prior_img_latent: str | None
-    recon_latent: str | None
+    align_img_latent: IMAGE_ENCODER | None
+    prior_img_latent: IMAGE_ENCODER | None
+    recon_latent: IMAGE_ENCODER | None
 
 
 class SampleType(TypedDict):
@@ -230,7 +247,14 @@ class EEGDataModule(DataModule):
         self.rng = np.random.default_rng(config.seed)
         self.tensor_cache = tensor_cache
         self.embeddings_map = embeddings_map
-        super().__init__(config)
+
+        embeddings_stats = self._get_embeddings_stats()
+        logging.info(f"Embeddings stats:")
+        for k, v in flatten_configs(embeddings_stats).items():
+            logging.info(f"\t{k}: {v}")
+
+
+        super().__init__(config, embedding_stats=embeddings_stats)
 
     def get_metadata(self) -> dict:
         return {}
@@ -274,11 +298,31 @@ class EEGDataModule(DataModule):
         }
         dataloader_args.update(kwargs)
 
-        dataset = self.datasets[split]
+        dataset = self._get_dataset(split)
         return torch.utils.data.DataLoader(
             dataset,
             **dataloader_args,
         )
+
+    def _get_embeddings_stats(self):
+        img_dir_path = (
+            self.config.data_path / self.config.imgs_dir / "training_images"
+        )
+        img_paths = list(img_dir_path.rglob("*.jpg"))
+
+        encoder_to_embedding = {v: k for k, v in self.embeddings_map.items() if v is not None}
+        embedding_types = [str(v) for v in self.embeddings_map.values() if v is not None]
+        embedding_stats = get_embeddings_stats(
+            tensorcache=self.tensor_cache,
+            img_paths=img_paths,
+            embedding_names=embedding_types,    # type: ignore
+            split="train",
+        )
+        return {encoder_to_embedding[k]: v for k, v in embedding_stats.items() if k in encoder_to_embedding}
+
+
+
+
 
 
 class EEGDataset(Dataset):
@@ -370,7 +414,10 @@ class EEGDataset(Dataset):
                 self.__getitem__(i)
 
 
-def load_image_from_path(path: Path, mode: str | None = None) -> Tensor:
+def load_image_from_path(path: Path | str, mode: str | None = None) -> Tensor:
+    if isinstance(path, str):
+        path = Path(path)
+
     if not path.exists():
         raise FileNotFoundError(f"Image not found: {path}")
 
@@ -387,7 +434,7 @@ def load_image_from_path(path: Path, mode: str | None = None) -> Tensor:
 
 
 def batch_load_images(
-    paths: Iterable[Path],
+    paths: Iterable[Path | str],
     parallel: bool = False,
     progressbar: bool = False,
     mode: str | None = None,
@@ -517,3 +564,41 @@ def load_all_eeg_data(
         all_times = torch.tensor([])
 
     return torch.stack(all_eeg_data), torch.stack(all_idxs), all_times, all_ch_names
+
+
+
+
+@torch.no_grad()
+def get_embeddings_stats(
+    tensorcache: TensorCache,
+    img_paths: list[Path],
+    embedding_names: list[IMAGE_ENCODER],
+    split: Literal["train", "test"],
+) -> dict[str, dict[str, torch.Tensor]]:
+    logging.info(f"Getting embedding stats for {embedding_names} - {len(img_paths)} images")
+    _running_embeddings = {}
+
+    for emb_name in embedding_names:
+        arg_list = ((str(img_path), emb_name, split) for img_path in img_paths)
+        _running_embeddings[emb_name] = tensorcache.batch_get(arg_list)
+    
+
+    logging.info(f"Keys gathered: {_running_embeddings.keys()}")
+
+    _running_latents = _running_embeddings
+
+    logging.info(f"Finished getting embeddings {_running_latents.keys()}")
+
+    embedding_stats: dict[str, dict[str, torch.Tensor]] = {
+        k: {
+            "mean": torch.mean(v, dim=0),
+            "std": torch.std(v, dim=0),
+            "min": torch.min(v, dim=0).values,
+            "max": torch.max(v, dim=0).values,
+            "norm": v.norm(dim=-1).mean(),
+        }
+        for k, v in _running_latents.items()
+    }
+
+    logging.info(f"Finished getting embedding stats")
+    return embedding_stats

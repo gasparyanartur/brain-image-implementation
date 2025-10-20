@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 import sys
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 import dotenv
 from huggingface_hub import login
 from pydantic import BaseModel
@@ -16,6 +16,8 @@ import yaml
 
 import matplotlib.pyplot as plt
 
+def casttensor(x: Any) -> torch.Tensor:
+    return cast(torch.Tensor, x)
 
 def setup_logging():
     logging.basicConfig(

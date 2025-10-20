@@ -28,6 +28,7 @@ from brain_image.data import (
 )
 from brain_image.model.eeg_encoder import create_eeg_encoder
 from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
+from brain_image.model.img_encoder import IMAGE_ENCODER
 from brain_image.model.loss import CLIPLoss, InfoNCELoss
 
 from brain_image.model.prior import (
@@ -61,9 +62,9 @@ import wandb
 
 
 class EEGAlignmentConfig(BaseConfig):
-    align_img_encoder: str = "unaligned_synclr_vitb16"
-    recon_latent_encoder: str = "sd_variations_v2"
-    prior_img_encoder: str = "clip_vitl14"
+    align_img_encoder: IMAGE_ENCODER = "unaligned_synclr_vitb16"
+    recon_latent_encoder: IMAGE_ENCODER = "sd_variations_v2"
+    prior_img_encoder: IMAGE_ENCODER = "clip_vitl14"
     eeg_encoder: str = "nice"
 
     do_align: bool = True
@@ -155,8 +156,8 @@ class DataBatchT(TypedDict):
 class EEGAlignmentModel(pl.LightningModule):
     def __init__(
         self,
-        config: EEGAlignmentConfig,
-        dataset_config: EEGDatasetConfig,
+        config: EEGAlignmentConfig | dict,
+        dataset_config: EEGDatasetConfig | dict,
         dtype: torch.dtype = DTYPE,
         init_weights: bool = False,
         compile: bool = True,
@@ -165,6 +166,11 @@ class EEGAlignmentModel(pl.LightningModule):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        if isinstance(config, dict):
+            config = EEGAlignmentConfig.model_validate(config)
+
+        if isinstance(dataset_config, dict):
+            dataset_config = EEGDatasetConfig.model_validate(dataset_config)
 
         self.automatic_optimization = (
             False  # Disable automatic optimization, we will handle it manually
@@ -260,9 +266,13 @@ class EEGAlignmentModel(pl.LightningModule):
         self.learning_rate_options: list[dict[str, Any]] = []
 
         self.atleast_one_training_step: bool = False
-        self.embedding_stats = self._get_embeddings_stats()
+
+        logging.info(f"Finished initializing model")
+
 
     def configure_optimizers(self):
+        logging.info("Configuring optimizers")
+
         def _iter_params(*models: nn.Module | None):
             param_list: list[nn.Parameter] = []
             for model in models:
@@ -404,10 +414,11 @@ class EEGAlignmentModel(pl.LightningModule):
     def load_checkpoint(
         cls, checkpoint_path: str | Path, undo_compile: bool = False, **kwargs
     ):
-        checkpoint_path = Path(checkpoint_path)
-        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         if not undo_compile:
             return super().load_from_checkpoint(checkpoint_path, **kwargs)
+
+        checkpoint_path = Path(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
         # When compile with torch.compile(model) instead of model.compile(),
         # the state_dict gets nested under orig_mod. Needs to be removed.
@@ -525,6 +536,7 @@ class EEGAlignmentModel(pl.LightningModule):
             batch_idx == self.data_module.get_num_batches("test") - 1
         ):
             eval_metrics, eval_outputs = self.run_full_validation(split="test")
+            test_metrics, test_outputs = self.run_full_test()
             metrics.update(eval_metrics)
 
             if eval_outputs and ((wandb_logger := self.get_wandb_logger()) is not None):
@@ -699,7 +711,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 case "none":
                     pass
                 case "z_scale":
-                    stats = self.embedding_stats["prior_img_latent"]
+                    stats = self.data_module.embedding_stats["prior_img_latent"]
                     target_latent = (
                         target_latent - stats["mean"].to(target_latent.device)
                     ) / stats["std"].to(target_latent.device)
@@ -930,17 +942,19 @@ class EEGAlignmentModel(pl.LightningModule):
         split: Literal["val", "test"] = "val",
     ):
         assert (target := all_data.get("prior_img_latent")) is not None
-        stats = self.embedding_stats["prior_img_latent"]
-        target = (target - stats["mean"].to(target)) / stats["std"].to(target)
+
+        if self.config.debug_prior_use_target_as_cond:
+            eeg_latent_normed = F.normalize(-target) + torch.randn_like(target) * 0.2
+        else:
+            assert (
+                eeg_latent_normed := all_data.get("eeg_latent_normed")
+            ) is not None, "EEG latent is not in batch"
 
         metrics = {}
         img_outputs = {}
 
-        gen = torch.Generator(device).manual_seed(self.config.seed)
         pred = self.get_all_prior_preds(
-            all_data,
-            progress_bar=True,
-            generator=gen,
+            eeg_latent_normed,
             batch_size=self.data_module.config.get_batch_size(split),
         )
         assert pred is not None
@@ -974,6 +988,127 @@ class EEGAlignmentModel(pl.LightningModule):
         )
 
         return metrics, img_outputs
+
+    def run_full_test(self, **kwargs) -> tuple[dict[str, Any], dict[str, Any]]:
+        metrics = {}
+        img_outputs = {}
+
+        data_loader = self.data_module.get_dataloader("test")
+        all_data = gather_dataloader(data_loader)
+        all_data = cast(DataBatchT, all_data)
+
+        eeg_latent, eeg_latent_normed = self.get_all_eeg_latents(
+            all_data,
+            batch_size=self.data_module.config.get_batch_size("test"),
+            progress_bar=False,
+            normalize=True,
+        )
+
+        all_data["eeg_latent"], all_data["eeg_latent_normed"] = (
+            eeg_latent,
+            eeg_latent_normed,
+        )
+        device, dtype = self._get_device_dtype()
+
+        if self.config.do_align:
+            metrics_align, img_outputs_align = self._run_test_align(
+                all_data, device
+            )
+            metrics.update(metrics_align)
+            img_outputs.update(img_outputs_align)
+
+        if self.config.do_recon:
+            recon_idxs = kwargs.get("recon_idxs")
+            if recon_idxs is None:
+                #recon_idxs = torch.tensor([
+                #    161,        # Seaweed
+                #    143,        # Pug
+                #    158,        # Scallop
+                #    166,        # Slide
+                #    65,         # Dreidl
+                #    127,        # Pajamas
+                #    100,        # Jelly Beans
+                #])
+
+                recon_idxs = torch.arange(0, all_data["eeg_latent"].size(0))
+            else: 
+                recon_idxs = torch.tensor(recon_idxs)
+
+            metrics_prior, img_outputs_prior = self._run_test_recon(
+                all_data, device, recon_idxs
+            )
+            metrics.update(metrics_prior)
+            img_outputs.update(img_outputs_prior)
+
+        return metrics, img_outputs
+
+    def _run_test_align(
+        self,
+        all_data: DataBatchT,
+        device: torch.device,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        metrics, img_outputs = {}, {}
+
+        # TODO
+
+        return metrics, img_outputs
+
+
+    def _run_test_recon(
+        self,
+        all_data: DataBatchT,
+        device: torch.device,
+        test_recon_idxs: torch.Tensor | None
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        metrics, img_outputs = {}, {}
+
+        assert (target_latent := all_data.get("prior_img_latent")) is not None
+
+        if self.config.debug_prior_use_target_as_cond:
+            assert (
+                "idx" in all_data and all_data["idx"] is not None
+            ), "Index is not in batch"
+            eeg_latent_normed = F.normalize(-target_latent)
+        else:
+            assert (
+                eeg_latent_normed := all_data.get("eeg_latent_normed")
+            ) is not None, "EEG latent is not in batch"
+
+        metrics = {}
+        img_outputs = {}
+
+        prior_pred = self.get_all_prior_preds(
+            eeg_latent_normed,
+            batch_size=self.data_module.config.get_batch_size("test"),
+        )
+        assert prior_pred is not None
+
+        conditioning = torch.cat(
+            [F.normalize(prior_pred), F.normalize(target_latent)], dim=0
+        )
+
+        recon = self.get_prior_reconstructions(
+            conditioning
+        )
+
+        if recon is None:
+            return {}, {}
+
+        recon_pred, recon_target = recon.chunk(2, dim=0)
+
+        lpips_score = self._get_lpips_score(recon_pred, recon_target)
+
+        metrics = {
+            f"eval/recon/lpips": lpips_score.detach().cpu(),
+        }
+        img_outputs = {
+            "eval/recon/pred": [x.detach().cpu().float() for x in recon_pred],
+            "eval/recon/target": [x.detach().cpu().float() for x in recon_target],
+        }
+
+        return metrics, img_outputs
+
+
 
     @torch.no_grad()
     def plot_lowdim_projection(
@@ -1053,14 +1188,36 @@ class EEGAlignmentModel(pl.LightningModule):
         self,
         batch,
         stage: Literal["val", "test"],
-        num_reconstructions: int = 5,
+        num_reconstructions: int | None = None,
+        recon_idxs: torch.Tensor | None = None,
     ):
-        recon_pred, recon_target = self._get_reconstructions(
-            batch, stage, num_reconstructions=num_reconstructions
+        if recon_idxs is None:
+            if num_reconstructions is None:
+                num_reconstructions = self.config.num_reconstructions
+
+            recon_idxs = torch.randint(
+                0,
+                batch["prior_img_latent"].size(0),
+                (num_reconstructions,),
+            )
+
+        device, dtype = self._get_device_dtype()
+        target_latent = batch["prior_img_latent"][recon_idxs].to(
+            device, dtype=dtype
+        )
+        prior_pred = batch["prior_pred"][recon_idxs].to(device, dtype=dtype)
+        conditioning = torch.cat(
+            [F.normalize(prior_pred), F.normalize(target_latent)], dim=0
         )
 
-        if recon_pred is None or recon_target is None:
+        recon = self.get_prior_reconstructions(
+            conditioning
+        )
+
+        if recon is None:
             return {}, {}
+
+        recon_pred, recon_target = recon.chunk(2, dim=0)
 
         lpips_score = self._get_lpips_score(recon_pred, recon_target)
 
@@ -1095,29 +1252,20 @@ class EEGAlignmentModel(pl.LightningModule):
         return None
 
     @torch.no_grad()
-    def _get_reconstructions(
+    def get_prior_reconstructions(
         self,
-        batch,
-        stage: Literal["val", "test"],
-        num_reconstructions: int = 5,
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        conditioning: torch.Tensor,
+        pipe_kwargs: dict = {},
+    ) -> torch.Tensor | None:
         if self.prior is None:
-            return None, None
+            return None
 
         device, dtype = self._get_device_dtype()
-
-        target_latent = batch["prior_img_latent"][:num_reconstructions].to(
-            device, dtype=dtype
-        )
-        target_latent = F.normalize(target_latent)
-        prior_pred = batch["prior_pred"][:num_reconstructions].to(device, dtype=dtype)
-        conditioning = torch.cat(
-            [F.normalize(prior_pred), F.normalize(target_latent)], dim=0
-        )
-
         pipe = IPAdapterReconstructionPipeline.load_pretrained(device=device)
-        reconstruction = pipe.reconstruct_latents(conditioning)
+        reconstruction = pipe.reconstruct_latents(conditioning, **pipe_kwargs)
         del pipe
+
+        return reconstruction
 
         recon_imgs, recon_target = torch.chunk(reconstruction, 2, dim=0)
         return recon_imgs, recon_target
@@ -1136,11 +1284,7 @@ class EEGAlignmentModel(pl.LightningModule):
         batch: DataBatchT,
         device,
         dtype,
-        normalize: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if not normalize:
-            raise ValueError(f"Non-normalized EEG not supported")
-
         assert self.eeg_encoder is not None, "EEG encoder is not initialized"
         assert (subs := batch.get("sub")) is not None, "Subject is not in batch"
         assert (
@@ -1168,29 +1312,22 @@ class EEGAlignmentModel(pl.LightningModule):
     @torch.no_grad()
     def get_all_prior_preds(
         self,
-        all_data: DataBatchT,
+        eeg_latent_normed: torch.Tensor,
         batch_size: int = 512,
         progress_bar: bool = True,
         generator: torch.Generator | None = None,
         prior_kwargs: dict = {},
+        norm_scheme: Literal["none", "z_scale", "l2_scale"] | None = None
     ) -> torch.Tensor | None:
+        device, dtype = self._get_device_dtype()
+
         if self.prior is None:
             return None
 
-        assert (
-            eeg_latent_normed := all_data.get("eeg_latent_normed")
-        ) is not None, "EEG latent is not in batch"
+        if generator is None:
+            generator = torch.Generator(device).manual_seed(self.config.seed)
 
-        if self.config.debug_prior_use_target_as_cond:
-            assert (
-                target_latent := all_data.get("prior_img_latent")
-            ) is not None, "Prior image latent is not in batch"
-            assert (
-                "idx" in all_data and all_data["idx"] is not None
-            ), "Index is not in batch"
-            eeg_latent_normed = F.normalize(-target_latent)
-
-        device, dtype = self._get_device_dtype()
+        norm_scheme = norm_scheme or self.prior.config.norm_scheme
 
         n = eeg_latent_normed.size(0)
         all_prior_preds_ = []
@@ -1208,11 +1345,11 @@ class EEGAlignmentModel(pl.LightningModule):
                     **prior_kwargs,
                 )
                 
-                match self.prior.config.norm_scheme:
+                match norm_scheme:
                     case "none":
                         pass
                     case "z_scale":
-                        stats = self.embedding_stats["prior_img_latent"]
+                        stats = self.data_module.embedding_stats["prior_img_latent"]
                         prior_pred = prior_pred * stats["std"].to(prior_pred.device) + stats["mean"].to(prior_pred.device)
                     case "l2_scale":
                         prior_pred = F.normalize(prior_pred, dim=-1) * (prior_pred.size(-1) ** 0.5)
@@ -1256,47 +1393,12 @@ class EEGAlignmentModel(pl.LightningModule):
                     batch_data,
                     device,
                     dtype,
-                    normalize=normalize,
                 )
                 all_latents.append(eeg_latent.detach().cpu())
                 all_latents_normed.append(eeg_latent_normed.detach().cpu())
                 pbar.update(len(eeg_latent))
 
         return torch.cat(all_latents, dim=0), torch.cat(all_latents_normed, dim=0)
-
-    @torch.no_grad()
-    def _get_embeddings_stats(self):
-        logging.info(
-            f"Getting embedding stats for {self.config.embeddings_to_compute_stats}"
-        )
-        _running_embeddings = {}
-
-        for batch in self.train_dataloader():
-            for emb_name in self.config.embeddings_to_compute_stats:
-                if emb_name not in batch:
-                    continue
-
-                if emb_name not in _running_embeddings:
-                    _running_embeddings[emb_name] = []
-
-                _running_embeddings[emb_name].append(batch[emb_name])
-
-        _running_latents = {
-            k: torch.cat(v, dim=0) for k, v in _running_embeddings.items()
-        }
-
-        if "prior_img_latent" in _running_latents:
-            _running_latents["prior_img_latent_normed"] = F.normalize(
-                _running_latents["prior_img_latent"]
-            )
-
-        embedding_stats: dict[str, dict[str, torch.Tensor]] = {
-            k: {"mean": v.mean(dim=0), "std": v.std(dim=0)}
-            for k, v in _running_latents.items()
-        }
-
-        logging.info(f"Finished getting embedding stats")
-        return embedding_stats
 
 
 def _index_encoding(x: torch.Tensor, d_embed: int = 1024) -> torch.Tensor:
