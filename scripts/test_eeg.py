@@ -1,3 +1,4 @@
+import datetime
 import re
 import argparse 
 import logging
@@ -5,9 +6,16 @@ from pathlib import Path
 
 from typing import Literal
 from pydantic import BaseModel
+import json
 
+import torch
+
+from brain_image.metrics import METRIC_LOOKUP, MetricType
 from brain_image.model.eeg_alignment import EEGAlignmentModel
 from brain_image.utils import flatten_configs, setup_logging
+import os
+
+from torchvision.utils import save_image
 
 
 class Args(BaseModel):
@@ -16,6 +24,9 @@ class Args(BaseModel):
     hyperparameters_path: Path | None = None
     checkpoint_selection: Literal["last", "max", "min"] = "min"
     checkpoint_metric: str = "val-loss"
+    output_dir: Path = Path("outputs/experiments")
+    metrics: list[str] = ['pixcorr', 'ssim', 'alex2', 'alex5', 'inceptionv3', 'clip', 'efficientnet', 'swav']
+    recon_idxs: list[int] | None = None
 
 
 def _find_cp_to_use(checkpoint_dir: Path, checkpoint_selection: Literal["last", "max", "min"], checkpoint_metric: str) -> Path:
@@ -84,14 +95,42 @@ def main(args: Args):
     logging.info(f"Finished loading model.")
     
     logging.info(f"Running full test...")
-    metrics, imgs = model.run_full_test()
+    metrics, imgs, outputs = model.run_full_test(metrics=args.metrics, recon_idxs=args.recon_idxs if args.recon_idxs else None)
     logging.info(f"Finished running full test.")
 
     logging.info(f"Metrics:")
     for key, value in metrics.items():
         logging.info(f"  {key}: {value}")
 
-    # TOOD: Handle outputs
+    metrics = {name.split("/")[-1]: value.item() for name, value in metrics.items()}   # Remove the prefix
+    imgs = {name.split("/")[-1]: value for name, value in imgs.items()}   # Remove the prefix
+    outputs = {name.split("/")[-1]: value for name, value in outputs.items()}   # Remove the prefix
+
+    name = model.get_name(timestamp=False)
+    timestamp = datetime.datetime.now().strftime("%y%m%d_%H%M%S")
+    name = f"{name}_{timestamp}"
+    output_path = args.output_dir / name
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path / "metrics.json", "w") as f:
+        json.dump(metrics, f, indent=4)
+
+    with open(output_path / "config.json", "w") as f:
+        json.dumps(
+            args.model_dump_json(indent=4)
+        )
+
+    reconstructions = imgs["reconstruction"] 
+    ground_truths = imgs["ground_truth"]
+    idxs = outputs["idx"]
+    img_paths = outputs["img_path"]
+    img_dir = Path(output_path / "imgs")
+    img_dir.mkdir(parents=True, exist_ok=True)
+    
+    for reconstruction, ground_truth, idx, img_path in zip(reconstructions, ground_truths, idxs, img_paths):
+        save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
+        save_image(ground_truth, img_dir / f"{idx}_gt.jpg")
+
 
 
 if __name__ == "__main__":
@@ -101,6 +140,9 @@ if __name__ == "__main__":
     parser.add_argument("--hyperparameters_path", "-hp", type=Path, help="Path to the hyperparameters")
     parser.add_argument("--checkpoint_selection", choices=["last", "max", "min"], default="min", help="How to select the checkpoint")
     parser.add_argument("--checkpoint_metric", default="val-loss", help="Metric used to find best checkpoint")
+    parser.add_argument("--output_dir", "-o", type=Path, help="Output directory", default=Path("outputs/experiments"))
+    parser.add_argument("--metrics", "-m", type=str, nargs="+", default=list(METRIC_LOOKUP.keys()), choices=list(METRIC_LOOKUP.keys()), help="Metrics to compute")
+    parser.add_argument("--recon_idxs", "-i", type=int, nargs="*", default=None)
 
 
     args = parser.parse_args()

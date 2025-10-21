@@ -1,4 +1,5 @@
 from abc import abstractmethod, ABC
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union, cast
 
 import torch
@@ -399,7 +400,7 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
         outputs = []
         for i in tqdm.tqdm(range(conditioning_latent.size(0)), disable=not progress_bar, desc="Reconstructing latents"):
             cond_latent = [conditioning_latent[i].unsqueeze(0)]
-            base_latent = low_image_latent[i] if low_image_latent is not None else None # TODO
+            base_latent = cast(torch.FloatTensor, low_image_latent[i]) if low_image_latent is not None else None # TODO
             recon = self.generate_ip_adapter_embeds(
                 self.pipe,
                 prompt=kwargs.get("prompt", ""),
@@ -407,12 +408,14 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
                 generator=generator,
-                output_type="pt"
+                output_type="pt",
+                latents=base_latent
             ).images    # type: ignore
             outputs.append(recon)
-        
-        return torch.cat(outputs) # type: ignore
+            reconstructions = torch.cat(outputs)
 
+    
+        return reconstructions
 
 
 

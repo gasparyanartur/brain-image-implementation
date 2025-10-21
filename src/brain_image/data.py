@@ -218,6 +218,14 @@ class DataModule(LightningDataModule, ABC):
     def _create_dataloader(self, split) -> torch.utils.data.DataLoader:
         raise NotImplementedError
 
+    def cleanup(self) -> None:
+        dataloader_keys = list(self.dataloaders.keys())
+        for key in dataloader_keys:
+            if self.dataloaders[key] is None:
+                continue
+            del self.dataloaders[key]
+
+
 
 
 class EmbeddingsMap(TypedDict):
@@ -294,7 +302,7 @@ class EEGDataModule(DataModule):
             "shuffle": shuffle,
             "num_workers": num_workers,
             "pin_memory": device != "cpu",
-            "persistent_workers": num_workers > 0,
+            "persistent_workers": (split == "train") and (num_workers > 0),
         }
         dataloader_args.update(kwargs)
 
@@ -440,8 +448,8 @@ def batch_load_images(
     mode: str | None = None,
 ) -> Tensor:
     if parallel:
-        with mp.Pool() as pool:
-            imgs = pool.map(functools.partial(load_image_from_path, mode=mode), paths)
+        with ThreadPoolExecutor() as pool:
+            imgs = list(pool.map(functools.partial(load_image_from_path, mode=mode), paths, timeout=10))
     else:
         imgs = [
             load_image_from_path(path, mode=mode)

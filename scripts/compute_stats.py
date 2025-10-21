@@ -21,6 +21,41 @@ class Arguments(BaseModel):
     split: Literal["train", "test"]
 
 
+@torch.no_grad()
+def get_embeddings_stats(
+    tensorcache: TensorCache,
+    img_paths: list[Path],
+    embedding_names: list[IMAGE_ENCODER],
+    split: Literal["train", "test"],
+) -> dict[str, dict[str, torch.Tensor]]:
+    logging.info(f"Getting embedding stats for {embedding_names} - {len(img_paths)} images")
+    _running_embeddings = {}
+
+    for emb_name in embedding_names:
+        arg_list = ((str(img_path), emb_name, split) for img_path in img_paths)
+        _running_embeddings[emb_name] = tensorcache.batch_get(arg_list)
+    
+
+    logging.info(f"Keys gathered: {_running_embeddings.keys()}")
+
+    _running_latents = _running_embeddings
+
+    logging.info(f"Finished getting embeddings {_running_latents.keys()}")
+
+    embedding_stats: dict[str, dict[str, torch.Tensor]] = {
+        k: {
+            "mean": torch.mean(v, dim=0),
+            "std": torch.std(v, dim=0),
+            "min": torch.min(v, dim=0).values,
+            "max": torch.max(v, dim=0).values,
+            "norm": v.norm(dim=-1).mean(),
+        }
+        for k, v in _running_latents.items()
+    }
+
+    logging.info(f"Finished getting embedding stats")
+    return embedding_stats
+
 
 def main(args: Arguments):
     setup_logging()

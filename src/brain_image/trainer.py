@@ -19,7 +19,6 @@ class WandbConfig(BaseConfig):
     project: str = "brain-image"
     entity: Optional[str] = None
     log_model: bool = False
-    wandb_tags: List[str] = []
     mode: Literal["online", "offline"] = "online"
 
 
@@ -68,21 +67,6 @@ class Trainer:
         self.model: EEGAlignmentModel = model
         self.pl_trainer = self.create_pl_trainer()
 
-    def get_tags(self):
-        wandb_tags = ["train", *self.config.wandb.wandb_tags]
-
-        if "SLURM_JOB_ID" in os.environ:
-            wandb_tags.append("slurm")
-        else:
-            wandb_tags.append("local")
-
-        if self.config.overfit_batches != 0:
-            wandb_tags.append("overfit")
-
-        if self.config.debug_mode:
-            wandb_tags.append("debug")
-
-        return wandb_tags
 
     def create_pl_trainer(self) -> pl.Trainer:
         callbacks: list[pl.Callback] = []
@@ -118,9 +102,8 @@ class Trainer:
             )
             callbacks.append(early_stopping_callback)
 
-        tags = sorted(self.get_tags())
 
-        log_path = self.config.log_dir / "-".join(tags)
+        log_path = self.config.log_dir / self.get_train_title()
         logging.info(f"Logging to path {log_path}...")
 
         if not log_path.exists():
@@ -128,14 +111,14 @@ class Trainer:
 
         loggers.append(
             CSVLogger(
-                save_dir=self.config.log_dir,
-                name="-".join(tags),
+                save_dir=log_path,
+                name=None,
             )
         )
         loggers.append(
             TensorBoardLogger(
-                save_dir=self.config.log_dir,
-                name="-".join(tags),
+                save_dir=log_path,
+                name=None,
                 default_hp_metric=False,
             )
         )
@@ -146,10 +129,11 @@ class Trainer:
             name = self.get_train_title()
             wandb_logger = WandbLogger(
                 project=self.config.wandb.project,
+                save_dir=log_path,
                 entity=self.config.wandb.entity,
                 name=name,
                 log_model=self.config.wandb.log_model,
-                tags=tags,
+                tags=self.get_title_components(),
                 offline=self.config.wandb.mode == "offline",
             )
             loggers.append(wandb_logger)
@@ -172,23 +156,37 @@ class Trainer:
             accelerator=accelerator,
         )
 
-    def get_train_title_components(self) -> list[str]:
+    def get_title_components(self) -> list[str]:
         components = [
             f"{self.config.run_name}",
-            datetime.datetime.now().strftime("%y%m%d_%H%M%S"),
+            self.model.get_name(timestamp=True),
+            "train",
         ]
+
+        if "SLURM_JOB_ID" in os.environ:
+            components.append("slurm")
+        else:
+            components.append("local")
+
+        if self.config.overfit_batches != 0:
+            components.append("overfit")
+
+        if self.config.debug_mode:
+            components.append("debug")
+
         if (slurm_job_id := os.environ.get("SLURM_JOB_ID")) is not None:
             components.append(f"slurm_{slurm_job_id}")
         if (slurm_array_job_id := os.environ.get("SLURM_ARRAY_JOB_ID")) is not None:
             components.append(f"array_{slurm_array_job_id}")
+
         return components
 
     def get_train_title(self) -> str:
-        return "-".join(self.get_train_title_components())
+        return "-".join(self.get_title_components())
 
     def train(self, ckpt_path: Optional[Path] = None):
         logging.info(
-            f"Starting {self.get_train_title_components()} training with Lightning..."
+            f"Starting {self.get_title_components()} training with Lightning..."
         )
 
         ckpt_path_str = str(ckpt_path) if ckpt_path else None
@@ -266,25 +264,3 @@ class EEGAlignTrainer(Trainer):
         super().__init__(trainer_config, model)
         self.model = model
 
-    def get_tags(self):
-        tags = super().get_tags()
-
-        if self.model.config.do_align:
-            tags.append("align")
-        if self.model.config.do_recon:
-            tags.append("recon")
-        if self.model.config.do_recon_low:
-            tags.append("lowrec")
-
-        tags.append(self.model.config.align_img_encoder)
-        tags.append(self.model.config.eeg_encoder)
-
-        return tags
-
-    def get_train_title_components(self) -> list[str]:
-        components = super().get_train_title_components()
-
-        tags = self.get_tags()
-        components.extend(tags)
-
-        return components
