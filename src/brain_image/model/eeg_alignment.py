@@ -795,7 +795,7 @@ class EEGAlignmentModel(pl.LightningModule):
                     ) / stats["std"].to(target_latent.device)
                 case "l2_scale":
                     target_latent = F.normalize(target_latent) * (
-                        target_latent.dim(-1) ** 0.5
+                        target_latent.size(-1) ** 0.5
                     )
 
         if self.config.debug_prior_use_target_as_cond:

@@ -27,12 +27,12 @@ CLI_ARGS="$@"
 echo "CLI_ARGS: $CLI_ARGS"
 
 ./scripts/container/run_singularity.sh \
-    python /workspace/scripts/test_eeg.py $CLI_ARGS 
+    python /workspace/scripts/train_eeg.py $CLI_ARGS 
 
 if [ $? -eq 0 ]; then
-    echo "Testing completed successfully"
+    echo "Training completed successfully"
 else
-    echo "Testing failed with exit code $?"
+    echo "Training failed with exit code $?"
     exit 1
 fi
 
