@@ -3,7 +3,6 @@ defaults:
   - dataset: eeg_dataset
   - model: eeg_model
   - trainer: eeg_trainer
-  - wandb: wandb
   - _self_
 
 checkpoint_path: null
