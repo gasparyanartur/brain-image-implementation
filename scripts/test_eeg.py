@@ -19,12 +19,12 @@ from torchvision.utils import save_image
 
 
 class Args(BaseModel):
-    run_path: Path | None = None
+    run_path: Path
     checkpoint_path: Path | None = None
     hyperparameters_path: Path | None = None
     checkpoint_selection: Literal["last", "max", "min"] = "min"
     checkpoint_metric: str = "val-loss"
-    output_dir: Path = Path("outputs/experiments")
+    output_dir: Path | None = None
     metrics: list[str] = ['pixcorr', 'ssim', 'alex2', 'alex5', 'inceptionv3', 'clip', 'efficientnet', 'swav']
     recon_idxs: list[int] | None = None
 
@@ -80,14 +80,20 @@ def main(args: Args):
     for key, value in flatten_configs(args).items():
         logging.info(f"  {key}: {value}")
 
+    if (version_dirs := list(args.run_path.glob("version_*"))):
+        for version_dir in reversed(sorted(version_dirs)):
+            if version_dir.glob("*.ckpt"):
+                args.run_path = version_dir
+                break
+        else:
+            raise ValueError(f"No checkpoints found in any version of {list(v.name for v in version_dirs)}")
+
+
     if args.checkpoint_path is None:
-        if args.run_path is None:
-            raise ValueError(f"If checkpoint_path is not specified, run_path must be specified")
-
         logging.info(f"Checkpoint path not specified, selecting checkpoint from {args.run_path}")
-        args.checkpoint_path = _find_cp_to_use(args.run_path / "checkpoints", args.checkpoint_selection, args.checkpoint_metric)
+        cp_dir = args.run_path / "checkpoints"
+        args.checkpoint_path = _find_cp_to_use(cp_dir, args.checkpoint_selection, args.checkpoint_metric)
         logging.info(f"Selected checkpoint: {args.checkpoint_path}")
-
 
     logging.info(f"Loading model from {args.checkpoint_path} with hyperparameters from {args.hyperparameters_path}...")
     model = EEGAlignmentModel.load_from_checkpoint(args.checkpoint_path, hparams_file=args.hyperparameters_path)
@@ -106,16 +112,14 @@ def main(args: Args):
     imgs = {name.split("/")[-1]: value for name, value in imgs.items()}   # Remove the prefix
     outputs = {name.split("/")[-1]: value for name, value in outputs.items()}   # Remove the prefix
 
-    name = model.get_name(timestamp=False)
-    timestamp = datetime.datetime.now().strftime("%y%m%d_%H%M%S")
-    name = f"{name}_{timestamp}"
-    output_path = args.output_dir / name
-    output_path.mkdir(parents=True, exist_ok=True)
+    name = args.run_path.name
+    output_dir = (args.output_dir / name) if (args.output_dir is not None) else (args.run_path / "test")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(output_path / "metrics.json", "w") as f:
+    with open(output_dir / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=4)
 
-    with open(output_path / "config.json", "w") as f:
+    with open(output_dir / "config.json", "w") as f:
         json.dumps(
             args.model_dump_json(indent=4)
         )
@@ -124,7 +128,7 @@ def main(args: Args):
     ground_truths = imgs["ground_truth"]
     idxs = outputs["idx"]
     img_paths = outputs["img_path"]
-    img_dir = Path(output_path / "imgs")
+    img_dir = Path(output_dir / "imgs")
     img_dir.mkdir(parents=True, exist_ok=True)
     
     for reconstruction, ground_truth, idx, img_path in zip(reconstructions, ground_truths, idxs, img_paths):
@@ -135,12 +139,12 @@ def main(args: Args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run_path", "-r", type=Path, help="Path to the run")
-    parser.add_argument("--checkpoint_path", "-c", type=Path, help="Path to the checkpoint")
+    parser.add_argument("run_path", type=Path, help="Path to the run")
+    parser.add_argument("--checkpoint_path", "-c", type=Path, help="Path to the checkpoint, overrides checkpoints found in the run path")
     parser.add_argument("--hyperparameters_path", "-hp", type=Path, help="Path to the hyperparameters")
     parser.add_argument("--checkpoint_selection", choices=["last", "max", "min"], default="min", help="How to select the checkpoint")
     parser.add_argument("--checkpoint_metric", default="val-loss", help="Metric used to find best checkpoint")
-    parser.add_argument("--output_dir", "-o", type=Path, help="Output directory", default=Path("outputs/experiments"))
+    parser.add_argument("--output_dir", "-o", type=Path, help="Experiment directory. if None, results are written to run_path/outputs", default=None)
     parser.add_argument("--metrics", "-m", type=str, nargs="+", default=list(METRIC_LOOKUP.keys()), choices=list(METRIC_LOOKUP.keys()), help="Metrics to compute")
     parser.add_argument("--recon_idxs", "-i", type=int, nargs="*", default=None)
 
