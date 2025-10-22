@@ -307,15 +307,14 @@ class EEGAlignmentModel(pl.LightningModule):
         name_components.append(f"eeg_{self.config.eeg_encoder}")
 
         if self.config.do_align:
-            name_components.append(f"align_{self.config.align_img_encoder}")
+            name_components.append(f"alig_{self.config.align_img_encoder}")
 
         if self.config.do_recon:
-            name_components.append(f"recon_{self.config.recon_latent_encoder}")
+            name_components.append(f"reco_{self.config.prior_img_encoder}")
 
         if self.config.do_recon_low:
-            name_components.append(f"recon_low_{self.config.recon_latent_encoder}")
+            name_components.append(f"relo_{self.config.recon_latent_encoder}")
 
-        name_components.append(f"seed_{self.config.seed}")
         return "-".join(name_components)
 
     def configure_optimizers(self):

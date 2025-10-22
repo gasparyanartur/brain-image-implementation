@@ -32,7 +32,18 @@ symlink $storage_path/tensorcache tensorcache
 symlink $storage_path/logs logs
 symlink $storage_path/models models
 symlink $storage_path/.cache .cache
+symlink $storage_path/experiments experiments
 ```
+
+If you're on a SLURM cluster, also create the following directories:
+
+```
+mkdir -p logs/slurm/setup_data
+mkdir -p logs/slurm/generate_embeddings
+mkdir -p logs/slurm/train_eeg
+mkdir -p logs/slurm/test_eeg
+```
+
 
 * Option B: Go into src/brain_image/configs/ and update the paths in each configuration file to point to the directories you want to use.
 
@@ -48,6 +59,7 @@ Setting and install UV.
 ```
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv
+source .venv/bin/activate
 uv sync
 ```
 
@@ -79,13 +91,31 @@ The output should be an image named something like `images/brain_{datetime}.sif`
 Once everything works, run the data downloading script. For this example we use sub-8, but repeat for any subs you want to include.
 
 ```
-uv run scripts/download_data.py
+python scripts/setup_data.py --subs 8
+```
+or
+```
+sbatch scripts/slurm/run_setup_data.sh --subs 8
 ```
 
-Next, generate embeddings:
+### Step 4: Generate embeddings
+
+The training loop assumes all relevant image latents are precomputed and stored in `tensorcache`. All list of supported image encoder latents can be found in `src/brain_image/model/img_encoder.py`.
+
+By default, the embeddings generated are found in `src/configs/generate_embeddings.yaml`
 
 ```
-python scripts/generate_embeddings.py
+python scripts/generate_embeddings.py 
+```
+or
+```
+sbatch scripts/slurm/run_generate_embeddings.sh
+```
+
+Embeddings for specific image encoders can be generated my specifying the `model_names` argument:
+
+```
+python scripts/generate_embeddings.py model_names=[clip_vith14]
 ```
 
 ### Step 4: Configs
@@ -93,8 +123,11 @@ python scripts/generate_embeddings.py
 Before you start training, you need to configure the hydra configs, found under `src/brain_image/configs/`.
 In particular, make sure the paths are pointing to desired location, as mention in `Step 1`.
 
+### Step 5: Environment
 
+The training script loads your API keys from .env by default.
+This is done mainly for two things: `Hugging Face Hub` and `Weights and Biases`
 
-### Step 5: Logging
+Create a .env file in the root of the project,.
 
 TODO: Talk about wandb, under configs/... Mention setting up WANDB_API_KEY in your environment 

@@ -1,5 +1,4 @@
 from __future__ import annotations
-import datetime
 import os
 from pathlib import Path
 import logging
@@ -29,7 +28,7 @@ class TrainConfig(BaseConfig):
     init_weights: bool = True
     debug_mode: bool = False
 
-    log_dir: Path = Path("logs")
+    log_dir: Path = Path("logs/train")
     enable_barebones: bool = False
     checkpoint_monitor: str = "val/loss"
     checkpoint_monitor_mode: Literal["min", "max"] = "max"
@@ -102,12 +101,9 @@ class Trainer:
             )
             callbacks.append(early_stopping_callback)
 
-
-        log_path = self.config.log_dir / self.get_train_title()
+        log_path = self.config.log_dir / self.model.get_name()
+        log_path.mkdir(parents=True, exist_ok=True)
         logging.info(f"Logging to path {log_path}...")
-
-        if not log_path.exists():
-            log_path.mkdir()
 
         model_id = create_model_id()
 
@@ -166,11 +162,6 @@ class Trainer:
             "train",
         ]
 
-        if "SLURM_JOB_ID" in os.environ:
-            components.append("slurm")
-        else:
-            components.append("local")
-
         if self.config.overfit_batches != 0:
             components.append("overfit")
 
@@ -178,9 +169,12 @@ class Trainer:
             components.append("debug")
 
         if (slurm_job_id := os.environ.get("SLURM_JOB_ID")) is not None:
-            components.append(f"slurm_{slurm_job_id}")
+            components.append(f"slurmid_{slurm_job_id}")
+        else:
+            components.append("local")
+
         if (slurm_array_job_id := os.environ.get("SLURM_ARRAY_JOB_ID")) is not None:
-            components.append(f"array_{slurm_array_job_id}")
+            components.append(f"slurmarr_{slurm_array_job_id}")
 
         return components
 
