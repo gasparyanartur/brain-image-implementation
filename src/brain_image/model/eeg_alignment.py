@@ -27,7 +27,7 @@ from brain_image.data import (
     batch_load_images,
     get_image_paths,
 )
-from brain_image.metrics import MetricName, evaluate_metrics
+from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
 from brain_image.model.eeg_encoder import create_eeg_encoder
 from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
 from brain_image.model.img_encoder import IMAGE_ENCODER
@@ -989,6 +989,7 @@ class EEGAlignmentModel(pl.LightningModule):
 
         align_img_latent_normed = F.normalize(align_img_latent)
         sim = eeg_latent_normed.to(device) @ align_img_latent_normed.T
+
         top_sim = sim.topk(1, dim=-1).indices.flatten()  # <B, 1>
         chosen_idx = indexes[top_sim]
         top1_acc = (chosen_idx == indexes).float().mean()
@@ -1113,8 +1114,33 @@ class EEGAlignmentModel(pl.LightningModule):
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         metrics, img_outputs = {}, {}
 
-        # TODO
+        assert (
+            eeg_latent_normed := all_data.get("eeg_latent_normed")
+        ) is not None, "EEG latent is not in batch"
 
+        assert (
+            align_img_latent := all_data.get("align_img_latent")
+        ) is not None, "Align img latent is not in batch"
+
+        assert (indexes := all_data.get("idx")) is not None, "Indices are not in batch"
+
+        eeg_latent_normed = eeg_latent_normed.to(device)
+        align_img_latent = align_img_latent.to(device)
+        indexes = indexes.to(device)
+
+        align_img_latent_normed = F.normalize(align_img_latent)
+        sim = eeg_latent_normed.to(device) @ align_img_latent_normed.T
+
+        brain_acc = get_top1_acc(sim, axis=1)
+        image_acc = get_top1_acc(sim, axis=0)
+
+        metrics = {
+            "align/brain_acc": brain_acc,
+            "align/image_acc": image_acc,
+        }
+
+        img_outputs = {
+        }
         return metrics, img_outputs
 
     def _run_test_recon(

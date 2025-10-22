@@ -108,9 +108,7 @@ def main(args: Args):
     for key, value in metrics.items():
         logging.info(f"  {key}: {value}")
 
-    metrics = {name.split("/")[-1]: value.item() for name, value in metrics.items()}   # Remove the prefix
-    imgs = {name.split("/")[-1]: value for name, value in imgs.items()}   # Remove the prefix
-    outputs = {name.split("/")[-1]: value for name, value in outputs.items()}   # Remove the prefix
+    metrics = {name: value.item() for name, value in metrics.items()}
 
     name = args.run_path.name
     output_dir = (args.output_dir / name) if (args.output_dir is not None) else (args.run_path / "test")
@@ -124,11 +122,12 @@ def main(args: Args):
             args.model_dump_json(indent=4)
         )
 
-    reconstructions = imgs["reconstruction"] 
-    ground_truths = imgs["ground_truth"]
-    idxs = outputs["idx"]
-    img_paths = outputs["img_path"]
-    img_dir = Path(output_dir / "imgs")
+    # Reconstructions
+    reconstructions = imgs["prior/reconstruction"] 
+    ground_truths = imgs["prior/ground_truth"]
+    idxs = outputs["prior/idx"]
+    img_paths = outputs["prior/img_path"]
+    img_dir = Path(output_dir / "reconstructions")
     img_dir.mkdir(parents=True, exist_ok=True)
     
     for reconstruction, ground_truth, idx, img_path in zip(reconstructions, ground_truths, idxs, img_paths):

@@ -3,7 +3,7 @@ defaults:
   - _self_
 
 model:
-  do_align: false
+  do_align: true
   do_recon: true
   do_recon_low: false
   
@@ -26,7 +26,7 @@ model:
   prior_lr: 1e-3
   prior_min_lr: 1e-7
   prior_warmup_epochs: 5
-  prior_delay_epochs: 0
+  prior_delay_epochs: 10
 
   max_epochs: 500
   #max_epochs: 150
@@ -34,8 +34,7 @@ model:
 trainer:
   checkpoint_monitor_early_stop: 150
 
-
 dataset:
-  batch_size: 1024
+  batch_size: 512
   val_batch_size: 256
   test_batch_size: 256

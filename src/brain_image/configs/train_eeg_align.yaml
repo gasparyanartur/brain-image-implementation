@@ -1,8 +1,5 @@
 defaults:
-  - base
-  - dataset: eeg_dataset
-  - model: eeg_model
-  - trainer: eeg_trainer
+  - train_eeg
   - _self_
 
 model:
@@ -26,6 +23,3 @@ dataset:
   batch_size: 512
   val_batch_size: 256
   test_batch_size: 256
-
-checkpoint_path: null
-resume_training: false

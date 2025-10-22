@@ -4,8 +4,6 @@ defaults:
   - model: eeg_model
   - trainer: eeg_trainer
   - wandb: wandb
-  - override hydra/job_logging: disabled
-  - override hydra/hydra_logging: disabled
   - _self_
 
 checkpoint_path: null
