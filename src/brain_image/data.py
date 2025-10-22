@@ -296,7 +296,7 @@ class EEGDataModule(DataModule):
             case "test":
                 shuffle = False 
 
-        num_workers = self.config.num_workers or mp.cpu_count()
+        num_workers = self.config.num_workers or min(32, mp.cpu_count())
         device = get_device_str()
         dataloader_args = {
             "batch_size": self.config.get_batch_size(split),
