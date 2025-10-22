@@ -2,11 +2,11 @@
 #SBATCH --job-name=train_eeg
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=64
-#SBATCH --mem=256G
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=128G
 #SBATCH --gpus=1
-#SBATCH --time=2-00:00:00
-#SBATCH --output=logs/slurm/train_eeg/%j.out
+#SBATCH --time=1-00:00:00
+#SBATCH --output=logs/slurm/test_eeg/%j.out
 #SBATCH --account=Berzelius-2025-278
 
 
@@ -27,12 +27,12 @@ CLI_ARGS="$@"
 echo "CLI_ARGS: $CLI_ARGS"
 
 ./scripts/container/run_singularity.sh \
-    python /workspace/scripts/test_eeg.py $CLI_ARGS 
+    python /workspace/scripts/train_eeg.py $CLI_ARGS 
 
 if [ $? -eq 0 ]; then
-    echo "Testing completed successfully"
+    echo "Training completed successfully"
 else
-    echo "Testing failed with exit code $?"
+    echo "Training failed with exit code $?"
     exit 1
 fi
 
