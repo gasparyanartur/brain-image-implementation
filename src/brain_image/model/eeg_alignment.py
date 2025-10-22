@@ -75,7 +75,7 @@ class EEGAlignmentConfig(BaseConfig):
 
     align_input_noise: float = 0.0
 
-    plot_lowdim_proj: bool = True
+    plot_lowdim_proj: bool = False
     low_dim_proj_pca: int = 50
 
     debug_prior_use_target_as_cond: bool = False
@@ -643,7 +643,6 @@ class EEGAlignmentModel(pl.LightningModule):
             if isinstance(self.device, torch.device)
             else get_device(self.device)
         )
-
         eeg_latent, eeg_latent_normed = self.get_eeg_latent(
             batch,
             device,
@@ -1295,11 +1294,12 @@ class EEGAlignmentModel(pl.LightningModule):
             if num_reconstructions is None:
                 num_reconstructions = self.config.num_reconstructions
 
-            recon_idxs = torch.randint(
-                0,
-                batch["prior_img_latent"].size(0),
-                (num_reconstructions,),
-            )
+            #recon_idxs = torch.randint(
+            #    0,
+            #    batch["prior_img_latent"].size(0),
+            #    (num_reconstructions,),
+            #)
+            recon_idxs = torch.arange(num_reconstructions)
 
         device, dtype = self._get_device_dtype()
         target_latent = batch["prior_img_latent"][recon_idxs].to(device, dtype=dtype)
