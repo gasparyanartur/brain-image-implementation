@@ -16,6 +16,8 @@ model:
 
   max_epochs: 40
 
+  full_eval_every_epochs: 5
+
 trainer:
   checkpoint_monitor_early_stop: 10
 

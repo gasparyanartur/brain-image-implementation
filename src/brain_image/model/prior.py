@@ -709,6 +709,7 @@ class SimpleDiffusionPrior(nn.Module):
         self.eval()
 
         device = self._dummy_param.device
+        print(device)
 
         # Validate inputs
         if conditioning is None:
