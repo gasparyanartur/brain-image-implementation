@@ -117,6 +117,18 @@ class EEGAlignmentConfig(BaseConfig):
     debug_metrics: bool = False
     eeg_encoder_path: Path | None = None
 
+    highlighted_recons: list[int] = [
+        161,  # Seaweed
+        143,  # Pug
+        158,  # Scallop
+        166,  # Slide
+        65,  # Dreidel
+        127,  # Pajamas
+        100,  # Jelly Beans
+        141,  # Possum
+        198,  # Wine
+    ]
+
     max_epochs: int = 100
 
     seed: int = 42
@@ -175,6 +187,7 @@ class EEGAlignmentModel(pl.LightningModule):
         compile: bool = True,
         cache_dir: Path = Path("tensorcache"),
         eeg_encoder_path: Path | None = None,
+        model_id: str | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -187,6 +200,8 @@ class EEGAlignmentModel(pl.LightningModule):
         self.automatic_optimization = (
             False  # Disable automatic optimization, we will handle it manually
         )
+
+        self.model_id = model_id
 
         self.config: EEGAlignmentConfig = (
             config
@@ -290,7 +305,7 @@ class EEGAlignmentModel(pl.LightningModule):
             )
 
         name_components.append(f"eeg_{self.config.eeg_encoder}")
-        
+
         if self.config.do_align:
             name_components.append(f"align_{self.config.align_img_encoder}")
 
@@ -302,7 +317,6 @@ class EEGAlignmentModel(pl.LightningModule):
 
         name_components.append(f"seed_{self.config.seed}")
         return "-".join(name_components)
-
 
     def configure_optimizers(self):
         logging.info("Configuring optimizers")
@@ -575,14 +589,34 @@ class EEGAlignmentModel(pl.LightningModule):
             if eval_outputs and ((wandb_logger := self.get_wandb_logger()) is not None):
                 for k, v in eval_outputs.items():
                     wandb_logger.log_image(key="test/" + k, images=v)
-            
-            test_metrics, test_img_outputs, _ = self.run_full_test()
-            if test_img_outputs and ((wandb_logger := self.get_wandb_logger()) is not None):
+
+            test_metrics, test_img_outputs, test_outputs = self.run_full_test()
+            if test_img_outputs and (
+                (wandb_logger := self.get_wandb_logger()) is not None
+            ):
+                # Log selected handful of images to weights and biases
+
+                idxs = test_outputs["prior/idx"]
+                selected_img_outputs = {}
                 for k, v in test_img_outputs.items():
+                    selected_img_outputs[k] = []
+                    for imgs, idx in zip(v, idxs):
+                        if idx in self.config.highlighted_recons:
+                            selected_img_outputs[k].append(imgs)
+
+                for k, v in selected_img_outputs.items():
+                    logging.info(f"Logging {len(v)} images for {k}")
                     wandb_logger.log_image(key="full_test/" + k, images=v)
+
             if test_metrics:
                 for k, v in test_metrics.items():
-                    self.log(f"full_test/{k}", v, prog_bar=False, on_step=False, on_epoch=True)
+                    self.log(
+                        f"full_test/{k}",
+                        v,
+                        prog_bar=False,
+                        on_step=False,
+                        on_epoch=True,
+                    )
 
             # Delete training loader to kill persistent workers
             self.data_module.cleanup()
@@ -763,7 +797,6 @@ class EEGAlignmentModel(pl.LightningModule):
                     target_latent = F.normalize(target_latent) * (
                         target_latent.dim(-1) ** 0.5
                     )
-
 
         if self.config.debug_prior_use_target_as_cond:
             eeg_latent_normed = F.normalize(-target_latent)
@@ -1033,7 +1066,9 @@ class EEGAlignmentModel(pl.LightningModule):
 
         return metrics, img_outputs
 
-    def run_full_test(self, **kwargs) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    def run_full_test(
+        self, **kwargs
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         metrics = {}
         img_outputs = {}
         outputs = {}
@@ -1056,35 +1091,13 @@ class EEGAlignmentModel(pl.LightningModule):
         device, dtype = self._get_device_dtype()
 
         if self.config.do_align:
-            metrics_align, img_outputs_align = self._run_test_align(
-                all_data, device
-            )
+            metrics_align, img_outputs_align = self._run_test_align(all_data, device)
             metrics.update(metrics_align)
             img_outputs.update(img_outputs_align)
 
         if self.config.do_recon:
-            recon_idxs = kwargs.get("recon_idxs")
-            if recon_idxs is None:
-                """
-                recon_idxs = torch.tensor([
-                    161,        # Seaweed
-                    143,        # Pug
-                    158,        # Scallop
-                    166,        # Slide
-                    65,         # Dreidel
-                    127,        # Pajamas
-                    100,        # Jelly Beans
-                    141,        # Possum
-                    198,        # Wine
-                ]).long()
-                """
-                pass
-
-            else: 
-                recon_idxs = torch.tensor(recon_idxs).long()
-
             metrics_prior, img_outputs_prior, outputs_prior = self._run_test_recon(
-                all_data, device, recon_idxs, metrics=kwargs.get("metrics")
+                all_data, device, metrics=kwargs.get("metrics")
             )
 
             metrics.update(metrics_prior)
@@ -1092,7 +1105,6 @@ class EEGAlignmentModel(pl.LightningModule):
             outputs.update(outputs_prior)
 
         return metrics, img_outputs, outputs
-
 
     def _run_test_align(
         self,
@@ -1105,21 +1117,17 @@ class EEGAlignmentModel(pl.LightningModule):
 
         return metrics, img_outputs
 
-
     def _run_test_recon(
         self,
         all_data: DataBatchT,
         device: torch.device,
-        test_recon_idxs: torch.Tensor | None,
-        metrics: list[MetricName] | None = None
+        metrics: list[MetricName] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         metrics = metrics or self.config.test_metrics
 
         assert (target_latent := all_data.get("prior_img_latent")) is not None
         assert (img_path := all_data.get("img_path")) is not None
-
-        if test_recon_idxs is None:
-            test_recon_idxs = torch.arange(target_latent.size(0)).long()
+        assert (idx := all_data.get("idx")) is not None
 
         gts = batch_load_images(img_path, parallel=True, progressbar=True)
 
@@ -1138,7 +1146,7 @@ class EEGAlignmentModel(pl.LightningModule):
         prior_pred = self.get_all_prior_preds(
             eeg_latent_normed,
             batch_size=self.data_module.config.get_batch_size("test"),
-            progress_bar=True
+            progress_bar=True,
         )
         assert prior_pred is not None
 
@@ -1146,7 +1154,7 @@ class EEGAlignmentModel(pl.LightningModule):
         recon = self.get_prior_reconstructions(
             conditioning, pipe_kwargs={"progress_bar": True}
         )
-        #recon = torch.rand((200, 3, 512, 512))
+        # recon = torch.rand((200, 3, 512, 512))
         if recon is None:
             return {}, {}, {}
 
@@ -1154,12 +1162,7 @@ class EEGAlignmentModel(pl.LightningModule):
         gts = gts.to(device)
 
         metric_values = evaluate_metrics(recon, gts, metrics=metrics)
-        metric_values = {
-            f"prior/{k}": v for k, v in metric_values.items()
-        }
-
-        recon = recon[test_recon_idxs]
-        gts = gts[test_recon_idxs]
+        metric_values = {f"prior/{k}": v for k, v in metric_values.items()}
 
         resize = tv2.Compose(
             [
@@ -1175,13 +1178,11 @@ class EEGAlignmentModel(pl.LightningModule):
             "prior/ground_truth": [x.detach().cpu() for x in gts],
         }
         outputs = {
-            "prior/idx": test_recon_idxs.tolist(),
-            "prior/img_path": [img_path[i] for i in test_recon_idxs],
+            "prior/idx": idx,
+            "prior/img_path": img_path,
         }
 
         return metric_values, img_outputs, outputs
-
-
 
     @torch.no_grad()
     def plot_lowdim_projection(
@@ -1275,17 +1276,13 @@ class EEGAlignmentModel(pl.LightningModule):
             )
 
         device, dtype = self._get_device_dtype()
-        target_latent = batch["prior_img_latent"][recon_idxs].to(
-            device, dtype=dtype
-        )
+        target_latent = batch["prior_img_latent"][recon_idxs].to(device, dtype=dtype)
         prior_pred = batch["prior_pred"][recon_idxs].to(device, dtype=dtype)
         conditioning = torch.cat(
             [F.normalize(prior_pred), F.normalize(target_latent)], dim=0
         )
 
-        recon = self.get_prior_reconstructions(
-            conditioning
-        )
+        recon = self.get_prior_reconstructions(conditioning)
 
         if recon is None:
             return {}, {}
@@ -1340,7 +1337,6 @@ class EEGAlignmentModel(pl.LightningModule):
 
         return reconstruction
 
-
     def train_dataloader(self):
         return self.data_module.train_dataloader()
 
@@ -1388,7 +1384,7 @@ class EEGAlignmentModel(pl.LightningModule):
         progress_bar: bool = True,
         generator: torch.Generator | None = None,
         prior_kwargs: dict = {},
-        norm_scheme: Literal["none", "z_scale", "l2_scale"] | None = None
+        norm_scheme: Literal["none", "z_scale", "l2_scale"] | None = None,
     ) -> torch.Tensor | None:
         device, dtype = self._get_device_dtype()
 
@@ -1415,15 +1411,19 @@ class EEGAlignmentModel(pl.LightningModule):
                     generator=generator,
                     **prior_kwargs,
                 )
-                
+
                 match norm_scheme:
                     case "none":
                         pass
                     case "z_scale":
                         stats = self.data_module.embedding_stats["prior_img_latent"]
-                        prior_pred = prior_pred * stats["std"].to(prior_pred.device) + stats["mean"].to(prior_pred.device)
+                        prior_pred = prior_pred * stats["std"].to(
+                            prior_pred.device
+                        ) + stats["mean"].to(prior_pred.device)
                     case "l2_scale":
-                        prior_pred = F.normalize(prior_pred, dim=-1) * (prior_pred.size(-1) ** 0.5)
+                        prior_pred = F.normalize(prior_pred, dim=-1) * (
+                            prior_pred.size(-1) ** 0.5
+                        )
 
                 all_prior_preds_.append(prior_pred.detach().cpu())
                 pbar.update(prior_pred.size(0))

@@ -10,8 +10,10 @@ do_recon: false
 do_recon_low: false
 
 debug_prior_use_target_as_cond: false
-debug_metrics: true
-log_gradients: true
+debug_metrics: false
+log_gradients: false
+plot_lowdim_proj: true
+low_dim_proj_pca: 50
 
 align_loss_type: clip
 

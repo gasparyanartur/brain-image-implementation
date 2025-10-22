@@ -12,7 +12,7 @@ from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger, CS
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig
 from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
-from brain_image.utils import get_dtype, init_wandb
+from brain_image.utils import create_model_id, get_dtype, init_wandb
 
 class WandbConfig(BaseConfig):
     enabled: bool = True
@@ -109,29 +109,32 @@ class Trainer:
         if not log_path.exists():
             log_path.mkdir()
 
+        model_id = create_model_id()
+
         loggers.append(
             CSVLogger(
                 save_dir=log_path,
-                name=None,
+                name=model_id,
+                version=0
             )
         )
         loggers.append(
             TensorBoardLogger(
                 save_dir=log_path,
-                name=None,
+                name=model_id,
                 default_hp_metric=False,
+                version=0
             )
         )
 
         if self.config.wandb.enabled:
             init_wandb()
 
-            name = self.get_train_title()
             wandb_logger = WandbLogger(
                 project=self.config.wandb.project,
                 save_dir=log_path,
                 entity=self.config.wandb.entity,
-                name=name,
+                name=model_id,
                 log_model=self.config.wandb.log_model,
                 tags=self.get_title_components(),
                 offline=self.config.wandb.mode == "offline",
@@ -156,10 +159,10 @@ class Trainer:
             accelerator=accelerator,
         )
 
-    def get_title_components(self) -> list[str]:
+    def get_title_components(self, timestamp=False) -> list[str]:
         components = [
             f"{self.config.run_name}",
-            self.model.get_name(timestamp=True),
+            self.model.get_name(timestamp=timestamp),
             "train",
         ]
 
@@ -181,12 +184,12 @@ class Trainer:
 
         return components
 
-    def get_train_title(self) -> str:
-        return "-".join(self.get_title_components())
+    def get_train_title(self, timestamp=False) -> str:
+        return "-".join(self.get_title_components(timestamp=timestamp))
 
     def train(self, ckpt_path: Optional[Path] = None):
         logging.info(
-            f"Starting {self.get_title_components()} training with Lightning..."
+            f"Starting training with Lightning..."
         )
 
         ckpt_path_str = str(ckpt_path) if ckpt_path else None

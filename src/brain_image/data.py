@@ -12,7 +12,7 @@ from typing import Iterable, Literal, TypedDict, cast
 import numpy as np
 import torch
 from torch import Tensor
-from torch.utils.data import Dataset, Subset
+from torch.utils.data import Dataset
 import torchvision
 from torchvision.transforms import v2 as tv2
 from lightning.pytorch import LightningDataModule
@@ -276,6 +276,7 @@ class EEGDataModule(DataModule):
             tensor_cache=self.tensor_cache,
             embeddings_map=self.embeddings_map,
             limit_size=self.config.get_limit_size(split),
+            limit_shuffle=split=="train",
             preload_cache=self.config.preload_cache
         )
 
@@ -331,8 +332,6 @@ class EEGDataModule(DataModule):
 
 
 
-
-
 class EEGDataset(Dataset):
     def __init__(
         self,
@@ -342,6 +341,7 @@ class EEGDataset(Dataset):
         embeddings_map: EmbeddingsMap = cast(EmbeddingsMap, {}),
         standardize_embeddings: list[str] = ["prior_img_latent"],
         limit_size: float = 1.0,
+        limit_shuffle: bool = True,
         preload_cache: bool = True,
     ):
         self.config = config
@@ -367,12 +367,14 @@ class EEGDataset(Dataset):
         logging.info(f"Loaded {len(self.prepared_data)} samples")
 
         if self.limit_size < 1.0:
-            logging.info(f"Limiting dataset size to {self.limit_size * 100:.1f}%")
+            new_size = int(len(self.prepared_data) * self.limit_size)
+            logging.info(f"Limiting dataset size to {self.limit_size * 100:.1f}% - {new_size} samples")
+            
             idxs = np.random.choice(
                 len(self.prepared_data),
-                int(len(self.prepared_data) * self.limit_size),
+                new_size,
                 replace=False,
-            )
+            ) if limit_shuffle else np.arange(new_size)
             self.prepared_data = [self.prepared_data[i] for i in idxs]
 
         if preload_cache:

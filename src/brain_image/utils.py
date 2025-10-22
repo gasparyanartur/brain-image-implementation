@@ -1,13 +1,17 @@
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+import datetime
+import hashlib
 import io
 import logging
 from pathlib import Path
 import sys
 from collections.abc import Mapping
 from typing import Any, cast
+import uuid
 import dotenv
 from huggingface_hub import login
+import numpy as np
 from pydantic import BaseModel
 import torch
 import os
@@ -327,3 +331,16 @@ class NormDirLen:
 def get_norm_dir_len(vec: torch.Tensor, eps: float = 1e-8) -> NormDirLen:
     norm = vec.norm(dim=-1, keepdim=True).detach()
     return NormDirLen(norm, vec / (norm + eps), norm.mean())
+
+def random_word(word_len: int, seed: int | None = None) -> str:
+    rng = np.random.default_rng(seed)
+    min_value = ord('a')
+    max_value = ord('z')
+    ids = rng.integers(min_value, max_value+1, size=word_len)
+    chars = [chr(i) for i in ids]
+    return "".join(chars)
+
+def create_model_id(seed: int | None = None) -> str:
+    timestamp = datetime.datetime.now().strftime("%y%m%d%H%M%S")
+    unique_word = random_word(6, seed=seed)
+    return timestamp + unique_word
