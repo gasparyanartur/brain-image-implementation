@@ -2,8 +2,8 @@
 #SBATCH --job-name=train_eeg
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=64
-#SBATCH --mem=256G
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=128G
 #SBATCH --gpus=1
 #SBATCH --time=2-00:00:00
 #SBATCH --output=logs/slurm/train_eeg/%j.out
