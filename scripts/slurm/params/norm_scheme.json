@@ -2,7 +2,7 @@
 {"entries": [
     {
         "keys": [
-            "model.norm_scheme"
+            "model.prior.norm_scheme"
         ],
         "values": [
             ["l2_scale", "z_scale", "none"]
