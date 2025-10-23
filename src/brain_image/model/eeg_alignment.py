@@ -29,7 +29,7 @@ from brain_image.data import (
 )
 from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
 from brain_image.model.eeg_encoder import create_eeg_encoder
-from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
+from brain_image.model.eeg_encoder.eeg_encoder import DEFAULT_EEG_DIM, EEGEncoder
 from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM
 from brain_image.model.loss import CLIPLoss, InfoNCELoss
 
@@ -234,6 +234,7 @@ class EEGAlignmentModel(pl.LightningModule):
         self.prior: SimpleDiffusionPrior | None = None
         if self.config.do_recon:
             assert self.config.prior, "Prior config must be provided"
+            self.config.prior.d_cond = self.eeg_dim
             self.prior = SimpleDiffusionPrior(self.config.prior).to(dtype)
 
         elif self.config.do_recon_low:
@@ -244,7 +245,7 @@ class EEGAlignmentModel(pl.LightningModule):
         eeg_encoder_path = eeg_encoder_path or self.config.eeg_encoder_path
         self.eeg_encoder = create_eeg_encoder(
             self.config.eeg_encoder,
-            output_dim=IMAGE_ENCODER_DIM[self.config.align_img_encoder],
+            output_dim=self.eeg_dim,
             checkpoint_path=eeg_encoder_path,
         )
 
@@ -314,6 +315,11 @@ class EEGAlignmentModel(pl.LightningModule):
             name_components.append(f"relo_{self.config.recon_latent_encoder}")
 
         return "-".join(name_components)
+
+    @property
+    def eeg_dim(self) -> int:
+        return IMAGE_ENCODER_DIM[self.config.align_img_encoder]
+
 
     def configure_optimizers(self):
         logging.info("Configuring optimizers")
