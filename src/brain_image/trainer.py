@@ -44,6 +44,8 @@ class TrainConfig(BaseConfig):
     save_checkpoints: bool = True
     save_top_k: int = 1
 
+    make_subdir: bool = True
+
     wandb: WandbConfig = WandbConfig()
 
     accelerator: str | None = None
@@ -101,7 +103,10 @@ class Trainer:
             )
             callbacks.append(early_stopping_callback)
 
-        log_path = self.config.log_dir / self.model.get_name()
+        log_path = self.config.log_dir 
+        if self.config.make_subdir:
+            log_path = log_path / self.get_train_title()
+
         log_path.mkdir(parents=True, exist_ok=True)
         logging.info(f"Logging to path {log_path}...")
 
