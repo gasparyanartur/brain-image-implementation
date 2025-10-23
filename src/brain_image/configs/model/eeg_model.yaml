@@ -12,7 +12,7 @@ do_recon_low: false
 debug_prior_use_target_as_cond: false
 debug_metrics: false
 log_gradients: false
-plot_lowdim_proj: true
+plot_lowdim_proj: false
 low_dim_proj_pca: 50
 
 align_loss_type: clip
@@ -21,7 +21,7 @@ skip_eval_first_epoch: true
 full_eval_every_epochs: 5
 
 prior: 
-  norm_scheme: null
+  norm_scheme: z_scale
 
 encoder_lr: 3e-4
 encoder_min_lr: 1e-6

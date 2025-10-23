@@ -10,7 +10,7 @@ debug_mode: false
 
 dtype: "float32"
 
-log_dir: logs
+log_dir: logs/train
 checkpoint_dir: null
 enable_barebones: false
 checkpoint_monitor: "val/loss"
@@ -26,6 +26,6 @@ enable_model_summary: true
 save_checkpoints: true
 save_top_k: 1
 
-make_subdir: true
+make_subdir: false
 
 accelerator: "auto" 

@@ -44,7 +44,7 @@ class TrainConfig(BaseConfig):
     save_checkpoints: bool = True
     save_top_k: int = 1
 
-    make_subdir: bool = True
+    make_subdir: bool = False
 
     wandb: WandbConfig = WandbConfig()
 
@@ -111,6 +111,14 @@ class Trainer:
         logging.info(f"Logging to path {log_path}...")
 
         model_id = create_model_id()
+        if (slurm_array_job_id := os.getenv("SLURM_ARRAY_JOB_ID")) is not None:
+            model_id += f"-slurmarr{slurm_array_job_id}"
+            if (slurm_task_id := os.getenv("SLURM_ARRAY_TASK_ID")) is not None:
+                model_id += f"_{slurm_task_id}"
+
+        elif (slurm_job_id := os.getenv("SLURM_JOB_ID")) is not None:
+            model_id += f"-slurm{slurm_job_id}"
+
 
         loggers.append(
             CSVLogger(
@@ -138,6 +146,8 @@ class Trainer:
                 log_model=self.config.wandb.log_model,
                 tags=self.get_title_components(),
                 offline=self.config.wandb.mode == "offline",
+                group=os.environ.get("SLURM_ARRAY_JOB_ID"),
+                job_type="train"
             )
             loggers.append(wandb_logger)
 
@@ -160,25 +170,19 @@ class Trainer:
         )
 
     def get_title_components(self, timestamp=False) -> list[str]:
-        components = [
-            f"{self.config.run_name}",
-            self.model.get_name(timestamp=timestamp),
-            "train",
-        ]
-
-        if self.config.overfit_batches != 0:
-            components.append("overfit")
+        components = []
 
         if self.config.debug_mode:
             components.append("debug")
 
         if (slurm_job_id := os.environ.get("SLURM_JOB_ID")) is not None:
-            components.append(f"slurmid_{slurm_job_id}")
-        else:
-            components.append("local")
+            components.append(f"slurm")
 
-        if (slurm_array_job_id := os.environ.get("SLURM_ARRAY_JOB_ID")) is not None:
-            components.append(f"slurmarr_{slurm_array_job_id}")
+        if (slurm_task_id := os.environ.get("SLURM_ARRAY_TASK_ID")) is not None:
+            components.append(f"slurmarr")
+
+        if slurm_job_id is None and slurm_task_id is None:
+            components.append("local")
 
         return components
 

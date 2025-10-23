@@ -37,7 +37,8 @@ experiment_dir=${EXPERIMENT_DIR:-experiments}
 experiment_path="${experiment_dir}/${experiment_name}"
 if [ ! -d "$experiment_path" ]; then
     echo "Experiment directory does not exist: $experiment_path"
-    exit 1
+    echo "Creating directory: $experiment_path"
+    mkdir -p $experiment_path
 fi 
 
 echo "Experiment Directory: $experiment_dir"
@@ -45,4 +46,4 @@ echo "Parameter Directory: $param_dir"
 echo "Experiment Path: $experiment_path"
 echo "Parameter Path: $param_path"
 
-sbatch $array_arg scripts/slurm/run_sweep.sh $param_path python /workspace/scripts/train_eeg.py trainer.log_dir=$experiment_path trainer.make_subdir=False $cli_args
+sbatch $array_arg scripts/slurm/run_sweep.sh $param_path python /workspace/scripts/train_eeg.py --config-name=train_eeg_alignprior trainer.log_dir=$experiment_path trainer.make_subdir=False $cli_args

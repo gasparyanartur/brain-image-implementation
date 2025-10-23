@@ -1,0 +1,12 @@
+
+{"entries": [
+    {
+        "keys": [
+            "model.align_img_encoder", "model.eeg_encoder"
+        ],
+        "values": [
+            ["clip_vitl14", "clip_vith14", "unaligned_synclr_vitb16", "aligned_synclr_vitb16"],
+            ["nice", "atms"]
+        ]
+    }
+]}
