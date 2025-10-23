@@ -1,0 +1,11 @@
+
+{"entries": [
+    {
+        "keys": [
+            "model.norm_scheme"
+        ],
+        "values": [
+            ["l2_scale", "z_scale", "none"]
+        ]
+    }
+]}

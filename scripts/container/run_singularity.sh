@@ -8,17 +8,30 @@ fi
 
 mount_points=()
 
+if [ -z "$CONTAINER_VERBOSE" ]; then
+    SILENCE=1
+else
+    SILENCE=0
+fi
+
+
 if [ -d "/proj" ]; then
-    echo "Mounting /proj"
+    if [ -z "$SILENCE" ]; then
+        echo "Mounting /proj"
+    fi
     mount_points+=("--bind /proj/proj")
 fi
 
 if [ -d "/home" ]; then
-    echo "Mounting /home"
+    if [ -z "$SILENCE" ]; then
+        echo "Mounting /home"
+    fi
     mount_points+=("--bind /home:/home")
 fi
 
-echo "Running singularity image: $image_path"
+if [ -z "$SILENCE" ]; then
+    echo "Running singularity image: $image_path"
+fi
 
 # Set environment variables for the container
 export PROJECT_WORKSPACE_DIR=/workspace
@@ -31,11 +44,13 @@ if [ -n "$WANDB_API_KEY" ]; then
 fi
 
 CLI_ARGS="$@"
-echo "CLI_ARGS: $CLI_ARGS"
+if [ -z "SILENCE" ]; then
+    echo "CLI_ARGS: $CLI_ARGS"
+fi
 
 unset PYTHONSTARTUP
 
-apptainer run \
+apptainer exec \
 --nv \
 --bind $PWD:/workspace \
 --home /workspace \
@@ -44,4 +59,5 @@ apptainer run \
 --env PROJECT_WORKSPACE_DIR=/workspace \
 ${export_env_args[*]} \
 ${mount_point[*]} \
-$image_path $CLI_ARGS
+$image_path \
+$CLI_ARGS
