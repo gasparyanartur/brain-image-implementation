@@ -15,6 +15,7 @@ class SlurmArrayEntry(BaseModel):
 
 
 class SlurmArrayConfig(BaseModel):
+    separator: str = "="
     entries: List[SlurmArrayEntry]
 
 
@@ -30,7 +31,7 @@ def verify_entry(entry: SlurmArrayEntry):
 
 
 def combine_joined_parameters(
-    arg_names: List[str], arg_values: List[List[str]], arg_prefix: str = ""
+    arg_names: List[str], arg_values: List[List[str]], arg_prefix: str = "", sep: str = "="
 ) -> List[str]:
     joined_params = []
 
@@ -38,7 +39,7 @@ def combine_joined_parameters(
         params: List[str] = []
 
         for arg_name, arg_value in zip(arg_names, arg_values):
-            params.append(f"{arg_prefix}{arg_name} {arg_value[i_arg]}")
+            params.append(f"{arg_prefix}{arg_name}{sep}{arg_value[i_arg]}")
 
         joined_params.append(" ".join(params))
 
@@ -51,7 +52,7 @@ def parse_param_list(config: SlurmArrayConfig, arg_prefix: str = "") -> List[str
     for entry in config.entries:
         verify_entry(entry)
 
-        joined_params = combine_joined_parameters(entry.keys, entry.values, arg_prefix)
+        joined_params = combine_joined_parameters(entry.keys, entry.values, arg_prefix, sep=config.separator)
         all_params.append(joined_params)
 
     combined_parameters = list(it.product(*all_params))
