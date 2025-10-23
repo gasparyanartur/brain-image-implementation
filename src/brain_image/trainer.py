@@ -133,7 +133,6 @@ class Trainer:
 
             wandb_logger = WandbLogger(
                 project=self.config.wandb.project,
-                save_dir=log_path,
                 entity=self.config.wandb.entity,
                 name=model_id,
                 log_model=self.config.wandb.log_model,
