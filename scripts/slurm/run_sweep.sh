@@ -6,7 +6,7 @@
 #SBATCH --mem=128G
 #SBATCH --gpus=1
 #SBATCH --time=2-00:00:00
-#SBATCH --output=logs/slurm/sweep/%j.out
+#SBATCH --output=logs/slurm/sweep/%A_%a.out
 #SBATCH --account=Berzelius-2025-278
 
 echo "Job ID: $SLURM_JOB_ID"
