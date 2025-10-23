@@ -271,6 +271,18 @@ METRIC_LOOKUP: dict[MetricName, MetricType] = {
     "efficientnet": get_metric_efficientnet,
     "swav": get_metric_swav,
 }
+METRIC_BIGGER_IS_BETTER: dict[MetricName, bool] = {
+    "pixcorr": True,
+    "ssim": True,
+    "alex2": True,
+    "alex5": True,
+    "inceptionv3": True,
+    "clip": True,
+    "efficientnet": False,
+    "swav": False,
+}
+
+
 
 
 def evaluate_metrics(preds: torch.Tensor, gts: torch.Tensor, metrics: list[MetricName]) -> dict[MetricName, torch.Tensor]:

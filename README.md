@@ -82,8 +82,7 @@ Once that is done, you should see a new image under `images/singularity_base.sif
 ./scripts/container/build_singularity.sh
 ```
  
-The output should be an image named something like `images/brain_{datetime}.sif`. This is the image you will use for the slurm jobs.
-
+The output should be an image named something like `images/brain_{datetime}.sif`. This is the image you will use for the slurm jobs. (Note, you might want to build locally and rsync to the cluster since you need sudo access.)
 
 
 ### Step 3: Setup data
