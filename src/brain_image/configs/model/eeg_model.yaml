@@ -17,12 +17,6 @@ low_dim_proj_pca: 50
 
 align_loss_type: clip
 
-#project_dim: 768
-project_dim: 1024
-eeg_latent_dim: 1440
-#img_latent_dim: 768
-img_latent_dim: 1024
-
 skip_eval_first_epoch: true
 full_eval_every_epochs: 5
 

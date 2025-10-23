@@ -42,6 +42,7 @@ mkdir -p logs/slurm/setup_data
 mkdir -p logs/slurm/generate_embeddings
 mkdir -p logs/slurm/train_eeg
 mkdir -p logs/slurm/test_eeg
+mkdir -p logs/slurm/sweep
 ```
 
 

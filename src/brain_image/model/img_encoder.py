@@ -26,6 +26,14 @@ from dreamsim.model import PerceptualModel
 
 
 IMAGE_ENCODER = typing.Literal["clip_vitl14", "clip_vith14", "sd_variations_v2", "synclr_vitb16", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
+IMAGE_ENCODER_DIM: dict[IMAGE_ENCODER, int] = {
+    "clip_vitl14": 768,
+    "clip_vith14": 1024,
+    "sd_variations_v2": 768,
+    "synclr_vitb16": 768,
+    "aligned_synclr_vitb16": 768,
+    "unaligned_synclr_vitb16": 768,
+}
 
 def model_name_to_hf_name(model_name: IMAGE_ENCODER) -> str:
     match model_name:

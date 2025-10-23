@@ -30,7 +30,7 @@ from brain_image.data import (
 from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
 from brain_image.model.eeg_encoder import create_eeg_encoder
 from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
-from brain_image.model.img_encoder import IMAGE_ENCODER
+from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM
 from brain_image.model.loss import CLIPLoss, InfoNCELoss
 
 from brain_image.model.prior import (
@@ -88,9 +88,6 @@ class EEGAlignmentConfig(BaseConfig):
 
     full_eval_every_epochs: int = 1
     skip_eval_first_epoch: bool = True
-
-    img_latent_dim: int = 768
-    project_dim: int = 768
 
     num_reconstructions: int = 3
     temperature_init: float = 0.07
@@ -247,6 +244,7 @@ class EEGAlignmentModel(pl.LightningModule):
         eeg_encoder_path = eeg_encoder_path or self.config.eeg_encoder_path
         self.eeg_encoder = create_eeg_encoder(
             self.config.eeg_encoder,
+            output_dim=IMAGE_ENCODER_DIM[self.config.align_img_encoder],
             checkpoint_path=eeg_encoder_path,
         )
 

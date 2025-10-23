@@ -8,15 +8,19 @@ from brain_image.utils import find_module_content_in_state_dict
 
 
 def create_eeg_encoder(
-    name: str, config=None, checkpoint_path: Path | None = None
+    name: str, config=None, output_dim: int | None = None, checkpoint_path: Path | None = None, config_override: dict | None = None
 ) -> EEGEncoder:
+    config_override = config_override or {}
+    if output_dim is not None:
+        config_override["output_dim"] = output_dim
+
     match name:
         case "nice":
             model_name = "nice"
-            encoder = NiceEEGEncoder(config if config is not None else NiceConfig())
+            encoder = NiceEEGEncoder(config if config is not None else NiceConfig(**config_override))
         case "atms":
             model_name = "atms"
-            encoder = AtmsEEGEncoder()
+            encoder = AtmsEEGEncoder(**config_override)
         case _:
             raise ValueError(f"Unknown encoder name: {name}")
 
