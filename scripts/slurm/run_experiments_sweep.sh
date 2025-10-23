@@ -45,4 +45,4 @@ echo "Parameter Directory: $param_dir"
 echo "Experiment Path: $experiment_path"
 echo "Parameter Path: $param_path"
 
-sbatch $array_arg scripts/slurm/run_sweep.sh $param_path python /workspace/scripts/train_eeg.py trainer.log_dir=$experiment_path cli_args
+sbatch $array_arg scripts/slurm/run_sweep.sh $param_path python /workspace/scripts/train_eeg.py trainer.log_dir=$experiment_path $cli_args
