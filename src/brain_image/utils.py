@@ -214,6 +214,8 @@ def show_image(
 
 
 def setup():
+    from brain_image.configs import get_device_str
+
     setup_logging()
     dotenv.load_dotenv()
 
