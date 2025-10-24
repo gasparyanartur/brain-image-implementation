@@ -709,7 +709,6 @@ class SimpleDiffusionPrior(nn.Module):
         self.eval()
 
         device = self._dummy_param.device
-        print(device)
 
         # Validate inputs
         if conditioning is None:
@@ -718,16 +717,15 @@ class SimpleDiffusionPrior(nn.Module):
                     f"Need to define either 'conditioning' or 'batch_size'"
                 )
 
-            latent_dim = self.config.d_embed
-
         else:
-            batch_size = conditioning.size(0)
-            latent_dim = conditioning.size(1)
-
-            if latent_dim != self.config.d_embed:
+            if batch_size is not None:
                 raise ValueError(
-                    f"Expected conditioning with dim {self.config.d_embed}, received dim {latent_dim}"
+                    f"Cannot define both 'conditioning' and 'batch_size'"
                 )
+            batch_size = conditioning.size(0)
+
+        latent_dim = self.config.d_input
+
 
         if num_steps is None and scheduler_timesteps is None:
             raise ValueError(
