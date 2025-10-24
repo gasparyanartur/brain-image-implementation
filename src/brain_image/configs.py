@@ -73,6 +73,9 @@ _device: torch.device | None = None
 
 @lru_cache(maxsize=1)
 def get_device_str() -> str:
+    if (override_device := os.environ.get("OVERRIDE_DEVICE")) is not None:
+        return override_device
+        
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 

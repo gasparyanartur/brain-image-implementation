@@ -116,12 +116,6 @@ def get_dtype(dtype: str) -> torch.dtype:
         case _:
             raise ValueError(f"Unsupported dtype: {dtype}")
 
-
-if "DEVICE" in os.environ:
-    DEVICE = torch.device(os.environ["DEVICE"])
-else:
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 if "DTYPE" in os.environ:
     DTYPE = get_dtype(os.environ["DTYPE"])
 else:
@@ -229,8 +223,9 @@ def setup():
     if not tok:
         raise ValueError("HF_API_TOKEN is not set. Please set it in the .env file")
 
-    logging.info(f"Using device: {DEVICE}")
-    logging.info(f"Using dtype: {DTYPE}")
+    device_str = get_device_str()
+
+    logging.info(f"Using device: {device_str}")
     logging.info(f"Using directory: {os.getcwd()}")
     login(token=tok)
 

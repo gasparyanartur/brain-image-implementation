@@ -9,7 +9,7 @@ import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger, CSVLogger
 from brain_image.data import EEGDatasetConfig
-from brain_image.configs import BaseConfig
+from brain_image.configs import BaseConfig, get_device_str
 from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
 from brain_image.utils import create_model_id, get_dtype, init_wandb
 
@@ -247,14 +247,7 @@ class Trainer:
         logging.info(f"Saved checkpoint to {filepath}")
 
     def load_checkpoint(self, filepath: Path):
-        if self.config.accelerator is None or self.config.accelerator == "auto":
-            map_location = "cpu"
-        elif self.config.accelerator in ["cpu", "gpu", "cuda"]:
-            map_location = "cuda"
-        else:  # Assume it's already a valid device string (e.g., "cuda:0")
-            map_location = self.config.accelerator
-
-        checkpoint = torch.load(filepath, map_location=map_location)
+        checkpoint = torch.load(filepath, map_location=get_device_str())
 
         self.model.load_state_dict(checkpoint["state_dict"])
 
