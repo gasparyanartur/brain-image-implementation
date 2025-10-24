@@ -105,7 +105,6 @@ class SetupDataArguments(BaseModel):
     preprocess_data: bool
     remove_extracted: bool
     prepare_data: bool
-    get_stats: bool
     all_stages: bool
     skip_existing: bool
     seed: int
