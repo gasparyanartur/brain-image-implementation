@@ -1,0 +1,38 @@
+{
+    "entries": [
+        {
+            "keys": [
+                "model.align_img_encoder"
+            ],
+            "values": [
+                [
+                    "clip_vitl14",
+                    "clip_vith14",
+                    "unaligned_synclr_vitb16",
+                    "aligned_synclr_vitb16"
+                ]
+            ]
+        },
+        {
+            "keys": [
+                "model.eeg_encoder"
+            ],
+            "values": [
+                [
+                    "nice",
+                    "atms"
+                ]
+            ]
+        },
+        {
+            "keys": [
+                "dataset.subs"
+            ],
+            "values": [
+                [
+                    "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[8]", "[9]", "[10]"
+                ]
+            ]
+        }
+    ]
+}
