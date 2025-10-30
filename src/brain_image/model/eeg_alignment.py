@@ -1,11 +1,14 @@
 import datetime
 from collections.abc import Iterator
+import json
 import math
 import lightning as pl
+from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torchvision.utils import save_image
 from lightning.pytorch.loggers import WandbLogger
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
@@ -114,7 +117,7 @@ class EEGAlignmentConfig(BaseConfig):
     debug_metrics: bool = False
     eeg_encoder_path: Path | None = None
 
-    highlighted_recons: list[int] = [
+    highlighted_recons: list[int] | None = [
         161,  # Seaweed
         143,  # Pug
         158,  # Scallop
@@ -319,7 +322,6 @@ class EEGAlignmentModel(pl.LightningModule):
     @property
     def eeg_dim(self) -> int:
         return IMAGE_ENCODER_DIM[self.config.align_img_encoder]
-
 
     def configure_optimizers(self):
         logging.info("Configuring optimizers")
@@ -594,32 +596,11 @@ class EEGAlignmentModel(pl.LightningModule):
                     wandb_logger.log_image(key="test/" + k, images=v)
 
             test_metrics, test_img_outputs, test_outputs = self.run_full_test()
-            if test_img_outputs and (
-                (wandb_logger := self.get_wandb_logger()) is not None
-            ):
-                # Log selected handful of images to weights and biases
 
-                idxs = test_outputs["prior/idx"]
-                selected_img_outputs = {}
-                for k, v in test_img_outputs.items():
-                    selected_img_outputs[k] = []
-                    for imgs, idx in zip(v, idxs):
-                        if idx in self.config.highlighted_recons:
-                            selected_img_outputs[k].append(imgs)
+            self.log_test_output(test_metrics, test_img_outputs, test_outputs)
 
-                for k, v in selected_img_outputs.items():
-                    logging.info(f"Logging {len(v)} images for {k}")
-                    wandb_logger.log_image(key="full_test/" + k, images=v)
-
-            if test_metrics:
-                for k, v in test_metrics.items():
-                    self.log(
-                        f"full_test/{k}",
-                        v,
-                        prog_bar=False,
-                        on_step=False,
-                        on_epoch=True,
-                    )
+            if self.log_dir is not None:
+                self.dump_test_output(self.log_dir, metrics, test_img_outputs, test_outputs, selected_img_idxs=self.config.highlighted_recons) 
 
             # Delete training loader to kill persistent workers
             self.data_module.cleanup()
@@ -634,6 +615,62 @@ class EEGAlignmentModel(pl.LightningModule):
             )
 
         return losses, outputs, metrics
+
+    @property
+    def log_dir(self) -> Path | None:
+        for logger in self.loggers:
+            if isinstance(logger, (CSVLogger, TensorBoardLogger)):
+                if logger.log_dir is not None:
+                    return Path(logger.log_dir)
+
+        return None
+
+
+    def dump_test_output(self, output_dir: Path, metrics: dict[str, Any], imgs: dict[str, Any], outputs: dict[str, Any], selected_img_idxs: list[int] | None = None):
+        metrics = {name: value.item() for name, value in metrics.items()}
+
+        with open(output_dir / "test_metrics.json", "w") as f:
+            json.dump(metrics, f, indent=4)
+
+        # Reconstructions
+        reconstructions = imgs["prior/reconstruction"] 
+        ground_truths = imgs["prior/ground_truth"]
+        idxs = outputs["prior/idx"]
+        img_paths = outputs["prior/img_path"]
+        img_dir = Path(output_dir / "reconstructions")
+        img_dir.mkdir(parents=True, exist_ok=True)
+        
+        for reconstruction, ground_truth, idx, img_path in zip(reconstructions, ground_truths, idxs, img_paths):
+            if selected_img_idxs is not None and idx not in selected_img_idxs:
+                continue
+            save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
+            save_image(ground_truth, img_dir / f"{idx}_recon_gt.jpg")
+
+    def log_test_output(self, metrics, imgs, outputs):
+        if imgs and (
+            (wandb_logger := self.get_wandb_logger()) is not None
+        ):
+            # Log selected handful of images to weights and biases
+            idxs = outputs["prior/idx"]
+            selected_img_outputs = {k: [] for k in imgs.keys()}
+            for k, v in imgs.items():
+                for imgs, idx in zip(v, idxs):
+                    if (self.config.highlighted_recons is None) or (idx in self.config.highlighted_recons):
+                        selected_img_outputs[k].append(imgs)
+
+            for k, v in selected_img_outputs.items():
+                logging.info(f"Logging {len(v)} images for {k}")
+                wandb_logger.log_image(key="full_test/" + k, images=v)
+
+        if metrics:
+            for k, v in metrics.items():
+                self.log(
+                    f"full_test/{k}",
+                    v,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
 
     def run_step(
         self,

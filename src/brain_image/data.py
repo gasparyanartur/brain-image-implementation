@@ -304,6 +304,7 @@ class EEGDataModule(DataModule):
             "num_workers": num_workers,
             "pin_memory": device != "cpu",
             "persistent_workers": (split == "train") and (num_workers > 0),
+            "drop_last": False
         }
         dataloader_args.update(kwargs)
 

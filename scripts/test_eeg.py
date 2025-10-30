@@ -108,32 +108,17 @@ def main(args: Args):
     for key, value in metrics.items():
         logging.info(f"  {key}: {value}")
 
-    metrics = {name: value.item() for name, value in metrics.items()}
 
     name = args.run_path.name
     output_dir = (args.output_dir / name) if (args.output_dir is not None) else (args.run_path / "test")
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    with open(output_dir / "metrics.json", "w") as f:
-        json.dump(metrics, f, indent=4)
 
     with open(output_dir / "config.json", "w") as f:
         json.dumps(
             args.model_dump_json(indent=4)
         )
 
-    # Reconstructions
-    reconstructions = imgs["prior/reconstruction"] 
-    ground_truths = imgs["prior/ground_truth"]
-    idxs = outputs["prior/idx"]
-    img_paths = outputs["prior/img_path"]
-    img_dir = Path(output_dir / "reconstructions")
-    img_dir.mkdir(parents=True, exist_ok=True)
-    
-    for reconstruction, ground_truth, idx, img_path in zip(reconstructions, ground_truths, idxs, img_paths):
-        save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
-        save_image(ground_truth, img_dir / f"{idx}_gt.jpg")
-
+    model.dump_test_output(output_dir, metrics, imgs, outputs)
 
 
 if __name__ == "__main__":
