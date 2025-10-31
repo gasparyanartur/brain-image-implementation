@@ -89,12 +89,14 @@ class TensorCache:
     def __init__(
         self,
         cache_path: Path = Path("tensorcache"),
-        memory_cache_size: int = 512000,
+        memory_cache_size: int = 1024*1024,
         use_encrypt: bool = False,
         overwrite: bool = True,
     ):
         self.cache_path = cache_path
         self.cache_path.mkdir(parents=True, exist_ok=True)
+
+        self._path_cache = {}
 
         self.memory_cache_size = memory_cache_size
         self.memory_cache = {}
@@ -103,9 +105,15 @@ class TensorCache:
         self.overwrite = overwrite
 
     def _get_tensor_path(self, *keys: str) -> Path:
+        keys = tuple(keys)
+        if keys in self._path_cache:
+            return self._path_cache[keys]
+
         encoded_path = self._encode_keys(*keys, use_encrypt=self.use_encrypt)
         full_path = self.cache_path / encoded_path
-        return full_path.with_suffix(".pt")
+        full_path = full_path.with_suffix(".pt")
+        self._path_cache[keys] = full_path
+        return full_path
 
     def save(self, tensor: torch.Tensor, *keys: str):
         path = self._get_tensor_path(*keys)

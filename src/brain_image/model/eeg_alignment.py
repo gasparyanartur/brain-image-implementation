@@ -769,7 +769,6 @@ class EEGAlignmentModel(pl.LightningModule):
             eeg_latent_normed := cache["eeg_latent"]
         ) is not None, "Normed eeg latent is not defined"
 
-        # target_latent = F.normalize(target_latent)
         with torch.no_grad():
             match self.config.prior.norm_scheme:
                 case "none":
