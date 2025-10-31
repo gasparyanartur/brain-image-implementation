@@ -18,7 +18,7 @@ checkpoint_monitor_early_stop: 20
 overfit_batches: 0
 
 val_check_interval: 1.0
-check_val_every_n_epoch: null
+check_val_every_n_epochs: null
 
 log_every_n_steps: 50
 enable_progress_bar: true
