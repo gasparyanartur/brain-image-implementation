@@ -95,6 +95,7 @@ class EEGAlignmentConfig(BaseConfig):
     num_reconstructions: int = 3
     temperature_init: float = 0.07
     log_gradients: bool = False
+    log_on_step: bool = False
 
     prior: DiffusionPriorConfig | None = DiffusionPriorConfig()
 
@@ -545,8 +546,8 @@ class EEGAlignmentModel(pl.LightningModule):
                 name,
                 metric_value,
                 prog_bar=name in self.config.prog_bar_metrics,
-                on_step=True,
-                on_epoch=False,
+                on_step=self.config.log_on_step,
+                on_epoch=not self.config.log_on_step,
             )
 
         return losses["loss"]
@@ -616,61 +617,7 @@ class EEGAlignmentModel(pl.LightningModule):
 
         return losses, outputs, metrics
 
-    @property
-    def log_dir(self) -> Path | None:
-        for logger in self.loggers:
-            if isinstance(logger, (CSVLogger, TensorBoardLogger)):
-                if logger.log_dir is not None:
-                    return Path(logger.log_dir)
 
-        return None
-
-
-    def dump_test_output(self, output_dir: Path, metrics: dict[str, Any], imgs: dict[str, Any], outputs: dict[str, Any], selected_img_idxs: list[int] | None = None):
-        metrics = {name: value.item() for name, value in metrics.items()}
-
-        with open(output_dir / "test_metrics.json", "w") as f:
-            json.dump(metrics, f, indent=4)
-
-        # Reconstructions
-        reconstructions = imgs["prior/reconstruction"] 
-        ground_truths = imgs["prior/ground_truth"]
-        idxs = outputs["prior/idx"]
-        img_paths = outputs["prior/img_path"]
-        img_dir = Path(output_dir / "reconstructions")
-        img_dir.mkdir(parents=True, exist_ok=True)
-        
-        for reconstruction, ground_truth, idx, img_path in zip(reconstructions, ground_truths, idxs, img_paths):
-            if selected_img_idxs is not None and idx not in selected_img_idxs:
-                continue
-            save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
-            save_image(ground_truth, img_dir / f"{idx}_recon_gt.jpg")
-
-    def log_test_output(self, metrics, imgs, outputs):
-        if imgs and (
-            (wandb_logger := self.get_wandb_logger()) is not None
-        ):
-            # Log selected handful of images to weights and biases
-            idxs = outputs["prior/idx"]
-            selected_img_outputs = {k: [] for k in imgs.keys()}
-            for k, v in imgs.items():
-                for imgs, idx in zip(v, idxs):
-                    if (self.config.highlighted_recons is None) or (idx in self.config.highlighted_recons):
-                        selected_img_outputs[k].append(imgs)
-
-            for k, v in selected_img_outputs.items():
-                logging.info(f"Logging {len(v)} images for {k}")
-                wandb_logger.log_image(key="full_test/" + k, images=v)
-
-        if metrics:
-            for k, v in metrics.items():
-                self.log(
-                    f"full_test/{k}",
-                    v,
-                    prog_bar=False,
-                    on_step=False,
-                    on_epoch=True,
-                )
 
     def run_step(
         self,
@@ -725,7 +672,7 @@ class EEGAlignmentModel(pl.LightningModule):
                     device=device,
                 )
 
-        loss = torch.stack(list(losses.values())).sum()
+        loss = torch.stack([v for v in losses.values()]).sum()
         losses["loss"] = loss
 
         return losses, outputs, metrics
@@ -830,8 +777,8 @@ class EEGAlignmentModel(pl.LightningModule):
                 case "z_scale":
                     stats = self.data_module.embedding_stats["prior_img_latent"]
                     target_latent = (
-                        target_latent - stats["mean"].to(target_latent.device)
-                    ) / stats["std"].to(target_latent.device)
+                        target_latent - stats["mean"].to(device)
+                    ) / stats["std"].to(device)
                 case "l2_scale":
                     target_latent = F.normalize(target_latent) * (
                         target_latent.size(-1) ** 0.5
@@ -1355,10 +1302,7 @@ class EEGAlignmentModel(pl.LightningModule):
 
         recon_pred, recon_target = recon.chunk(2, dim=0)
 
-        lpips_score = self._get_lpips_score(recon_pred, recon_target)
-
         metrics = {
-            f"eval/recon/lpips": lpips_score.detach().cpu(),
         }
         img_outputs = {
             "eval/recon/pred": [x.detach().cpu().float() for x in recon_pred],
@@ -1367,19 +1311,61 @@ class EEGAlignmentModel(pl.LightningModule):
 
         return metrics, img_outputs
 
-    @torch.no_grad()
-    def _get_lpips_score(
-        self, img_recon: torch.Tensor, img_target: torch.Tensor
-    ) -> torch.Tensor:
-        lpips = LearnedPerceptualImagePatchSimilarity(net_type="squeeze")
-        lpips.requires_grad_(False)
-        lpips.to(self.device)
+    @property
+    def log_dir(self) -> Path | None:
+        for logger in self.loggers:
+            if isinstance(logger, (CSVLogger, TensorBoardLogger)):
+                if logger.log_dir is not None:
+                    return Path(logger.log_dir)
 
-        # Prepare images for lpips - Need to be in the [-1, 1] range and same shape as reconstructions
-        img_recon = F.normalize(img_recon - img_recon.min()) * 2 - 1
-        img_target = F.normalize(img_target - img_recon.min()) * 2 - 1
+        return None
 
-        return lpips(img_recon, img_target)
+
+    def dump_test_output(self, output_dir: Path, metrics: dict[str, Any], imgs: dict[str, Any], outputs: dict[str, Any], selected_img_idxs: list[int] | None = None):
+        metrics = {name: value.item() for name, value in metrics.items()}
+
+        with open(output_dir / "test_metrics.json", "w") as f:
+            json.dump(metrics, f, indent=4)
+
+        # Reconstructions
+        reconstructions = imgs["prior/reconstruction"] 
+        ground_truths = imgs["prior/ground_truth"]
+        idxs = outputs["prior/idx"]
+        img_paths = outputs["prior/img_path"]
+        img_dir = Path(output_dir / "reconstructions")
+        img_dir.mkdir(parents=True, exist_ok=True)
+        
+        for reconstruction, ground_truth, idx, img_path in zip(reconstructions, ground_truths, idxs, img_paths):
+            if selected_img_idxs is not None and idx not in selected_img_idxs:
+                continue
+            save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
+            save_image(ground_truth, img_dir / f"{idx}_recon_gt.jpg")
+
+    def log_test_output(self, metrics, imgs, outputs):
+        if imgs and (
+            (wandb_logger := self.get_wandb_logger()) is not None
+        ):
+            # Log selected handful of images to weights and biases
+            idxs = outputs["prior/idx"]
+            selected_img_outputs = {k: [] for k in imgs.keys()}
+            for k, v in imgs.items():
+                for imgs, idx in zip(v, idxs):
+                    if (self.config.highlighted_recons is None) or (idx in self.config.highlighted_recons):
+                        selected_img_outputs[k].append(imgs)
+
+            for k, v in selected_img_outputs.items():
+                logging.info(f"Logging {len(v)} images for {k}")
+                wandb_logger.log_image(key="full_test/" + k, images=v)
+
+        if metrics:
+            for k, v in metrics.items():
+                self.log(
+                    f"full_test/{k}",
+                    v,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
 
     def get_wandb_logger(self) -> WandbLogger | None:
         for logger in self.loggers:

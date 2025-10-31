@@ -20,6 +20,8 @@ align_loss_type: clip
 skip_eval_first_epoch: true
 full_eval_every_epochs: 5
 
+log_on_step: false
+
 prior: 
   norm_scheme: z_scale
 

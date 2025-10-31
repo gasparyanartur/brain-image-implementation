@@ -161,10 +161,10 @@ class Trainer:
             enable_checkpointing=(not self.config.enable_barebones)
             and self.config.save_checkpoints,
             enable_model_summary=not self.config.enable_barebones,
-            enable_progress_bar=not self.config.enable_barebones,
+            enable_progress_bar=(not self.config.enable_barebones) and self.config.enable_progress_bar,
             overfit_batches=self.config.overfit_batches,
             precision=precision,
-            log_every_n_steps=self.config.log_every_n_steps,
+            log_every_n_steps=self.config.log_every_n_steps if self.model.config.log_on_step else 1_000_000_000,
             val_check_interval=self.config.val_check_interval,
             accelerator=accelerator,
         )

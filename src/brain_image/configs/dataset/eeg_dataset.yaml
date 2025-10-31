@@ -16,3 +16,5 @@ shuffle_train: true
 limit_train_size: 1.0
 limit_val_size: 1.0
 limit_test_size: 1.0
+
+num_workers: null

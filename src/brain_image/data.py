@@ -257,10 +257,7 @@ class EEGDataModule(DataModule):
         self.embeddings_map = embeddings_map
 
         embeddings_stats = self._get_embeddings_stats()
-        logging.info(f"Embeddings stats:")
-        for k, v in flatten_configs(embeddings_stats).items():
-            logging.info(f"\t{k}: {v}")
-
+        logging.info(f"Got embedding stats for: {embeddings_stats.keys()}")
 
         super().__init__(config, embedding_stats=embeddings_stats)
 
