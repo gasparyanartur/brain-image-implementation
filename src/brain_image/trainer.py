@@ -38,6 +38,7 @@ class TrainConfig(BaseConfig):
     dtype: Literal["float16", "float32"] = "float32"
 
     val_check_interval: float = 1.0
+    check_val_every_n_epochs: int | None = None
     log_every_n_steps: int = 100
     enable_progress_bar: bool = True
     enable_model_summary: bool = True
@@ -45,6 +46,7 @@ class TrainConfig(BaseConfig):
     save_top_k: int = 1
 
     make_subdir: bool = False
+
 
     wandb: WandbConfig = WandbConfig()
 
@@ -154,6 +156,18 @@ class Trainer:
         precision = "bf16-mixed" if self.config.dtype == "float16" else "32-true"
         accelerator = self.config.accelerator or "auto"
 
+        val_check_interval = self.config.val_check_interval
+        check_val_every_n_epochs = self.config.check_val_every_n_epochs
+
+        if check_val_every_n_epochs is not None:
+            val_check_interval = None
+        elif isinstance(val_check_interval, float) and val_check_interval > 1:
+            check_val_every_n_epochs = int(val_check_interval)
+            val_check_interval = None
+        else:
+            check_val_every_n_epochs = None
+
+
         return pl.Trainer(
             max_epochs=self.model.config.max_epochs,
             callbacks=callbacks if not self.config.enable_barebones else None,
@@ -165,7 +179,8 @@ class Trainer:
             overfit_batches=self.config.overfit_batches,
             precision=precision,
             log_every_n_steps=self.config.log_every_n_steps if self.model.config.log_on_step else 1_000_000_000,
-            val_check_interval=self.config.val_check_interval,
+            val_check_interval=val_check_interval,
+            check_val_every_n_epoch=check_val_every_n_epochs,
             accelerator=accelerator,
         )
 
