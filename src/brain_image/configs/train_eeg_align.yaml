@@ -15,11 +15,11 @@ model:
     - eeg_encoder
 
   max_epochs: 40
-
-  full_eval_every_epochs: 5
+  full_eval_every_epochs: 10
 
 trainer:
   checkpoint_monitor_early_stop: 10
+  check_val_every_n_epochs: 5
 
 dataset:
   batch_size: 512
