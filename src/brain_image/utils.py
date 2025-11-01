@@ -18,6 +18,8 @@ import os
 import PIL.Image
 import yaml
 
+from torch.nn import functional as F
+
 import matplotlib.pyplot as plt
 
 def casttensor(x: Any) -> torch.Tensor:
@@ -341,3 +343,35 @@ def create_model_id(seed: int | None = None) -> str:
     timestamp = datetime.datetime.now().strftime("%y%m%d%H%M%S")
     unique_word = random_word(6, seed=seed)
     return timestamp + unique_word
+
+
+@torch.compile()
+def z_scale(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+    return (x - mean.to(x.device)) / std.to(x.device)
+
+@torch.compile()
+def reverse_z_scale(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+    return x * std.to(x.device) + mean.to(x.device)
+
+@torch.compile()
+def l2_scale(x: torch.Tensor) -> torch.Tensor:
+    return F.normalize(x) / (x.size(-1) ** 0.5)
+
+@torch.compile
+def reverse_l2_scale(x: torch.Tensor) -> torch.Tensor:
+    return F.normalize(x)
+
+@torch.compile
+def tensor_split(x: torch.Tensor, dim: int, idxs: tuple[int, ...]) -> list[torch.Tensor]:
+    all_tensors = []
+
+    curr_idx = 0
+    for idx in idxs:
+        part = x[..., curr_idx : curr_idx + idx]
+        all_tensors.append(part)
+        curr_idx += part.size(dim)
+
+    if x.size(dim) != curr_idx:
+        raise ValueError(f"Tried to split tensor of size {x.size(dim)} into {len(idxs)} parts - Received output with size {curr_idx}")
+
+    return all_tensors

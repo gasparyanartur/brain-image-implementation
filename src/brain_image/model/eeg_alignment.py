@@ -57,6 +57,11 @@ from brain_image.utils import (
     get_mean_gradients,
     get_norm_dir_len,
     key_in_dict,
+    l2_scale,
+    reverse_l2_scale,
+    reverse_z_scale,
+    tensor_split,
+    z_scale,
 )
 
 import tqdm
@@ -587,7 +592,7 @@ class EEGAlignmentModel(pl.LightningModule):
                     wandb_logger.log_image(key=f"{prefix}{k}", images=v)
 
         for metric_name, metric_value in it.chain(losses.items(), metrics.items()):
-            prefix = "val/" if metric_name.split("/")[0] != "debug" else ""
+            prefix = "val/" if metric_name.split("/")[0] not in ("debug", "eval") else ""
             name = f"{prefix}{metric_name}"
             self.log(
                 name,
@@ -797,29 +802,22 @@ class EEGAlignmentModel(pl.LightningModule):
                     pass
                 case "z_scale":
                     stats = self.data_module.embedding_stats["prior_img_latent"]
-                    target_latent = (target_latent - stats["mean"].to(device)) / stats[
-                        "std"
-                    ].to(device)
+                    target_latent = z_scale(target_latent, stats["mean"], stats["std"])
 
                     if target_latent_2 is not None:
                         stats2 = self.data_module.embedding_stats["prior_img_latent_2"]
-                        target_latent_2 = (
-                            target_latent_2 - stats2["mean"].to(device)
-                        ) / stats2["std"].to(device)
+                        target_latent_2 = z_scale(
+                            target_latent_2, stats2["mean"], stats2["std"]
+                        )
 
                 case "l2_scale":
-                    target_latent = F.normalize(target_latent) * (
-                        target_latent.size(-1) ** 0.5
-                    )
+                    target_latent = l2_scale(target_latent)
 
                     if target_latent_2 is not None:
-                        target_latent_2 = F.normalize(target_latent_2) * (
-                            target_latent_2.size(-1) ** 0.5
-                        )
+                        target_latent_2 = l2_scale(target_latent_2)
 
         if self.config.debug_prior_use_target_as_cond:
             eeg_latent_normed = F.normalize(-target_latent)
-            # eeg_latent_normed = F.normalize(_index_encoding(batch["idx"]))
 
         batch_size = target_latent.size(0)
 
@@ -852,8 +850,11 @@ class EEGAlignmentModel(pl.LightningModule):
         pred = self.prior.remove_noise(noisy_latent, noise_pred, timesteps)
 
         if target_latent_2 is not None:
-            pred_2 = pred[:, target_latent.size(-1) :]
-            pred = pred[:, : target_latent.size(-1)]
+            assert self.config.prior_img_encoder_2
+
+            dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
+            dim2 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
+            pred, pred_2 = tensor_split(pred, -1, (dim1, dim2))
 
             align_loss, align_logits = self.align_loss(
                 F.normalize(pred_2), F.normalize(target_latent_2), labels=None
@@ -959,7 +960,9 @@ class EEGAlignmentModel(pl.LightningModule):
         is_not_first_or_flag_set = (self.current_epoch > 0) or (
             not self.config.skip_eval_first_epoch
         )
-        is_right_mod = (self.current_epoch+1) % self.config.full_eval_every_epochs == 0
+        is_right_mod = (
+            self.current_epoch + 1
+        ) % self.config.full_eval_every_epochs == 0
         is_right_val_epoch = is_not_first_or_flag_set and is_right_mod
 
         if not (is_right_val_epoch or split == "test"):
@@ -1081,12 +1084,14 @@ class EEGAlignmentModel(pl.LightningModule):
         assert pred is not None
 
         if self.config.prior_img_encoder_2:
-            pred_2_dim = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
-            pred_2 = pred[:, -pred_2_dim:]
-            pred = pred[:, :-pred_2_dim]
             target_2 = all_data.get("prior_img_latent_2")
             assert target_2 is not None
             target_2 = target_2.to(device)
+
+            dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
+            dim2 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
+
+            pred, pred_2 = tensor_split(pred, -1, (dim1, dim2))
 
         else:
             target_2 = None
@@ -1126,7 +1131,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 }
             )
         if target_2 is not None:
-            align_clip, align_logits = self.align_loss(
+            _, align_logits = self.align_loss(
                 F.normalize(pred_2.to(device)),
                 F.normalize(target_2.to(device)),
                 labels=None,
@@ -1134,7 +1139,6 @@ class EEGAlignmentModel(pl.LightningModule):
 
             metrics.update(
                 {
-                    "eval/prior/prior_align_clip": align_clip.mean().cpu(),
                     "eval/prior/prior_align_top1": get_top1_acc(
                         align_logits, axis=1
                     ).cpu(),
@@ -1252,9 +1256,9 @@ class EEGAlignmentModel(pl.LightningModule):
         assert prior_pred is not None
 
         if self.config.prior_img_encoder_2:
-            pred_2_dim = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
-            prior_pred_2 = prior_pred[:, -pred_2_dim:]
-            prior_pred = prior_pred[:, :-pred_2_dim]
+            dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
+            dim2 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
+            prior_pred, prior_pred_2 = tensor_split(prior_pred, -1, (dim1, dim2))
             target_2 = all_data.get("prior_img_latent_2")
         else:
             target_2 = None
@@ -1284,7 +1288,9 @@ class EEGAlignmentModel(pl.LightningModule):
 
         if target_2 is not None:
             align_clip, align_logits = self.align_loss(
-                F.normalize(prior_pred_2), F.normalize(target_2), labels=None
+                F.normalize(prior_pred_2.to(device)),
+                F.normalize(target_2.to(device)),
+                labels=None,
             )
             metric_values.update(
                 {
@@ -1591,37 +1597,32 @@ class EEGAlignmentModel(pl.LightningModule):
                                 "prior_img_latent_2"
                             ]
                             dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-                            prior_pred[:, :dim1] = prior_pred[:, :dim1] * stats1[
-                                "std"
-                            ].to(prior_pred.device) + stats1["mean"].to(
-                                prior_pred.device
+                            prior_pred[:, :dim1] = reverse_z_scale(
+                                prior_pred[:, :dim1], stats1["std"], stats1["mean"]
                             )
-                            prior_pred[:, dim1:] = prior_pred[:, dim1:] * stats2[
-                                "std"
-                            ].to(prior_pred.device) + stats2["mean"].to(
-                                prior_pred.device
+                            prior_pred[:, dim1:] = reverse_z_scale(
+                                prior_pred[:, dim1:], stats2["std"], stats2["mean"]
                             )
 
                         else:
                             stats = self.data_module.embedding_stats["prior_img_latent"]
-                            prior_pred = prior_pred * stats["std"].to(
-                                prior_pred.device
-                            ) + stats["mean"].to(prior_pred.device)
+                            prior_pred = reverse_z_scale(
+                                prior_pred, stats["std"], stats["mean"]
+                            )
 
                     case "l2_scale":
                         if self.config.prior_align_second_latent:
+                            assert self.config.prior_img_encoder_2
                             dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-                            prior_pred[:, :dim1] = F.normalize(
-                                prior_pred[:, :dim1], dim=-1
-                            ) * (dim1**0.5)
-                            prior_pred[:, dim1:] = F.normalize(
-                                prior_pred[:, dim1:], dim=-1
-                            ) * ((prior_pred.size(-1) - dim1) ** 0.5)
+                            prior_pred[:, :dim1] = reverse_l2_scale(
+                                prior_pred[:, :dim1]
+                            )
+                            prior_pred[:, dim1:] = reverse_l2_scale(
+                                prior_pred[:, dim1:]
+                            )
 
                         else:
-                            prior_pred = F.normalize(prior_pred, dim=-1) * (
-                                prior_pred.size(-1) ** 0.5
-                            )
+                            prior_pred = reverse_l2_scale(prior_pred)
 
                 all_prior_preds_.append(prior_pred.detach().cpu())
                 pbar.update(prior_pred.size(0))
