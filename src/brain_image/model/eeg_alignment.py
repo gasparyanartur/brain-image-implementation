@@ -1598,16 +1598,16 @@ class EEGAlignmentModel(pl.LightningModule):
                             ]
                             dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
                             prior_pred[:, :dim1] = reverse_z_scale(
-                                prior_pred[:, :dim1], stats1["std"], stats1["mean"]
+                                prior_pred[:, :dim1], stats1["mean"], stats1["std"]
                             )
                             prior_pred[:, dim1:] = reverse_z_scale(
-                                prior_pred[:, dim1:], stats2["std"], stats2["mean"]
+                                prior_pred[:, dim1:], stats2["mean"], stats2["std"]
                             )
 
                         else:
                             stats = self.data_module.embedding_stats["prior_img_latent"]
                             prior_pred = reverse_z_scale(
-                                prior_pred, stats["std"], stats["mean"]
+                                prior_pred, stats["mean"], stats["std"]
                             )
 
                     case "l2_scale":
