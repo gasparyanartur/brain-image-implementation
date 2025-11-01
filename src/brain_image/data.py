@@ -239,6 +239,7 @@ class DataModule(LightningDataModule, ABC):
 class EmbeddingsMap(TypedDict):
     align_img_latent: IMAGE_ENCODER | None
     prior_img_latent: IMAGE_ENCODER | None
+    prior_img_latent_2: IMAGE_ENCODER | None
     recon_latent: IMAGE_ENCODER | None
 
 

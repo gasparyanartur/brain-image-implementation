@@ -530,7 +530,6 @@ class DiffusionPriorConfig:
     d_input: int = 1024
     d_cond: int = 1024
     d_time: int = 512
-    d_embed: int = 1024
     d_hidden_start: int = 1024
     d_hidden_scale: float = 0.5
     depth: int = 5
@@ -586,7 +585,7 @@ class SimpleDiffusionPrior(nn.Module):
             config.d_time, flip_sin_to_cos=True, downscale_freq_shift=0
         )
         self.input_proj = nn.Sequential(
-            nn.Linear(config.d_embed, config.d_hidden_start),
+            nn.Linear(config.d_input, config.d_hidden_start),
             nn.LayerNorm(config.d_hidden_start),
             act_func(),
         )
@@ -641,7 +640,6 @@ class SimpleDiffusionPrior(nn.Module):
         self.decoder_layers = nn.ModuleList(decoder_layers)
 
         self.out_proj = nn.Linear(config.d_hidden_start, config.d_input)
-
         self.scheduler = DDPMScheduler(self.config.num_training_timesteps)
 
     def forward(
@@ -771,24 +769,7 @@ class SimpleDiffusionPrior(nn.Module):
     def predict_step(self, noisy_latent: Tensor, timestep: Tensor, conditioning: Tensor | None = None, *args, **kwargs) -> Tensor:
         # x: <B, D>
         noisy_pred = self.forward(noisy_latent, timestep, conditioning, *args, **kwargs) # <B, D>
-
-        prediction_type = cast(str, self.scheduler.config.prediction_type)   # type: ignore
-        alpha_prod_t = self.scheduler.alphas_cumprod[timestep].unsqueeze(1).expand(-1, noisy_latent.size(1))  # <B, D>
-        beta_prod_t = 1 - alpha_prod_t      # <B, 1>
-
-        match prediction_type:
-            case "epsilon":        
-                clean_pred = (noisy_latent - beta_prod_t**0.5 * noisy_pred) / alpha_prod_t**0.5
-            case "sample":
-                clean_pred = noisy_pred
-            case "v_prediction":
-                clean_pred = (alpha_prod_t**0.5) * noisy_latent - (beta_prod_t**0.5) * noisy_pred
-
-            case _:
-                raise ValueError(
-                    f"prediction_type given as {prediction_type} must be one of `epsilon`, `sample` or"
-                    " `v_prediction`  for the DDPMScheduler."
-                )
+        clean_pred = self.remove_noise(noisy_latent, noisy_pred, timestep, *args, **kwargs)
 
         return clean_pred
     

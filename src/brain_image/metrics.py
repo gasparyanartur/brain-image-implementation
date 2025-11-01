@@ -358,10 +358,10 @@ def _correlation_distance(
 
 
 
-@torch.compile
+@torch.compile()
 @torch.no_grad()
 def get_top1_acc(logits: torch.Tensor, axis=1) -> torch.Tensor:
-    indexes = torch.arange(len(logits)).to(logits.device)
+    indexes = torch.arange(len(logits), device=logits.device)
     top1 = logits.topk(1, dim=axis).indices.flatten()
     top1_acc = (top1 == indexes).float().mean()
     return top1_acc
