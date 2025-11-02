@@ -859,10 +859,15 @@ class EEGAlignmentModel(pl.LightningModule):
             align_loss, align_logits = self.align_loss(
                 F.normalize(pred_2), F.normalize(target_latent_2), labels=None
             )
+            pred_mse_loss_2 = (
+                torch.nn.functional.mse_loss(pred_2, target_latent_2)
+                * self.config.prior_pred_mse_loss_factor
+            )
             losses.update(
                 {
                     "prior/align_clip_loss": align_loss
-                    * self.config.prior_align_loss_factor
+                    * self.config.prior_align_loss_factor,
+                    "prior/pred_mse_loss_2": pred_mse_loss_2,
                 }
             )
 
