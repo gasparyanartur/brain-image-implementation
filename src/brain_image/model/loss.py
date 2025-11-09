@@ -22,18 +22,18 @@ class CLIPLoss(nn.Module):
         if labels.size(0) != z_i.size(0) or labels.size(1) != z_i.size(0):
             raise ValueError(f"Labels shape should be ({z_i.size(0)}, {z_i.size(0)}), but got {labels.shape}")
 
-        sim = z_e @ z_i.T 
-        sim_scaled = sim * self.logit_scale.exp().clamp(max=self.max_scale)
+        logits = z_e @ z_i.T 
+        logits_scaled = logits * self.logit_scale.exp().clamp(max=self.max_scale)
 
         loss_e = self.loss_func(
-            sim_scaled, labels
+            logits_scaled, labels
         )
         loss_i = self.loss_func(
-            sim_scaled.T, labels
+            logits_scaled.T, labels
         )
         loss = (loss_e + loss_i) * 0.5
 
-        return loss, sim
+        return loss, logits
 
 
 class InfoNCELoss(nn.Module):

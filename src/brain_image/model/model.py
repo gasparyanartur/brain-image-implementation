@@ -38,6 +38,20 @@ class WrapDebugSequential(nn.Module):
             print(f"(debug): {i} - {x.shape} - {self.debug_layers[i].note}")
         return x
 
+class LinearLayerNorm(nn.Module):
+    def __init__(self, dim_in: int, dim_out: int, act_func: nn.Module | None = None):
+        super().__init__()
+        self.linear = nn.Linear(dim_in, dim_out)
+        self.norm = nn.LayerNorm(dim_out)
+        self.act_func = act_func
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.norm(self.linear(x))
+        if self.act_func is not None:
+            x = self.act_func(x)
+        return x
+
+    
 
 class ResidualAdd(nn.Module):
     def __init__(self, module: nn.Module):

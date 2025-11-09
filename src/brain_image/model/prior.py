@@ -27,6 +27,9 @@ from dalle2_pytorch.train_configs import DiffusionPriorNetworkConfig
 from dalle2_pytorch.dalle2_pytorch import CausalTransformer, SinusoidalPosEmb, MLP
 
 from brain_image.configs import BaseConfig
+from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM
+from brain_image.model.model import LinearLayerNorm
+from brain_image.utils import l2_scale, reverse_l2_scale, reverse_z_scale, z_scale
 
 
 class BrainDiffusionPriorConfig(BaseConfig):
@@ -206,9 +209,9 @@ class DiffusionPriorNetwork(nn.Module):
 
         # mask out text embeddings with null text embeddings
 
-        null_text_embeds = self.null_text_embeds.to(text_embed.dtype)       # type: ignore
+        null_text_embeds = self.null_text_embeds.to(text_embed.dtype)  # type: ignore
 
-        text_embed = torch.where(text_keep_mask, text_embed, null_text_embeds)       # type: ignore
+        text_embed = torch.where(text_keep_mask, text_embed, null_text_embeds)  # type: ignore
 
         # mask out image embeddings with null image embeddings
 
@@ -227,7 +230,7 @@ class DiffusionPriorNetwork(nn.Module):
         learned_queries = repeat(self.learned_query, "d -> b 1 d", b=batch)
 
         if self.self_cond:
-            learned_queries = torch.cat((self_cond, learned_queries), dim=-2)       # type: ignore
+            learned_queries = torch.cat((self_cond, learned_queries), dim=-2)  # type: ignore
 
         input_stack = [text_embed, time_embed, image_embed, learned_queries]
         if text_encodings is not None:
@@ -575,8 +578,17 @@ class SimpleDiffusionPrior(nn.Module):
 
             return self.input_encoder(latent)
 
-    def __init__(self, config: DiffusionPriorConfig = DiffusionPriorConfig()):
+    def __init__(
+        self,
+        config: DiffusionPriorConfig = DiffusionPriorConfig(),
+        embedding_stats: dict[IMAGE_ENCODER, dict[str, Tensor]] | None = None,
+        encoder_embed_map: dict[str, IMAGE_ENCODER] | None = None,
+    ):
         super().__init__()
+        if config.norm_scheme == "z_scale" and embedding_stats is None:
+            raise ValueError("z_scale requires embedding stats")
+
+
         self._dummy_param = nn.Parameter(torch.empty(0))
         self.config = config
         act_func = get_activation(config.act_func)
@@ -584,10 +596,28 @@ class SimpleDiffusionPrior(nn.Module):
         self.time_proj = Timesteps(
             config.d_time, flip_sin_to_cos=True, downscale_freq_shift=0
         )
-        self.input_proj = nn.Sequential(
-            nn.Linear(config.d_input, config.d_hidden_start),
-            nn.LayerNorm(config.d_hidden_start),
-            act_func(),
+        self.input_proj = LinearLayerNorm(
+            config.d_input, config.d_hidden_start, act_func()
+        )
+
+        self.embedding_stats = embedding_stats or {}
+        logging.info(f"Received embedding stats with keys: {self.embedding_stats.keys()}")
+
+        self.encoder_dim_map = encoder_embed_map or {}
+
+        self.target_proj = nn.ModuleDict(
+            {
+                encoder_name: LinearLayerNorm(
+                    config.d_input, IMAGE_ENCODER_DIM[latent_name], act_func()
+                )
+                for encoder_name, latent_name in self.encoder_dim_map.items()
+            }
+        )
+        self.target_deproj = nn.ModuleDict(
+            {
+                encoder_name: nn.Linear(IMAGE_ENCODER_DIM[latent_name], config.d_input)
+                for encoder_name, latent_name in self.encoder_dim_map.items()
+            }
         )
 
         encoder_layers = []
@@ -642,6 +672,34 @@ class SimpleDiffusionPrior(nn.Module):
         self.out_proj = nn.Linear(config.d_hidden_start, config.d_input)
         self.scheduler = DDPMScheduler(self.config.num_training_timesteps)
 
+    @torch.no_grad()
+    def scale_target(
+        self, target: Tensor, latent_name: IMAGE_ENCODER | None = None
+    ) -> Tensor:
+        match self.config.norm_scheme:
+            case "none":
+                return target
+            case "l2_scale":
+                return l2_scale(target)
+            case "z_scale":
+                assert latent_name is not None and latent_name in self.embedding_stats, f"Unknown latent name {latent_name} in embedding stats {self.embedding_stats.keys()}"
+                stats = self.embedding_stats[latent_name]
+                return z_scale(target, stats["mean"], stats["std"])
+
+    @torch.no_grad()
+    def reverse_scale_target(
+        self, target: Tensor, latent_name: IMAGE_ENCODER | None = None
+    ) -> Tensor:
+        match self.config.norm_scheme:
+            case "none":
+                return target
+            case "l2_scale":
+                return reverse_l2_scale(target)
+            case "z_scale":
+                assert latent_name is not None and latent_name in self.embedding_stats
+                stats = self.embedding_stats[latent_name]
+                return reverse_z_scale(target, stats["mean"], stats["std"])
+
     def forward(
         self,
         x: Tensor,  # <B, D>
@@ -692,6 +750,44 @@ class SimpleDiffusionPrior(nn.Module):
 
         return x
 
+    @torch.compile()
+    def sample(
+        self,
+        target: torch.Tensor,
+        condition: torch.Tensor | None = None,
+        disable_cond_drop: bool = False,
+        noise: torch.Tensor | None = None,  # <B, D>
+        timesteps: torch.Tensor | None = None,  # <B>
+        *args,
+        **kwargs,
+    ) -> torch.Tensor:
+        device = target.device
+        batch_size = target.size(0)
+
+        noise = torch.randn_like(target) if noise is None else noise
+
+        timesteps = (
+            torch.randint(
+                0, self.config.num_training_timesteps, (batch_size,), device=device
+            )
+            if timesteps is None
+            else timesteps
+        )
+
+        noisy_latent = self.scheduler.add_noise(
+            target, noise, timesteps=cast(torch.IntTensor, timesteps)
+        )
+        noise_pred = self.forward(
+            noisy_latent,
+            timesteps,
+            condition,
+            cond_drop_prob=self.config.cond_drop_prob if not disable_cond_drop else 0,
+            *args,
+            **kwargs,
+        )
+        pred = self.remove_noise(noisy_latent, noise_pred, timesteps)
+        return pred
+
     @torch.no_grad()
     def generate(
         self,
@@ -717,13 +813,10 @@ class SimpleDiffusionPrior(nn.Module):
 
         else:
             if batch_size is not None:
-                raise ValueError(
-                    f"Cannot define both 'conditioning' and 'batch_size'"
-                )
+                raise ValueError(f"Cannot define both 'conditioning' and 'batch_size'")
             batch_size = conditioning.size(0)
 
         latent_dim = self.config.d_input
-
 
         if num_steps is None and scheduler_timesteps is None:
             raise ValueError(
@@ -766,25 +859,51 @@ class SimpleDiffusionPrior(nn.Module):
 
         return latent
 
-    def predict_step(self, noisy_latent: Tensor, timestep: Tensor, conditioning: Tensor | None = None, *args, **kwargs) -> Tensor:
+    def predict_step(
+        self,
+        noisy_latent: Tensor,
+        timestep: Tensor,
+        conditioning: Tensor | None = None,
+        *args,
+        **kwargs,
+    ) -> Tensor:
         # x: <B, D>
-        noisy_pred = self.forward(noisy_latent, timestep, conditioning, *args, **kwargs) # <B, D>
-        clean_pred = self.remove_noise(noisy_latent, noisy_pred, timestep, *args, **kwargs)
+        noisy_pred = self.forward(
+            noisy_latent, timestep, conditioning, *args, **kwargs
+        )  # <B, D>
+        clean_pred = self.remove_noise(
+            noisy_latent, noisy_pred, timestep, *args, **kwargs
+        )
 
         return clean_pred
-    
-    def remove_noise(self, noisy_latent: Tensor, noise_pred: Tensor, timestep: Tensor, *args, **kwargs) -> Tensor:
-        prediction_type = cast(str, self.scheduler.config.prediction_type)   # type: ignore
-        alpha_prod_t = self.scheduler.alphas_cumprod[timestep].unsqueeze(1).expand(-1, noisy_latent.size(1))  # <B, D>
-        beta_prod_t = 1 - alpha_prod_t      # <B, 1>
+
+    def remove_noise(
+        self,
+        noisy_latent: Tensor,
+        noise_pred: Tensor,
+        timestep: Tensor,
+        *args,
+        **kwargs,
+    ) -> Tensor:
+        prediction_type = cast(str, self.scheduler.config.prediction_type)  # type: ignore
+        alpha_prod_t = (
+            self.scheduler.alphas_cumprod[timestep]
+            .unsqueeze(1)
+            .expand(-1, noisy_latent.size(1))
+        )  # <B, D>
+        beta_prod_t = 1 - alpha_prod_t  # <B, 1>
 
         match prediction_type:
-            case "epsilon":        
-                clean_pred = (noisy_latent - beta_prod_t**0.5 * noise_pred) / alpha_prod_t**0.5
+            case "epsilon":
+                clean_pred = (
+                    noisy_latent - beta_prod_t**0.5 * noise_pred
+                ) / alpha_prod_t**0.5
             case "sample":
                 clean_pred = noise_pred
             case "v_prediction":
-                clean_pred = (alpha_prod_t**0.5) * noisy_latent - (beta_prod_t**0.5) * noise_pred
+                clean_pred = (alpha_prod_t**0.5) * noisy_latent - (
+                    beta_prod_t**0.5
+                ) * noise_pred
 
             case _:
                 raise ValueError(

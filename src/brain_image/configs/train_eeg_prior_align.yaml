@@ -8,7 +8,8 @@ model:
   do_recon_low: false
   
   eeg_encoder_path: null
-  prior_align_second_latent: true
+  prior_align_second_mode: condition
+  prior_img_encoder_2: unaligned_synclr_vitb16
 
   encoder_lr: 1e-3
   encoder_min_lr: 1e-7

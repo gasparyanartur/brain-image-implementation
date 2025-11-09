@@ -36,6 +36,7 @@ from brain_image.model.eeg_encoder.eeg_encoder import DEFAULT_EEG_DIM, EEGEncode
 from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM
 from brain_image.model.loss import CLIPLoss, InfoNCELoss
 
+from brain_image.model.model import LinearLayerNorm
 from brain_image.model.prior import (
     DiffusionPriorConfig,
     SimpleDiffusionPrior,
@@ -50,6 +51,7 @@ from brain_image.reconstruction import (
 )
 from brain_image.utils import (
     DTYPE,
+    VCLR,
     current_fig_to_img,
     find_module_content_in_state_dict,
     gather_dataloader,
@@ -78,7 +80,7 @@ class EEGAlignmentConfig(BaseConfig):
     prior_img_encoder_2: IMAGE_ENCODER | None = None
     eeg_encoder: str = "nice"
 
-    prior_align_second_latent: bool = False
+    prior_align_second_mode: Literal["none", "condition", "concat"] = "none"
 
     do_align: bool = True
     do_recon_low: bool = False
@@ -230,7 +232,7 @@ class EEGAlignmentModel(pl.LightningModule):
             ),
             "prior_img_latent_2": (
                 self.config.prior_img_encoder_2
-                if self.config.prior_align_second_latent
+                if self.config.prior_align_second_mode != "none"
                 else None
             ),
             "recon_latent": (
@@ -242,31 +244,83 @@ class EEGAlignmentModel(pl.LightningModule):
             dataset_config, tensor_cache=tensor_cache, embeddings_map=embeddings_map
         )
 
-        self.temperature = nn.Parameter(
-            torch.tensor(self.config.temperature_init, dtype=torch.float32)
-        )
-        self.loss = nn.CrossEntropyLoss()
-
         if init_weights:
             self._init_normal_weights()
 
         self.prior: SimpleDiffusionPrior | None = None
+        self.token_embedding: nn.ParameterDict | None = None
+        self.prior_input_encoder: nn.ParameterDict | None = None
+        self.prior_input_decoder: nn.ParameterDict | None = None
+        self.prior_align_loss: CLIPLoss | InfoNCELoss | None = None
 
         if self.config.do_recon:
             assert self.config.prior, "Prior config must be provided"
 
-            if not self.config.prior_align_second_latent:
+            if self.config.prior_align_second_mode == "none":
                 self.config.prior_img_encoder_2 = None
+
+            else:
+                self.prior_align_loss = CLIPLoss(self.config.temperature_init)
 
             self.config.prior.d_cond = self.eeg_dim
 
             self.config.prior.d_input = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-            if self.config.prior_img_encoder_2:
+
+            if self.config.prior_align_second_mode == "concat":
+                assert self.config.prior_img_encoder_2
+
                 self.config.prior.d_input += IMAGE_ENCODER_DIM[
                     self.config.prior_img_encoder_2
                 ]
 
-            self.prior = SimpleDiffusionPrior(self.config.prior).to(dtype)
+            elif self.config.prior_align_second_mode == "condition":
+                assert self.config.prior_img_encoder_2
+
+                self.token_embedding = nn.ParameterDict(
+                    {
+                        "encoder_1": nn.Parameter(torch.randn(self.eeg_dim)),
+                        "encoder_2": nn.Parameter(torch.randn(self.eeg_dim)),
+                    }
+                )
+
+                self.prior_input_encoder = nn.ParameterDict(
+                    {
+                        "encoder_1": LinearLayerNorm(
+                            IMAGE_ENCODER_DIM[self.config.prior_img_encoder],
+                            self.config.prior.d_input,
+                        ),
+                        "encoder_2": LinearLayerNorm(
+                            IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2],
+                            self.config.prior.d_input,
+                        ),
+                    }
+                )
+                self.prior_input_decoder = nn.ParameterDict(
+                    {
+                        "encoder_1": LinearLayerNorm(
+                            self.config.prior.d_input,
+                            IMAGE_ENCODER_DIM[self.config.prior_img_encoder],
+                        ),
+                        "encoder_2": LinearLayerNorm(
+                            self.config.prior.d_input,
+                            IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2],
+                        ),
+                    }
+                )
+
+            emb_stats = {
+                self.config.prior_img_encoder: self.data_module.embedding_stats[
+                    "prior_img_latent"
+                ],
+            }
+            if self.config.prior_img_encoder_2:
+                emb_stats[self.config.prior_img_encoder_2] = self.data_module.embedding_stats[
+                    "prior_img_latent_2"
+                ]
+
+            self.prior = SimpleDiffusionPrior(
+                self.config.prior, embedding_stats=emb_stats
+            ).to(dtype)
 
         elif self.config.do_recon_low:
             raise ValueError(
@@ -378,7 +432,13 @@ class EEGAlignmentModel(pl.LightningModule):
             ),
             OptimizerConfig(
                 name="prior",
-                modules=[self.prior],
+                modules=[
+                    self.prior,
+                    self.token_embedding,
+                    self.prior_align_loss,
+                    self.prior_input_encoder,
+                    self.prior_input_decoder,
+                ],
                 lr=self.config.prior_lr,
                 min_lr=self.config.prior_min_lr,
                 warmup_epochs=self.config.prior_warmup_epochs,
@@ -592,7 +652,9 @@ class EEGAlignmentModel(pl.LightningModule):
                     wandb_logger.log_image(key=f"{prefix}{k}", images=v)
 
         for metric_name, metric_value in it.chain(losses.items(), metrics.items()):
-            prefix = "val/" if metric_name.split("/")[0] not in ("debug", "eval") else ""
+            prefix = (
+                "val/" if metric_name.split("/")[0] not in ("debug", "eval") else ""
+            )
             name = f"{prefix}{metric_name}"
             self.log(
                 name,
@@ -786,87 +848,111 @@ class EEGAlignmentModel(pl.LightningModule):
         assert (
             target_latent := batch["prior_img_latent"]
         ) is not None, "Prior image latent is not defined"
-
         assert (
             eeg_latent_normed := cache["eeg_latent"]
         ) is not None, "Normed eeg latent is not defined"
+        target_latent = target_latent.to(device)
+        eeg_latent_normed = eeg_latent_normed.to(device)
 
         if self.config.prior_img_encoder_2:
             target_latent_2 = batch.get("prior_img_latent_2")
+            assert target_latent_2 is not None, "Prior image latent 2 is not defined"
+            target_latent_2 = target_latent_2.to(device)
         else:
             target_latent_2 = None
 
-        with torch.no_grad():
-            match self.config.prior.norm_scheme:
-                case "none":
-                    pass
-                case "z_scale":
-                    stats = self.data_module.embedding_stats["prior_img_latent"]
-                    target_latent = z_scale(target_latent, stats["mean"], stats["std"])
-
-                    if target_latent_2 is not None:
-                        stats2 = self.data_module.embedding_stats["prior_img_latent_2"]
-                        target_latent_2 = z_scale(
-                            target_latent_2, stats2["mean"], stats2["std"]
-                        )
-
-                case "l2_scale":
-                    target_latent = l2_scale(target_latent)
-
-                    if target_latent_2 is not None:
-                        target_latent_2 = l2_scale(target_latent_2)
+        target_latent = self.prior.scale_target(
+            target_latent, self.config.prior_img_encoder
+        )
+        if target_latent_2 is not None:
+            target_latent_2 = self.prior.scale_target(
+                target_latent_2, self.config.prior_img_encoder_2
+            )
 
         if self.config.debug_prior_use_target_as_cond:
             eeg_latent_normed = F.normalize(-target_latent)
 
         batch_size = target_latent.size(0)
 
-        if target_latent_2 is not None:
-            prior_target = torch.cat([target_latent, target_latent_2], dim=-1)
+        if self.config.prior_align_second_mode == "condition":
+            assert self.prior_input_encoder is not None
+            assert self.prior_input_decoder is not None
+            assert self.token_embedding is not None
+
+            prior_latent_emb_1 = F.normalize(
+                self.token_embedding["encoder_1"].to(device), dim=-1, p=2
+            ).expand(batch_size, -1)
+            prior_latent_emb_2 = F.normalize(
+                self.token_embedding["encoder_2"].to(device), dim=-1, p=2
+            ).expand(batch_size, -1)
+
+            losses.update(
+                {  # Keep token embeddings orthagonal to make model able to discern between them
+                    "prior/token_embed_orthog_loss": 5e-2
+                    * torch.linalg.vecdot(prior_latent_emb_1, prior_latent_emb_2)
+                    .abs()
+                    .mean()
+                }
+            )
+
+            condition = eeg_latent_normed + prior_latent_emb_1
+            condition_2 = eeg_latent_normed + prior_latent_emb_2
+
+            target = self.prior_input_encoder["encoder_1"](target_latent)
+            target_2 = self.prior_input_encoder["encoder_2"](target_latent_2)
+
+            timesteps = torch.randint(
+                0,
+                self.config.prior.num_training_timesteps,
+                size=(batch_size,),
+                device=device,
+            )
+
+            pred = self.prior.sample(target, condition, timesteps=timesteps)
+            pred_2 = self.prior.sample(target_2, condition_2, timesteps=timesteps)
+
+            pred = self.prior_input_decoder["encoder_1"](pred)
+            pred_2 = self.prior_input_decoder["encoder_2"](pred_2)
+
         else:
-            prior_target = target_latent
+            if self.config.prior_align_second_mode == "concat":
+                assert target_latent_2 is not None
+                target = torch.cat([target_latent, target_latent_2], dim=-1)
 
-        noise = torch.randn_like(prior_target)
-        timesteps = torch.randint(
-            0,
-            self.config.prior.num_training_timesteps,
-            size=(batch_size,),
-            device=device,
-        )
-        noisy_latent = self.prior.scheduler.add_noise(
-            prior_target, noise, timesteps=cast(torch.IntTensor, timesteps)
-        )
+            condition = eeg_latent_normed
 
-        noise_pred = self.prior.forward(
-            noisy_latent,
-            timesteps,
-            eeg_latent_normed,
-            self.config.prior.cond_drop_prob,
-        )
-        noise_mse_loss = (
-            torch.nn.functional.mse_loss(noise_pred, noise)
-            * self.config.prior_noise_mse_loss_factor
-        )
-        pred = self.prior.remove_noise(noisy_latent, noise_pred, timesteps)
+            timesteps = torch.randint(
+                0,
+                self.config.prior.num_training_timesteps,
+                size=(batch_size,),
+                device=device,
+            )
+            pred = self.prior.sample(target, condition, timesteps=timesteps)
 
-        if target_latent_2 is not None:
-            assert self.config.prior_img_encoder_2
+            if self.config.prior_align_second_mode == "concat":
+                assert self.config.prior_img_encoder_2
+                assert self.prior_align_loss is not None
+                dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
+                dim2 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
 
-            dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-            dim2 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
-            pred, pred_2 = tensor_split(pred, -1, (dim1, dim2))
+                pred, pred_2 = tensor_split(pred, -1, (dim1, dim2))
 
-            align_loss, align_logits = self.align_loss(
+        if pred_2 is not None:
+            assert self.prior_align_loss is not None
+            assert target_latent_2 is not None
+
+            align_loss, _ = self.prior_align_loss(
                 F.normalize(pred_2), F.normalize(target_latent_2), labels=None
             )
+            align_loss = align_loss * self.config.prior_align_loss_factor
             pred_mse_loss_2 = (
                 torch.nn.functional.mse_loss(pred_2, target_latent_2)
                 * self.config.prior_pred_mse_loss_factor
             )
+
             losses.update(
                 {
-                    "prior/align_clip_loss": align_loss
-                    * self.config.prior_align_loss_factor,
+                    "prior/pred_clip_loss_2": align_loss,
                     "prior/pred_mse_loss_2": pred_mse_loss_2,
                 }
             )
@@ -884,7 +970,6 @@ class EEGAlignmentModel(pl.LightningModule):
 
         losses.update(
             {
-                "prior/noise_mse_loss": noise_mse_loss,
                 "prior/pred_sim_loss": pred_sim_loss,
                 "prior/pred_mse_loss": pred_mse_loss,
             }
@@ -894,38 +979,21 @@ class EEGAlignmentModel(pl.LightningModule):
             timesteps_50 = int(
                 self.prior.config.num_training_timesteps * 0.5
             ) * torch.ones(batch_size, device=device, dtype=torch.int32)
-            noisy_latent_50 = self.prior.scheduler.add_noise(
-                prior_target, noise, timesteps=cast(torch.IntTensor, timesteps_50)
-            )
-            noise_pred_50 = self.prior.forward(
-                noisy_latent_50,
-                timesteps_50,
-                eeg_latent_normed,
-            )
-            pred_50 = self.prior.predict_step(
-                noise_pred_50, timesteps_50, eeg_latent_normed
-            )
-            pred_50 = pred_50[:, : target_latent.size(-1)]
+            pred_50 = self.prior.sample(target_latent, condition, timesteps=timesteps_50)
 
             metrics.update(
                 {
-                    "prior/pred_cos": torch.linalg.vecdot(
+                    "prior/pred_cos": VCLR(torch.linalg.vecdot(
                         F.normalize(target_latent), F.normalize(pred_50), dim=-1
-                    )
-                    .mean()
-                    .cpu(),
+                    ))
                 }
             )
-            if target_latent_2 is not None:
-                metrics.update(
-                    {"prior/align_top1": get_top1_acc(align_logits, axis=1).cpu()}
-                )
             if self.config.debug_metrics:
                 metrics.update(
                     {
-                        "debug/prior/pred/mean": pred_50.mean(dim=-1).mean().cpu(),
-                        "debug/prior/pred/std": pred_50.std(dim=-1).mean().cpu(),
-                        "debug/prior/pred/norm": pred_50.norm(dim=-1).mean().cpu(),
+                        "debug/prior/pred/mean": VCLR(pred_50.mean(dim=-1)),
+                        "debug/prior/pred/std": VCLR(pred_50.std(dim=-1)),
+                        "debug/prior/pred/norm": VCLR(pred_50.norm(dim=-1)),
                     }
                 )
 
@@ -933,27 +1001,12 @@ class EEGAlignmentModel(pl.LightningModule):
             if self.config.debug_metrics:
                 metrics.update(
                     {
-                        "debug/prior/target/mean": target_latent.mean(dim=-1)
-                        .mean()
-                        .cpu(),
-                        "debug/prior/target/std": target_latent.std(dim=-1)
-                        .mean()
-                        .cpu(),
-                        "debug/prior/target/norm": target_latent.norm(dim=-1)
-                        .mean()
-                        .cpu(),
-                        "debug/prior/noise/mean": noise.mean(dim=-1).mean().cpu(),
-                        "debug/prior/noise/std": noise.std(dim=-1).mean().cpu(),
-                        "debug/prior/noise/norm": noise.norm(dim=-1).mean().cpu(),
-                        "debug/prior/noise_pred/mean": noise_pred.mean(dim=-1)
-                        .mean()
-                        .cpu(),
-                        "debug/prior/noise_pred/std": noise_pred.std(dim=-1)
-                        .mean()
-                        .cpu(),
-                        "debug/prior/noise_pred/norm": noise_pred.norm(dim=-1)
-                        .mean()
-                        .cpu(),
+                        "debug/prior/target/mean": VCLR(target_latent.mean(dim=-1)),
+                        "debug/prior/target/std": VCLR(target_latent.std(dim=-1)),
+                        "debug/prior/target/norm": VCLR(target_latent.norm(dim=-1)),
+                        "debug/prior/noise_pred/mean": VCLR(pred.mean(dim=-1)),
+                        "debug/prior/noise_pred/std": VCLR(pred.std(dim=-1)),
+                        "debug/prior/noise_pred/norm": VCLR(pred.norm(dim=-1)),
                     }
                 )
 
@@ -984,7 +1037,6 @@ class EEGAlignmentModel(pl.LightningModule):
             all_data,
             batch_size=self.data_module.config.get_batch_size(split),
             progress_bar=False,
-            normalize=True,
         )
 
         all_data["eeg_latent"], all_data["eeg_latent_normed"] = (
@@ -1082,24 +1134,11 @@ class EEGAlignmentModel(pl.LightningModule):
         metrics = {}
         img_outputs = {}
 
-        pred = self.get_all_prior_preds(
-            eeg_latent_normed,
+        pred, pred_2 = self.get_all_prior_preds(
+            eeg_latent_normed.to(device),
             batch_size=self.data_module.config.get_batch_size(split),
         )
         assert pred is not None
-
-        if self.config.prior_img_encoder_2:
-            target_2 = all_data.get("prior_img_latent_2")
-            assert target_2 is not None
-            target_2 = target_2.to(device)
-
-            dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-            dim2 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
-
-            pred, pred_2 = tensor_split(pred, -1, (dim1, dim2))
-
-        else:
-            target_2 = None
 
         all_data["prior_pred"] = pred
 
@@ -1116,37 +1155,48 @@ class EEGAlignmentModel(pl.LightningModule):
 
         metrics.update(
             {
-                "eval/prior/recon_cos": torch.linalg.vecdot(
-                    F.normalize(pred), F.normalize(target), dim=-1
+                "eval/prior/pred_cos": VCLR(
+                    torch.linalg.vecdot(F.normalize(pred), F.normalize(target), dim=-1)
                 )
-                .detach()
-                .mean()
-                .cpu(),
             }
         )
 
         if self.config.debug_metrics:
             metrics.update(
                 {
-                    "eval/prior/pred_mean": pred.mean(dim=0).mean().cpu(),
-                    "eval/prior/pred_std": pred.std(dim=0).mean().cpu(),
-                    "eval/prior/target_to_pred_ratio": (
-                        target.norm(p=2, dim=-1).mean() / pred.norm(p=2, dim=-1).mean()
-                    ).cpu(),
+                    "eval/prior/pred_mean": VCLR(pred.mean(dim=0)),
+                    "eval/prior/pred_std": VCLR(pred.std(dim=0)),
+                    "eval/prior/target_to_pred_ratio": VCLR(
+                        target.norm(p=2, dim=-1, keepdim=True)
+                        / (pred.norm(p=2, dim=-1, keepdim=True) + 1e-8).mean()
+                    ),
                 }
             )
-        if target_2 is not None:
-            _, align_logits = self.align_loss(
-                F.normalize(pred_2.to(device)),
-                F.normalize(target_2.to(device)),
-                labels=None,
+        if self.config.prior_align_second_mode != "none":
+            assert (target_2 := all_data.get("prior_img_latent_2")) is not None
+            assert pred_2 is not None
+            pred_2 = pred_2.to(device)
+            target_2 = target_2.to(device)
+
+            pred_2_normed = F.normalize(pred_2, p=2, dim=-1)
+            target_2_normed = F.normalize(target_2, p=2, dim=-1)
+
+            align_loss, align_logits = self.align_loss(
+                pred_2_normed,
+                target_2_normed
             )
 
             metrics.update(
                 {
-                    "eval/prior/prior_align_top1": get_top1_acc(
-                        align_logits, axis=1
-                    ).cpu(),
+                    "eval/prior/pred2_align_loss": VCLR(align_loss),
+                    "eval/prior/pred2_align_top1": VCLR(
+                        get_top1_acc(align_logits, axis=1)
+                    ),
+                    "eval/prior/pred2_cos": VCLR(
+                        torch.linalg.vecdot(
+                            F.normalize(pred_2), F.normalize(target_2), dim=-1
+                        )
+                    ),
                 }
             )
 
@@ -1167,7 +1217,6 @@ class EEGAlignmentModel(pl.LightningModule):
             all_data,
             batch_size=self.data_module.config.get_batch_size("test"),
             progress_bar=False,
-            normalize=True,
         )
 
         all_data["eeg_latent"], all_data["eeg_latent_normed"] = (
@@ -1253,24 +1302,14 @@ class EEGAlignmentModel(pl.LightningModule):
 
         img_outputs = {}
 
-        prior_pred = self.get_all_prior_preds(
-            eeg_latent_normed,
+        pred, pred_2 = self.get_all_prior_preds(
+            eeg_latent_normed.to(device),
             batch_size=self.data_module.config.get_batch_size("test"),
-            progress_bar=True,
         )
-        assert prior_pred is not None
+        assert pred is not None
 
-        if self.config.prior_img_encoder_2:
-            dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-            dim2 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
-            prior_pred, prior_pred_2 = tensor_split(prior_pred, -1, (dim1, dim2))
-            target_2 = all_data.get("prior_img_latent_2")
-        else:
-            target_2 = None
-
-        conditioning = F.normalize(prior_pred)
         recon = self.get_prior_reconstructions(
-            conditioning, pipe_kwargs={"progress_bar": True}
+            F.normalize(pred.to(device)), pipe_kwargs={"progress_bar": True}
         )
         # recon = torch.rand((200, 3, 512, 512))
         if recon is None:
@@ -1291,16 +1330,24 @@ class EEGAlignmentModel(pl.LightningModule):
         gts = resize(gts)
         recon = resize(recon)
 
-        if target_2 is not None:
-            align_clip, align_logits = self.align_loss(
-                F.normalize(prior_pred_2.to(device)),
+        if self.config.prior_align_second_mode != "none":
+            assert (target_2 := all_data.get("prior_img_latent_2")) is not None
+            assert pred_2 is not None
+            target_2 = target_2.to(device)
+
+            _, align_logits = self.align_loss(
+                F.normalize(pred_2.to(device)),
                 F.normalize(target_2.to(device)),
                 labels=None,
             )
             metric_values.update(
                 {
-                    "prior/align_clip": align_clip.mean().cpu(),
-                    "prior/align_top1": get_top1_acc(align_logits, axis=1).cpu(),
+                    "prior/pred2_align_top1": VCLR(get_top1_acc(align_logits, axis=1)),
+                    "prior/pred2_cos": VCLR(
+                        torch.linalg.vecdot(
+                            F.normalize(pred_2), F.normalize(target_2), dim=-1
+                        )
+                    ),
                 }
             )
 
@@ -1563,11 +1610,11 @@ class EEGAlignmentModel(pl.LightningModule):
         generator: torch.Generator | None = None,
         prior_kwargs: dict = {},
         norm_scheme: Literal["none", "z_scale", "l2_scale"] | None = None,
-    ) -> torch.Tensor | None:
-        device, dtype = self._get_device_dtype()
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        device, _ = self._get_device_dtype()
 
         if self.prior is None:
-            return None
+            return None, None
 
         if generator is None:
             generator = torch.Generator(device).manual_seed(self.config.seed)
@@ -1575,7 +1622,8 @@ class EEGAlignmentModel(pl.LightningModule):
         norm_scheme = norm_scheme or self.prior.config.norm_scheme
 
         n = eeg_latent_normed.size(0)
-        all_prior_preds_ = []
+        all_preds = []
+        all_preds2 = []
         with tqdm.tqdm(
             total=n,
             desc="Prior sampling",
@@ -1583,57 +1631,87 @@ class EEGAlignmentModel(pl.LightningModule):
         ) as pbar:
             for i in range(0, n, batch_size):
                 eeg_values = eeg_latent_normed[i : i + batch_size].to(device)
+                B = eeg_values.size(0)
 
-                prior_pred = self.prior.generate(
-                    conditioning=eeg_values,
-                    generator=generator,
-                    **prior_kwargs,
-                )
+                if self.config.prior_align_second_mode == "condition":
+                    assert self.token_embedding is not None
+                    assert self.prior_input_decoder is not None
+
+                    tok_cond_1 = F.normalize(
+                        self.token_embedding["encoder_1"].to(device), dim=-1, p=2
+                    )
+                    tok_cond_2 = F.normalize(
+                        self.token_embedding["encoder_2"].to(device), dim=-1, p=2
+                    )
+                    cond = eeg_values + tok_cond_1
+                    cond_2 = eeg_values + tok_cond_2
+
+                    pred = self.prior.generate(
+                        conditioning=cond,
+                        generator=generator,
+                        **prior_kwargs,
+                    )
+                    pred = self.prior_input_decoder["encoder_1"].to(device)(pred)
+
+                    pred_2 = self.prior.generate(
+                        conditioning=cond_2,
+                        generator=generator,
+                        **prior_kwargs,
+                    )
+                    pred_2 = self.prior_input_decoder["encoder_2"].to(device)(pred_2)
+
+                else:
+                    cond = eeg_values
+                    pred = self.prior.generate(
+                        conditioning=eeg_values,
+                        generator=generator,
+                        **prior_kwargs,
+                    )
+                    pred_2 = None
+
+                if self.config.prior_align_second_mode == "concat":
+                    assert self.config.prior_img_encoder_2
+
+                    dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
+                    dim2 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
+
+                    pred, pred_2 = tensor_split(pred, -1, (dim1, dim2))
 
                 match norm_scheme:
                     case "none":
                         pass
                     case "z_scale":
-                        if self.config.prior_align_second_latent:
-                            stats1 = self.data_module.embedding_stats[
-                                "prior_img_latent"
-                            ]
+                        stats = self.data_module.embedding_stats["prior_img_latent"]
+                        pred = reverse_z_scale(pred, stats["mean"], stats["std"])
+
+                        if self.config.prior_align_second_mode != "none":
+                            assert pred_2 is not None
+
                             stats2 = self.data_module.embedding_stats[
                                 "prior_img_latent_2"
                             ]
-                            dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-                            prior_pred[:, :dim1] = reverse_z_scale(
-                                prior_pred[:, :dim1], stats1["mean"], stats1["std"]
-                            )
-                            prior_pred[:, dim1:] = reverse_z_scale(
-                                prior_pred[:, dim1:], stats2["mean"], stats2["std"]
-                            )
-
-                        else:
-                            stats = self.data_module.embedding_stats["prior_img_latent"]
-                            prior_pred = reverse_z_scale(
-                                prior_pred, stats["mean"], stats["std"]
+                            pred_2 = reverse_z_scale(
+                                pred_2, stats2["mean"], stats2["std"]
                             )
 
                     case "l2_scale":
-                        if self.config.prior_align_second_latent:
-                            assert self.config.prior_img_encoder_2
-                            dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-                            prior_pred[:, :dim1] = reverse_l2_scale(
-                                prior_pred[:, :dim1]
-                            )
-                            prior_pred[:, dim1:] = reverse_l2_scale(
-                                prior_pred[:, dim1:]
-                            )
+                        pred = reverse_l2_scale(pred)
+                        if self.config.prior_align_second_mode != "none":
+                            assert pred_2 is not None
+                            pred_2 = reverse_l2_scale(pred_2)
 
-                        else:
-                            prior_pred = reverse_l2_scale(prior_pred)
+                all_preds.append(pred.detach().cpu())
+                if pred_2 is not None:
+                    all_preds2.append(pred_2.detach().cpu())
+                pbar.update(pred.size(0))
 
-                all_prior_preds_.append(prior_pred.detach().cpu())
-                pbar.update(prior_pred.size(0))
+        prior_preds = torch.cat(all_preds, dim=0)
+        if pred_2 is not None:
+            prior_preds2 = torch.cat(all_preds2, dim=0)
+        else:
+            prior_preds2 = None
 
-        prior_preds = torch.cat(all_prior_preds_, dim=0)
-        return prior_preds
+        return prior_preds, prior_preds2
 
     @torch.no_grad()
     def get_all_eeg_latents(
@@ -1641,7 +1719,6 @@ class EEGAlignmentModel(pl.LightningModule):
         all_data: DataBatchT,
         batch_size: int = 512,
         progress_bar: bool = True,
-        normalize: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         assert (
             "idx" in all_data and all_data["idx"] is not None

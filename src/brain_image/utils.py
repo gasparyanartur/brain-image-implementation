@@ -22,6 +22,9 @@ from torch.nn import functional as F
 
 import matplotlib.pyplot as plt
 
+def VCLR(x: torch.Tensor) -> torch.Tensor:
+    return x.detach().mean().cpu()
+
 def casttensor(x: Any) -> torch.Tensor:
     return cast(torch.Tensor, x)
 
