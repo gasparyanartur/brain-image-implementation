@@ -37,6 +37,8 @@ wheels/
 /.cache
 
 /.env
+/.continue
+
 /wandb
 
 /test_outputs/
