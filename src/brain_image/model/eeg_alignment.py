@@ -900,6 +900,7 @@ class EEGAlignmentModel(pl.LightningModule):
             pred_2 = self.prior_input_decoder["encoder_2"](pred_2)
 
         else:
+            condition = eeg_latent_normed
             if self.config.prior_align_second_mode == "concat":
                 assert target_latent_2 is not None
                 prior_target = torch.cat([target_latent, target_latent_2], dim=-1)
@@ -975,8 +976,13 @@ class EEGAlignmentModel(pl.LightningModule):
             else:
                 pred_50 = self.prior.sample(prior_target, condition, timesteps=timesteps_50, disable_cond_drop=True)
                 if self.config.prior_align_second_mode == "condition":
+                    assert self.prior_input_decoder is not None
+                    
                     assert prior_target_2 is not None
                     pred_2_50 = self.prior.sample(prior_target_2, condition_2, timesteps=timesteps_50, disable_cond_drop=True)
+
+                    pred_50 = self.prior_input_decoder["encoder_1"](pred_50)
+                    pred_2_50 = self.prior_input_decoder["encoder_2"](pred_2_50)
                 else:
                     pred_2_50 = None
 
