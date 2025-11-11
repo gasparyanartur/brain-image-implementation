@@ -605,21 +605,6 @@ class SimpleDiffusionPrior(nn.Module):
 
         self.encoder_dim_map = encoder_embed_map or {}
 
-        self.target_proj = nn.ModuleDict(
-            {
-                encoder_name: LinearLayerNorm(
-                    config.d_input, IMAGE_ENCODER_DIM[latent_name], act_func()
-                )
-                for encoder_name, latent_name in self.encoder_dim_map.items()
-            }
-        )
-        self.target_deproj = nn.ModuleDict(
-            {
-                encoder_name: nn.Linear(IMAGE_ENCODER_DIM[latent_name], config.d_input)
-                for encoder_name, latent_name in self.encoder_dim_map.items()
-            }
-        )
-
         encoder_layers = []
         decoder_layers = []
 
@@ -669,7 +654,7 @@ class SimpleDiffusionPrior(nn.Module):
         self.encoder_layers = nn.ModuleList(encoder_layers)
         self.decoder_layers = nn.ModuleList(decoder_layers)
 
-        self.out_proj = nn.Linear(config.d_hidden_start, config.d_input)
+        self.out_proj = LinearLayerNorm(config.d_hidden_start, config.d_input)
         self.scheduler = DDPMScheduler(self.config.num_training_timesteps)
 
     @torch.no_grad()

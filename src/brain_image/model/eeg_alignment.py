@@ -26,7 +26,7 @@ from brain_image.data import (
 from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
 from brain_image.model.eeg_encoder import create_eeg_encoder
 from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM
-from brain_image.model.loss import CLIPLoss, InfoNCELoss
+from brain_image.model.loss import CLIPLoss
 
 from brain_image.model.model import LinearLayerNorm
 from brain_image.model.prior import (
@@ -44,6 +44,7 @@ from brain_image.utils import (
     DTYPE,
     VCLR,
     current_fig_to_img,
+    find_duplicates,
     gather_dataloader,
     get_dtype,
     get_mean_gradients,
@@ -82,9 +83,8 @@ class EEGAlignmentConfig(BaseConfig):
     align_loss_epoch: int = 0
     align_loss_factor: float = 0.1
     align_mse_loss_factor: float = 10.0
-    prior_align_loss_factor: float = 1.0
-    prior_pred_mse_loss_factor: float = 1.0
-    prior_noise_mse_loss_factor: float = 1.0
+    prior_align_loss_factor: float = 10.0
+    prior_pred_mse_loss_factor: float = 0.5
 
     full_eval_every_epochs: int = 1
     skip_eval_first_epoch: bool = True
@@ -236,7 +236,7 @@ class EEGAlignmentModel(pl.LightningModule):
         self.token_embedding: nn.ParameterDict | None = None
         self.prior_input_encoder: nn.ParameterDict | None = None
         self.prior_input_decoder: nn.ParameterDict | None = None
-        self.prior_align_loss: CLIPLoss | InfoNCELoss | None = None
+        self.prior_align_loss: CLIPLoss | None = None
 
         if self.config.do_recon:
             assert self.config.prior, "Prior config must be provided"
@@ -321,8 +321,6 @@ class EEGAlignmentModel(pl.LightningModule):
 
         if self.config.align_loss_type == "clip":
             self.align_loss = CLIPLoss(self.config.temperature_init)
-        elif self.config.align_loss_type == "infonce":
-            self.align_loss = InfoNCELoss(self.config.temperature_init)
         else:
             raise ValueError(f"Unknown align_loss_type: {self.config.align_loss_type}")
 
@@ -784,9 +782,10 @@ class EEGAlignmentModel(pl.LightningModule):
             # There might be duplicates (different subjects, same image)
             # labels = (idx.unsqueeze(0) == idx.unsqueeze(1)).float()
             labels = None
+            ignore_mask = find_duplicates(idx)
 
         align_clip_loss, align_logits = self.align_loss(
-            eeg_latent_normed, align_img_latent_normed, labels=labels
+            eeg_latent_normed, align_img_latent_normed, labels=labels, ignore_mask=ignore_mask
         )
 
         align_clip_loss = (
@@ -913,15 +912,16 @@ class EEGAlignmentModel(pl.LightningModule):
                 size=(batch_size,),
                 device=device,
             )
-            pred = self.prior.sample(prior_target, eeg_latent_normed, timesteps=timesteps)
+            pred = self.prior.sample(prior_target, condition, timesteps=timesteps)
 
             if self.config.prior_align_second_mode == "concat":
                 assert self.config.prior_img_encoder_2
                 assert self.prior_align_loss is not None
-                dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-                dim2 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
+                assert target_latent_2 is not None
 
-                pred, pred_2 = tensor_split(pred, -1, (dim1, dim2))
+                pred, pred_2 = tensor_split(pred, -1, (target_latent.size(-1), target_latent_2.size(-1)))
+            else:
+                pred_2 = None
 
         if pred_2 is not None:
             assert self.prior_align_loss is not None
@@ -967,12 +967,11 @@ class EEGAlignmentModel(pl.LightningModule):
             ) * torch.ones(batch_size, device=device, dtype=torch.int32)
             if self.config.prior_align_second_mode == "concat":
                 assert self.config.prior_img_encoder_2 is not None
+                assert target_latent_2 is not None
 
                 pred_full_50 = self.prior.sample(prior_target, condition, timesteps=timesteps_50, disable_cond_drop=True)
-                dim1 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-                dim2 = IMAGE_ENCODER_DIM[self.config.prior_img_encoder_2]
 
-                pred_50, pred_2_50 = tensor_split(pred_full_50, -1, (dim1, dim2))
+                pred_50, pred_2_50 = tensor_split(pred_full_50, -1, (target_latent.size(-1), target_latent_2.size(-1)))
             else:
                 pred_50 = self.prior.sample(prior_target, condition, timesteps=timesteps_50, disable_cond_drop=True)
                 if self.config.prior_align_second_mode == "condition":
@@ -1144,6 +1143,7 @@ class EEGAlignmentModel(pl.LightningModule):
         split: Literal["val", "test"] = "val",
     ):
         assert (target := all_data.get("prior_img_latent")) is not None
+        assert (idx := all_data.get("idx")) is not None
 
         if self.config.debug_prior_use_target_as_cond:
             eeg_latent_normed = F.normalize(-target) + torch.randn_like(target) * 0.2
@@ -1205,10 +1205,12 @@ class EEGAlignmentModel(pl.LightningModule):
 
             pred_2_normed = F.normalize(pred_2, p=2, dim=-1)
             target_2_normed = F.normalize(target_2, p=2, dim=-1)
+            ignore_mask = find_duplicates(idx)
 
             align_loss, align_logits = self.align_loss(
                 pred_2_normed,
-                target_2_normed
+                target_2_normed,
+                ignore_mask=ignore_mask
             )
 
             metrics.update(
@@ -1360,13 +1362,16 @@ class EEGAlignmentModel(pl.LightningModule):
 
         if self.config.prior_align_second_mode != "none":
             assert (target_2 := all_data.get("prior_img_latent_2")) is not None
+            assert (idx := all_data.get("idx")) is not None
             assert pred_2 is not None
             pred_2 = pred_2.to(device)
             target_2 = target_2.to(device)
 
+            ignore_mask = find_duplicates(idx)
             _, align_logits = self.align_loss(
                 F.normalize(pred_2),
                 F.normalize(target_2),
+                ignore_mask=ignore_mask
             )
             metric_values.update(
                 {

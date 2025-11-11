@@ -22,11 +22,14 @@ from torch.nn import functional as F
 
 import matplotlib.pyplot as plt
 
+
 def VCLR(x: torch.Tensor) -> torch.Tensor:
     return x.detach().mean().cpu()
 
+
 def casttensor(x: Any) -> torch.Tensor:
     return cast(torch.Tensor, x)
+
 
 def setup_logging():
     logging.basicConfig(
@@ -64,15 +67,17 @@ def gather_dataloader(
 
     return all_samples
 
+
 def current_fig_to_img():
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", bbox_inches='tight', dpi=300)
+    plt.savefig(buf, format="png", bbox_inches="tight", dpi=300)
     plt.close()
 
     buf.seek(0)
     img = PIL.Image.open(buf).convert("RGB")
 
     return img
+
 
 def investigate_tensor(name: str, v: torch.Tensor) -> None:
     items = {
@@ -120,6 +125,7 @@ def get_dtype(dtype: str) -> torch.dtype:
             return torch.bool
         case _:
             raise ValueError(f"Unsupported dtype: {dtype}")
+
 
 if "DTYPE" in os.environ:
     DTYPE = get_dtype(os.environ["DTYPE"])
@@ -236,7 +242,10 @@ def setup():
     logging.info(f"Using directory: {os.getcwd()}")
     login(token=tok)
 
-def flatten_configs(configs: Mapping[str, Any] | BaseModel, prefix="") -> dict[str, Any]:
+
+def flatten_configs(
+    configs: Mapping[str, Any] | BaseModel, prefix=""
+) -> dict[str, Any]:
     flat_configs = {}
 
     if isinstance(configs, BaseModel):
@@ -247,13 +256,12 @@ def flatten_configs(configs: Mapping[str, Any] | BaseModel, prefix="") -> dict[s
             value_dict = value
             flat_configs[prefix + key] = type(value)
             flattened_dict = flatten_configs(value_dict, prefix=f"{prefix}{key}.")
-            flat_configs.update(
-                flattened_dict
-            )
+            flat_configs.update(flattened_dict)
         else:
             flat_configs[prefix + key] = value
 
     return flat_configs
+
 
 def init_wandb():
     try:
@@ -267,10 +275,14 @@ def init_wandb():
             with open(config_path, "r") as f:
                 config = yaml.load(f, Loader=yaml.FullLoader)
                 if "api_key" in config:
-                    logging.info("WANDB_API_KEY found in config, attempting to login to wandb...")
+                    logging.info(
+                        "WANDB_API_KEY found in config, attempting to login to wandb..."
+                    )
                     api_key = config["api_key"]
         else:
-            logging.warning("WANDB_API_KEY not found in environment and config not found.")
+            logging.warning(
+                "WANDB_API_KEY not found in environment and config not found."
+            )
 
         wandb.login(key=api_key)
         logging.info("Successfully logged in to wandb")
@@ -334,13 +346,15 @@ def get_norm_dir_len(vec: torch.Tensor, eps: float = 1e-8) -> NormDirLen:
     norm = vec.norm(dim=-1, keepdim=True).detach()
     return NormDirLen(norm, vec / (norm + eps), norm.mean())
 
+
 def random_word(word_len: int, seed: int | None = None) -> str:
     rng = np.random.default_rng(seed)
-    min_value = ord('a')
-    max_value = ord('z')
-    ids = rng.integers(min_value, max_value+1, size=word_len)
+    min_value = ord("a")
+    max_value = ord("z")
+    ids = rng.integers(min_value, max_value + 1, size=word_len)
     chars = [chr(i) for i in ids]
     return "".join(chars)
+
 
 def create_model_id(seed: int | None = None) -> str:
     timestamp = datetime.datetime.now().strftime("%y%m%d%H%M%S")
@@ -352,20 +366,28 @@ def create_model_id(seed: int | None = None) -> str:
 def z_scale(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
     return (x - mean.to(x.device)) / std.to(x.device)
 
+
 @torch.compile()
-def reverse_z_scale(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+def reverse_z_scale(
+    x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor
+) -> torch.Tensor:
     return x * std.to(x.device) + mean.to(x.device)
+
 
 @torch.compile()
 def l2_scale(x: torch.Tensor) -> torch.Tensor:
     return F.normalize(x) / (x.size(-1) ** 0.5)
 
+
 @torch.compile
 def reverse_l2_scale(x: torch.Tensor) -> torch.Tensor:
     return F.normalize(x)
 
+
 @torch.compile
-def tensor_split(x: torch.Tensor, dim: int, idxs: tuple[int, ...]) -> list[torch.Tensor]:
+def tensor_split(
+    x: torch.Tensor, dim: int, idxs: tuple[int, ...]
+) -> list[torch.Tensor]:
     all_tensors = []
 
     curr_idx = 0
@@ -375,6 +397,29 @@ def tensor_split(x: torch.Tensor, dim: int, idxs: tuple[int, ...]) -> list[torch
         curr_idx += part.size(dim)
 
     if x.size(dim) != curr_idx:
-        raise ValueError(f"Tried to split tensor of size {x.size(dim)} into {len(idxs)} parts - Received output with size {curr_idx}")
+        raise ValueError(
+            f"Tried to split tensor of size {x.size(dim)} into {len(idxs)} parts - Received output with size {curr_idx}"
+        )
 
     return all_tensors
+
+
+@torch.no_grad()
+def find_duplicates(x: torch.Tensor) -> torch.Tensor:
+    if x.ndim != 1:
+        raise ValueError("Input tensor must be 1-dimensional")
+
+    duplicate_idxs = []
+    unique_values = set()
+
+    for i, v in enumerate(x):
+        s = v.item()
+        if s in unique_values:
+            duplicate_idxs.append(i)
+        else:
+            unique_values.add(s)
+
+    dups = torch.zeros(len(x), dtype=torch.bool, device=x.device)
+    dups[duplicate_idxs] = 1
+
+    return dups
