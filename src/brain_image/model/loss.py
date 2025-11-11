@@ -21,22 +21,24 @@ class CLIPLoss(nn.Module):
         if z_i.size(0) != B:
             raise ValueError(f"z_e and z_i should have the same batch size, but got {B} and {z_i.size(0)}")
 
+        logits = z_e @ z_i.T 
+        logits_scaled = logits * self.logit_scale.exp().clamp(max=self.max_scale)
+        if ignore_mask is not None:
+            keep_mask = ~ignore_mask.to(device)
+            logits_scaled = logits_scaled[keep_mask][:, keep_mask]
+            B = logits_scaled.size(0)
+
         if labels is None:
             labels = torch.arange(B, device=device)
 
         if labels.ndim != 1 or labels.size(0) != B:
             raise ValueError(f"Labels shape should be ({B},), but got {labels.shape}")
 
-        logits = z_e @ z_i.T 
-        logits_scaled = logits * self.logit_scale.exp().clamp(max=self.max_scale)
-        if ignore_mask is not None:
-            labels[ignore_mask.to(device)] = self.ignore_idx
-
         loss_e = self.loss_func(
-            logits_scaled, labels
+            logits_scaled, target=labels
         )
         loss_i = self.loss_func(
-            logits_scaled.T, labels
+            logits_scaled.T, target=labels
         )
         loss = (loss_e + loss_i) * 0.5
 

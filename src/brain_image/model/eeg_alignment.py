@@ -84,7 +84,7 @@ class EEGAlignmentConfig(BaseConfig):
     align_loss_factor: float = 0.1
     align_mse_loss_factor: float = 10.0
     prior_align_loss_factor: float = 10.0
-    prior_pred_mse_loss_factor: float = 0.5
+    prior_pred_mse_loss_factor: float = 10.
 
     full_eval_every_epochs: int = 1
     skip_eval_first_epoch: bool = True
@@ -780,12 +780,10 @@ class EEGAlignmentModel(pl.LightningModule):
 
         with torch.no_grad():
             # There might be duplicates (different subjects, same image)
-            # labels = (idx.unsqueeze(0) == idx.unsqueeze(1)).float()
-            labels = None
             ignore_mask = find_duplicates(idx)
 
         align_clip_loss, align_logits = self.align_loss(
-            eeg_latent_normed, align_img_latent_normed, labels=labels, ignore_mask=ignore_mask
+            eeg_latent_normed, align_img_latent_normed, ignore_mask=ignore_mask
         )
 
         align_clip_loss = (
@@ -926,9 +924,11 @@ class EEGAlignmentModel(pl.LightningModule):
         if pred_2 is not None:
             assert self.prior_align_loss is not None
             assert target_latent_2 is not None
+            assert (idx := batch.get("idx")) is not None
 
+            ignore_mask = find_duplicates(idx)
             align_loss, _ = self.prior_align_loss(
-                F.normalize(pred_2), F.normalize(target_latent_2), labels=None
+                F.normalize(pred_2), F.normalize(target_latent_2), ignore_mask=ignore_mask
             )
             align_loss = align_loss * self.config.prior_align_loss_factor
             pred_mse_loss_2 = (
@@ -995,8 +995,10 @@ class EEGAlignmentModel(pl.LightningModule):
             if pred_2_50 is not None:
                 assert self.prior_align_loss is not None
                 assert target_latent_2 is not None
+                assert (idx := batch.get("idx")) is not None
 
-                _, pred_2_align_logits = self.prior_align_loss(F.normalize(pred_2_50), F.normalize(target_latent_2))
+                ignore_mask = find_duplicates(idx)
+                _, pred_2_align_logits = self.prior_align_loss(F.normalize(pred_2_50), F.normalize(target_latent_2), ignore_mask=ignore_mask)
                 metrics.update(
                     {
                         "prior/pred_cos_2": VCLR(torch.linalg.vecdot(
@@ -1221,7 +1223,7 @@ class EEGAlignmentModel(pl.LightningModule):
                     ),
                     "eval/prior/pred2_cos": VCLR(
                         torch.linalg.vecdot(
-                            F.normalize(pred_2), F.normalize(target_2), dim=-1
+                            pred_2_normed, target_2_normed, dim=-1
                         )
                     ),
                 }
