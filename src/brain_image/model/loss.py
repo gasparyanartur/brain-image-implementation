@@ -16,14 +16,16 @@ class CLIPLoss(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         device = z_e.device
 
-        if z_e.size(0) != z_i.size(0):
-            raise ValueError(f"z_e and z_i should have the same batch size, but got {z_e.size(0)} and {z_i.size(0)}")
+        B = z_e.size(0)
+
+        if z_i.size(0) != B:
+            raise ValueError(f"z_e and z_i should have the same batch size, but got {B} and {z_i.size(0)}")
 
         if labels is None:
-            labels = torch.ones(z_i.size(0), device=device, dtype=torch.float).diag()
+            labels = torch.arange(B, device=device)
 
-        if labels.size(0) != z_i.size(0) or labels.size(1) != z_i.size(0):
-            raise ValueError(f"Labels shape should be ({z_i.size(0)}, {z_i.size(0)}), but got {labels.shape}")
+        if labels.ndim != 1 or labels.size(0) != B:
+            raise ValueError(f"Labels shape should be ({B},), but got {labels.shape}")
 
         logits = z_e @ z_i.T 
         logits_scaled = logits * self.logit_scale.exp().clamp(max=self.max_scale)

@@ -541,6 +541,7 @@ class DiffusionPriorConfig:
 
     cond_drop_prob: float = 0.1
     norm_scheme: Literal["z_scale", "l2_scale", "none"] = "none"
+    layer_norm_out: bool = False
 
     num_training_timesteps: int = 1000
 
@@ -588,7 +589,6 @@ class SimpleDiffusionPrior(nn.Module):
         if config.norm_scheme == "z_scale" and embedding_stats is None:
             raise ValueError("z_scale requires embedding stats")
 
-
         self._dummy_param = nn.Parameter(torch.empty(0))
         self.config = config
         act_func = get_activation(config.act_func)
@@ -601,7 +601,9 @@ class SimpleDiffusionPrior(nn.Module):
         )
 
         self.embedding_stats = embedding_stats or {}
-        logging.info(f"Received embedding stats with keys: {self.embedding_stats.keys()}")
+        logging.info(
+            f"Received embedding stats with keys: {self.embedding_stats.keys()}"
+        )
 
         self.encoder_dim_map = encoder_embed_map or {}
 
@@ -654,7 +656,11 @@ class SimpleDiffusionPrior(nn.Module):
         self.encoder_layers = nn.ModuleList(encoder_layers)
         self.decoder_layers = nn.ModuleList(decoder_layers)
 
-        self.out_proj = LinearLayerNorm(config.d_hidden_start, config.d_input)
+        self.out_proj = LinearLayerNorm(
+            config.d_hidden_start,
+            config.d_input,
+            do_layer_norm=self.config.layer_norm_out,
+        )
         self.scheduler = DDPMScheduler(self.config.num_training_timesteps)
 
     @torch.no_grad()
@@ -667,7 +673,9 @@ class SimpleDiffusionPrior(nn.Module):
             case "l2_scale":
                 return l2_scale(target)
             case "z_scale":
-                assert latent_name is not None and latent_name in self.embedding_stats, f"Unknown latent name {latent_name} in embedding stats {self.embedding_stats.keys()}"
+                assert (
+                    latent_name is not None and latent_name in self.embedding_stats
+                ), f"Unknown latent name {latent_name} in embedding stats {self.embedding_stats.keys()}"
                 stats = self.embedding_stats[latent_name]
                 return z_scale(target, stats["mean"], stats["std"])
 
