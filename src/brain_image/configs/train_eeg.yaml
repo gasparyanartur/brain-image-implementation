@@ -11,3 +11,4 @@ resume_training: false
 model:
   plot_lowdim_proj: false
   low_dim_proj_pca: 50
+  seed: 42
