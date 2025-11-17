@@ -1,6 +1,6 @@
 base_log_dir=${BASE_LOG_DIR:-logs/slurm}
-mode=$2
-logs_id=$1
+mode=$1
+logs_id=$2
 
 
 p=$(find $base_log_dir -name *$logs_id*)
