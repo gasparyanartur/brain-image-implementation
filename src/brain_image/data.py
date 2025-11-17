@@ -82,9 +82,6 @@ class EEGDatasetConfig(DataConfig):
 
     preload_cache: bool = True
 
-    seed: int = 42
-
-
 class TensorCache:
     def __init__(
         self,
@@ -261,7 +258,6 @@ class EEGDataModule(DataModule):
         embeddings_map: EmbeddingsMap,
     ):
         self.config: EEGDatasetConfig = config
-        self.rng = np.random.default_rng(config.seed)
         self.tensor_cache = tensor_cache
         self.embeddings_map = embeddings_map
 
@@ -326,7 +322,6 @@ class EEGDataModule(DataModule):
         )
         img_paths = list(img_dir_path.rglob("*.jpg"))
 
-        encoder_to_embedding = {v: k for k, v in self.embeddings_map.items() if v is not None}
         embedding_types = [str(v) for v in self.embeddings_map.values() if v is not None]
         embedding_stats = get_embeddings_stats(
             tensorcache=self.tensor_cache,
@@ -334,7 +329,9 @@ class EEGDataModule(DataModule):
             embedding_names=embedding_types,    # type: ignore
             split="train",
         )
-        return {encoder_to_embedding[k]: v for k, v in embedding_stats.items() if k in encoder_to_embedding}
+
+        mapped_stats = {k: embedding_stats[v] for k, v in self.embeddings_map.items() if v in embedding_stats}
+        return mapped_stats
 
 
 

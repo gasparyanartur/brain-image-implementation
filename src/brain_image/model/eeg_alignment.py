@@ -207,6 +207,7 @@ class EEGAlignmentModel(pl.LightningModule):
             else EEGAlignmentConfig.model_validate(config)
         )
 
+
         tensor_cache = TensorCache(cache_dir)
         embeddings_map: EmbeddingsMap = {
             "align_img_latent": (
@@ -231,6 +232,9 @@ class EEGAlignmentModel(pl.LightningModule):
 
         if init_weights:
             self._init_normal_weights()
+
+        logging.info(f"Seeding everything with seed: {self.config.seed}")
+        pl.seed_everything(self.config.seed)
 
         self.prior: SimpleDiffusionPrior | None = None
         self.token_embedding: nn.ParameterDict | None = None
@@ -293,6 +297,7 @@ class EEGAlignmentModel(pl.LightningModule):
                     }
                 )
 
+            print(self.data_module.embedding_stats.keys())
             emb_stats = {
                 self.config.prior_img_encoder: self.data_module.embedding_stats[
                     "prior_img_latent"

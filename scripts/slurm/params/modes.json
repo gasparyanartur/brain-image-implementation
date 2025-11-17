@@ -1,0 +1,24 @@
+{
+    "entries": [
+        {
+            "keys": [
+                "model.do_align",
+                "model.prior_align_second_mode"
+            ],
+            "values": [
+                [
+                    "true",
+                    "true",
+                    "false",
+                    "false"
+                ],
+                [
+                    "condition", 
+                    "none", 
+                    "condition",
+                    "none"
+                ]
+            ]
+        }
+    ]
+}
