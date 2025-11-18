@@ -207,7 +207,6 @@ class EEGAlignmentModel(pl.LightningModule):
             else EEGAlignmentConfig.model_validate(config)
         )
 
-
         tensor_cache = TensorCache(cache_dir)
         embeddings_map: EmbeddingsMap = {
             "align_img_latent": (
