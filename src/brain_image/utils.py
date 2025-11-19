@@ -224,23 +224,32 @@ def show_image(
         plt.close()
 
 
-def setup():
-    from brain_image.configs import get_device_str
+def setup_huggingface():
+    from huggingface_hub import login
 
-    setup_logging()
-    dotenv.load_dotenv()
-
-    torch.set_float32_matmul_precision("high")
+    logging.info(f"Logging in to Hugging Face Hub...")
 
     tok = os.environ.get("HF_API_TOKEN")
     if not tok:
         raise ValueError("HF_API_TOKEN is not set. Please set it in the .env file")
+    login(token=tok)
+
+    logging.info(f"Logged in to Hugging Face Hub")
+
+
+def setup():
+    from brain_image.configs import get_device_str
+
+    dotenv.load_dotenv()
+
+    setup_logging()
+    setup_huggingface()
+
+    torch.set_float32_matmul_precision("high")
 
     device_str = get_device_str()
-
     logging.info(f"Using device: {device_str}")
     logging.info(f"Using directory: {os.getcwd()}")
-    login(token=tok)
 
 
 def flatten_configs(

@@ -70,7 +70,7 @@ class DataConfig(BaseConfig, ABC):
 
 
 class EEGDatasetConfig(DataConfig):
-    data_path: Path = GlobalConfig.DATA_DIR / "things-eeg2"
+    data_path: Path = Path("data") / "things-eeg2"
 
     imgs_dir: str = "imgs"
     
@@ -237,7 +237,7 @@ class EmbeddingsMap(TypedDict):
     align_img_latent: IMAGE_ENCODER | None
     prior_img_latent: IMAGE_ENCODER | None
     prior_img_latent_2: IMAGE_ENCODER | None
-    recon_latent: IMAGE_ENCODER | None
+    low_level_latent: IMAGE_ENCODER | None
 
 
 class SampleType(TypedDict):
@@ -254,12 +254,14 @@ class EEGDataModule(DataModule):
     def __init__(
         self,
         config: EEGDatasetConfig,
-        tensor_cache: TensorCache,
-        embeddings_map: EmbeddingsMap,
+        tensor_cache: TensorCache = TensorCache(),
+        embeddings_map: EmbeddingsMap = {},
+        embeddings_to_compute_stats: list[IMAGE_ENCODER] = []
     ):
         self.config: EEGDatasetConfig = config
         self.tensor_cache = tensor_cache
         self.embeddings_map = embeddings_map
+        self.embeddings_to_compute_stats = embeddings_to_compute_stats
 
         embeddings_stats = self._get_embeddings_stats()
         logging.info(f"Got embedding stats for: {embeddings_stats.keys()}")
@@ -322,7 +324,7 @@ class EEGDataModule(DataModule):
         )
         img_paths = list(img_dir_path.rglob("*.jpg"))
 
-        embedding_types = [str(v) for v in self.embeddings_map.values() if v is not None]
+        embedding_types = [str(v) for k, v in self.embeddings_map.items() if k in self.embeddings_to_compute_stats and v is not None]
         embedding_stats = get_embeddings_stats(
             tensorcache=self.tensor_cache,
             img_paths=img_paths,

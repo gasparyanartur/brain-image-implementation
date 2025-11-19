@@ -25,11 +25,13 @@ import dreamsim
 from dreamsim.model import PerceptualModel
 
 
-IMAGE_ENCODER = typing.Literal["clip_vitl14", "clip_vith14", "sd_variations_v2", "synclr_vitb16", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
+IMAGE_ENCODER = typing.Literal["clip_vitl14", "clip_vith14", "sd_variations_v2", "ip_sdxl_turbo", "synclr_vitb16", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
+VAE_ENCODER = typing.Literal["sd_variations_v2", "ip_sdxl_turbo"]
 IMAGE_ENCODER_DIM: dict[IMAGE_ENCODER, int] = {
     "clip_vitl14": 768,
     "clip_vith14": 1024,
     "sd_variations_v2": 768,
+    "ip_sdxl_turbo": 1024,
     "synclr_vitb16": 768,
     "aligned_synclr_vitb16": 768,
     "unaligned_synclr_vitb16": 768,
@@ -43,6 +45,8 @@ def model_name_to_hf_name(model_name: IMAGE_ENCODER) -> str:
             return "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
         case "sd_variations_v2":
             return "lambdalabs/sd-image-variations-diffusers"
+        case "ip_sdxl_turbo":
+            return "stabilityai/sdxl-turbo"
         case "synclr_vitb16" | "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
             return "facebook/dino-vitb16"
         case _:
@@ -64,6 +68,10 @@ class BaseImageEncoder(nn.Module):
         return self.encode(img)
 
 
+def load_vae_encoder(model_name: typing.Literal["sd_variations_v2", "ip_sdxl_turbo"], *args, **kwargs) -> VAEImageEncoder:
+    enc = load_image_encoder(model_name, *args, **kwargs)
+    return enc
+
 def load_image_encoder(
     model_name: IMAGE_ENCODER,
     models_path: Path = Path("models"),
@@ -77,7 +85,7 @@ def load_image_encoder(
     match model_name:
         case "clip_vitl14" | "clip_vith14":
             model = CLIPImageEncoder(model_name, *args, **kwargs)
-        case "sd_variations_v2":
+        case "sd_variations_v2" | "ip_sdxl_turbo":
             model = VAEImageEncoder(model_name, *args, **kwargs)
         case "synclr_vitb16" | "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
             model = DreamsimImageEncoder(
@@ -126,7 +134,7 @@ class CLIPImageEncoder(BaseImageEncoder):
 
 
 class VAEImageEncoder(BaseImageEncoder):
-    def __init__(self, model_name: IMAGE_ENCODER = "sd_variations_v2", *args, **kwargs):
+    def __init__(self, model_name: IMAGE_ENCODER = "ip_sdxl_turbo", *args, **kwargs):
         super().__init__(model_name=model_name)
         hf_name = model_name_to_hf_name(model_name)
 
@@ -142,7 +150,6 @@ class VAEImageEncoder(BaseImageEncoder):
                 ToDtype(torch.float32, scale=True),
             ]
         )
-        self.feature_extractor = CLIPImageProcessor.from_pretrained(hf_name, subfolder="feature_extractor")
         self.processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
 
         self.preprocessor.requires_grad_(False)
@@ -155,9 +162,6 @@ class VAEImageEncoder(BaseImageEncoder):
     def preprocess(self, img: torch.Tensor) -> torch.Tensor:
         img = self._to_image(img)   # type: ignore
         img = self.preprocessor(img)
-        #img = self.feature_extractor(img, return_tensors="pt").pixel_values.to(
-        #    self.vae.device
-        #)
         img = self.processor.preprocess(img)
         return img
 

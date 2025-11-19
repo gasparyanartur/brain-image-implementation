@@ -61,7 +61,7 @@ import time
 
 class EEGAlignmentConfig(BaseConfig):
     align_img_encoder: IMAGE_ENCODER = "unaligned_synclr_vitb16"
-    recon_latent_encoder: IMAGE_ENCODER = "sd_variations_v2"
+    low_level_encoder: VAE_ENCODER = "ip_sdxl_turbo"
     prior_img_encoder: IMAGE_ENCODER = "clip_vitl14"
     prior_img_encoder_2: IMAGE_ENCODER | None = None
     eeg_encoder: str = "nice"
@@ -170,7 +170,7 @@ class DataBatchT(TypedDict):
     eeg_latent_normed: torch.Tensor | None
     align_img_latent: torch.Tensor | None
     prior_img_latent: torch.Tensor | None
-    recon_latent: torch.Tensor | None
+    low_level_latent: torch.Tensor | None
     prior_pred: torch.Tensor | None
     prior_pred_single: torch.Tensor | None
 
@@ -220,8 +220,8 @@ class EEGAlignmentModel(pl.LightningModule):
                 if self.config.prior_align_second_mode != "none"
                 else None
             ),
-            "recon_latent": (
-                self.config.recon_latent_encoder if self.config.do_recon_low else None
+            "low_level_latent": (
+                self.config.low_level_encoder if self.config.do_recon_low else None
             ),
         }
 
@@ -379,7 +379,7 @@ class EEGAlignmentModel(pl.LightningModule):
             name_components.append(f"reco_{self.config.prior_img_encoder}")
 
         if self.config.do_recon_low:
-            name_components.append(f"relo_{self.config.recon_latent_encoder}")
+            name_components.append(f"relo_{self.config.low_level_encoder}")
 
         return "-".join(name_components)
 
