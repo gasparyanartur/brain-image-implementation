@@ -296,7 +296,6 @@ class EEGAlignmentModel(pl.LightningModule):
                     }
                 )
 
-            print(self.data_module.embedding_stats.keys())
             emb_stats = {
                 self.config.prior_img_encoder: self.data_module.embedding_stats[
                     "prior_img_latent"
