@@ -11,6 +11,8 @@ from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger, CS
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig, get_device_str
 from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
+from brain_image.model.low_level import LowLevelModule
+from brain_image.model.model import TrainingModule
 from brain_image.utils import create_model_id, get_dtype, init_wandb
 
 class WandbConfig(BaseConfig):
@@ -31,8 +33,10 @@ class TrainConfig(BaseConfig):
     log_dir: Path = Path("logs/train")
     enable_barebones: bool = False
     checkpoint_monitor: str = "val/loss"
-    checkpoint_monitor_mode: Literal["min", "max"] = "max"
+    checkpoint_monitor_mode: Literal["min", "max"] = "min"
     checkpoint_monitor_early_stop: int = 10
+
+    cache_dir: Path = Path("tensorcache")
 
     overfit_batches: int = 0
     dtype: Literal["float16", "float32"] = "float32"
@@ -46,8 +50,6 @@ class TrainConfig(BaseConfig):
     save_top_k: int = 1
 
     make_subdir: bool = False
-
-
     wandb: WandbConfig = WandbConfig()
 
     accelerator: str | None = None
@@ -56,18 +58,15 @@ class TrainConfig(BaseConfig):
 class EEGAlignTrainerConfig(TrainConfig):
     run_name: str = "eeg_alignment"
 
-    compile_model: bool = True
     init_weights: bool = False
-    cache_dir: Path = Path("tensorcache")
 
-    checkpoint_monitor: str = "val_loss"
-    checkpoint_monitor_mode: Literal["min", "max"] = "min"
-
+class LowLevelTrainerConfig(TrainConfig):
+    run_name: str = "low_level"
 
 class Trainer:
-    def __init__(self, config: TrainConfig, model: EEGAlignmentModel):
+    def __init__(self, config: TrainConfig, model: TrainingModule):
         self.config = config
-        self.model: EEGAlignmentModel = model
+        self.model: TrainingModule = model
         self.pl_trainer = self.create_pl_trainer()
 
 
@@ -161,9 +160,18 @@ class Trainer:
 
         if check_val_every_n_epochs is not None:
             val_check_interval = None
-        elif isinstance(val_check_interval, float) and val_check_interval > 1:
-            check_val_every_n_epochs = int(val_check_interval)
-            val_check_interval = None
+        elif isinstance(val_check_interval, float):
+            if val_check_interval > 1:
+                check_val_every_n_epochs = int(val_check_interval)
+                val_check_interval = None
+
+            elif val_check_interval == 1:
+                check_val_every_n_epochs = 1
+                val_check_interval = None
+
+            else:
+                check_val_every_n_epochs = None
+
         else:
             check_val_every_n_epochs = None
 
@@ -277,3 +285,11 @@ class EEGAlignTrainer(Trainer):
         super().__init__(trainer_config, model)
         self.model = model
 
+
+class LowLevelTrainer(Trainer):
+    def __init__(self, trainer_config: LowLevelTrainerConfig, model: LowLevelModule):
+        if isinstance(trainer_config, dict):
+            trainer_config = LowLevelTrainerConfig.model_validate(trainer_config)
+
+        super().__init__(trainer_config, model)
+        self.model = model

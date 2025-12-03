@@ -1,8 +1,12 @@
 from __future__ import annotations
-
 import os
+
 import torch
 import torch.nn as nn
+
+from brain_image.configs import BaseConfig
+
+from lightning import pytorch as pl
 
 @torch.compile()
 def normalize_projection(
@@ -127,6 +131,13 @@ class LatentProjector(nn.Module):
 
 
 
+class TrainingModuleConfig(BaseConfig):
+    max_epochs: int = 100
+    seed: int = 42
+    log_on_step: bool = False
 
 
-
+class TrainingModule(pl.LightningModule):
+    def __init__(self, config: TrainingModuleConfig):
+        super().__init__()
+        self.config = config

@@ -25,10 +25,14 @@ from brain_image.data import (
 )
 from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
 from brain_image.model.eeg_encoder import create_eeg_encoder
-from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM
+from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM, VAE_ENCODER
 from brain_image.model.loss import CLIPLoss
 
-from brain_image.model.model import LinearLayerNorm
+from brain_image.model.model import (
+    LinearLayerNorm,
+    TrainingModule,
+    TrainingModuleConfig,
+)
 from brain_image.model.prior import (
     DiffusionPriorConfig,
     SimpleDiffusionPrior,
@@ -37,6 +41,7 @@ from brain_image.model.prior import (
 
 from typing import Any, Literal, Mapping, TypedDict, cast
 import logging
+from brain_image.optimizer import OptimizerConfig, get_optimizer_options, iter_params
 from brain_image.reconstruction import (
     IPAdapterReconstructionPipeline,
 )
@@ -59,7 +64,7 @@ import tempfile
 import time
 
 
-class EEGAlignmentConfig(BaseConfig):
+class EEGAlignmentConfig(TrainingModuleConfig):
     align_img_encoder: IMAGE_ENCODER = "unaligned_synclr_vitb16"
     low_level_encoder: VAE_ENCODER = "ip_sdxl_turbo"
     prior_img_encoder: IMAGE_ENCODER = "clip_vitl14"
@@ -84,7 +89,7 @@ class EEGAlignmentConfig(BaseConfig):
     align_loss_factor: float = 0.1
     align_mse_loss_factor: float = 10.0
     prior_align_loss_factor: float = 10.0
-    prior_pred_mse_loss_factor: float = 10.
+    prior_pred_mse_loss_factor: float = 10.0
 
     full_eval_every_epochs: int = 1
     skip_eval_first_epoch: bool = True
@@ -175,7 +180,7 @@ class DataBatchT(TypedDict):
     prior_pred_single: torch.Tensor | None
 
 
-class EEGAlignmentModel(pl.LightningModule):
+class EEGAlignmentModel(TrainingModule):
     def __init__(
         self,
         config: EEGAlignmentConfig | dict,
@@ -188,9 +193,10 @@ class EEGAlignmentModel(pl.LightningModule):
         model_id: str | None = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
         if isinstance(config, dict):
             config = EEGAlignmentConfig.model_validate(config)
+
+        super().__init__(config, **kwargs)
 
         if isinstance(dataset_config, dict):
             dataset_config = EEGDatasetConfig.model_validate(dataset_config)
@@ -302,9 +308,9 @@ class EEGAlignmentModel(pl.LightningModule):
                 ],
             }
             if self.config.prior_img_encoder_2:
-                emb_stats[self.config.prior_img_encoder_2] = self.data_module.embedding_stats[
-                    "prior_img_latent_2"
-                ]
+                emb_stats[self.config.prior_img_encoder_2] = (
+                    self.data_module.embedding_stats["prior_img_latent_2"]
+                )
 
             self.prior = SimpleDiffusionPrior(
                 self.config.prior, embedding_stats=emb_stats
@@ -355,7 +361,7 @@ class EEGAlignmentModel(pl.LightningModule):
 
         self.compile: bool = compile
 
-        self.learning_rate_options: list[dict[str, Any]] = []
+        self.optimizer_options: list[dict[str, Any]] = []
 
         self.atleast_one_training_step: bool = False
 
@@ -389,23 +395,6 @@ class EEGAlignmentModel(pl.LightningModule):
     def configure_optimizers(self):
         logging.info("Configuring optimizers")
 
-        def _iter_params(*models: nn.Module | None):
-            param_list: list[nn.Parameter] = []
-            for model in models:
-                if model is not None:
-                    param_list.extend(model.parameters())
-            return iter(param_list)
-
-        @dataclass
-        class OptimizerConfig:
-            name: str
-            modules: list[nn.Module | None]
-            lr: float
-            min_lr: float
-            warmup_epochs: int
-            delay_epochs: int
-            enabled: bool
-
         optimizer_configs = [
             OptimizerConfig(
                 name="eeg_encoder",
@@ -415,6 +404,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 warmup_epochs=self.config.encoder_warmup_epochs,
                 delay_epochs=self.config.encoder_delay_epochs,
                 enabled=self.eeg_encoder is not None,
+                lr_scheduler="cosine_anneal",
             ),
             OptimizerConfig(
                 name="prior",
@@ -430,93 +420,23 @@ class EEGAlignmentModel(pl.LightningModule):
                 warmup_epochs=self.config.prior_warmup_epochs,
                 delay_epochs=self.config.prior_delay_epochs,
                 enabled=self.prior is not None,
+                lr_scheduler="cosine_anneal",
             ),
         ]
 
-        optimizer_options = []
         num_train_batches = self.data_module.get_num_batches("train")
-        for config in optimizer_configs:
-            modules_to_opt = cast(
-                list[nn.Module], [m for m in config.modules if m is not None]
-            )
+        optimizer_options = get_optimizer_options(
+            optimizer_configs,
+            max_epochs=self.config.max_epochs,
+            num_train_batches=num_train_batches,
+            modules_to_optimize=self.config.modules_to_train,
+            optimizer_params={
+                "betas": self.config.betas,
+                "weight_decay": self.config.weight_decay,
+            },
+        )
 
-            if (
-                (config.name not in self.config.modules_to_train)
-                or (not config.enabled)
-                or (not modules_to_opt)
-            ):
-                config.enabled = False
-                for module in modules_to_opt:
-                    logging.info("Disabling optimization of module: %s")
-                    module.requires_grad_(False)
-                continue
-
-            logging.info(
-                f"Creating optimizer: {config.name} - lr: {config.lr}, min_lr: {config.min_lr}, warmup_epochs: {config.warmup_epochs}, delay_epochs: {config.delay_epochs}"
-            )
-            warmup_steps = config.warmup_epochs * num_train_batches
-            delay_steps = config.delay_epochs * num_train_batches
-            total_steps = self.config.max_epochs * num_train_batches
-
-            optimizer = torch.optim.AdamW(
-                _iter_params(*modules_to_opt),
-                lr=config.lr,
-                betas=self.config.betas,
-                weight_decay=self.config.weight_decay,
-            )
-            schedulers = []
-            milestones = []
-
-            if delay_steps > 0:
-                schedulers.append(
-                    torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _: 0)
-                )
-                milestones.append(delay_steps + max(milestones or [0]))
-
-            if warmup_steps > 0:
-                schedulers.append(
-                    torch.optim.lr_scheduler.LinearLR(
-                        optimizer,
-                        total_iters=warmup_steps,
-                    )
-                )
-                milestones.append(warmup_steps + max(milestones or [0]))
-
-            if self.config.lr_scheduler == "cosine_anneal":
-                schedulers.append(
-                    torch.optim.lr_scheduler.CosineAnnealingLR(
-                        optimizer,
-                        T_max=total_steps - max(milestones or [0]),
-                        eta_min=config.min_lr,
-                    )
-                )
-            elif self.config.lr_scheduler == "none":
-                schedulers.append(
-                    torch.optim.lr_scheduler.ConstantLR(
-                        optimizer,
-                        factor=1.0,
-                    )
-                )
-            else:
-                raise ValueError(f"Unknown lr_scheduler: {self.config.lr_scheduler}")
-
-            scheduler = torch.optim.lr_scheduler.SequentialLR(
-                optimizer,
-                schedulers=schedulers,
-                milestones=milestones,
-            )
-
-            optimizer_options.append(
-                {
-                    "name": config.name,
-                    "optimizer": optimizer,
-                    "lr_scheduler": scheduler,
-                    "interval": "step",
-                    "frequency": 1,
-                }
-            )
-
-        self.learning_rate_options = optimizer_options
+        self.optimizer_options = optimizer_options
         return optimizer_options
 
     def _init_normal_weights(self):
@@ -588,7 +508,7 @@ class EEGAlignmentModel(pl.LightningModule):
             scheduler.step()  # type: ignore
 
         metrics["lr/step"] = scheduler.last_epoch if scheduler is not None else -1
-        for opt_option in self.learning_rate_options:
+        for opt_option in self.optimizer_options:
             metrics["lr/" + opt_option["name"]] = opt_option[
                 "lr_scheduler"
             ].get_last_lr()[0]
@@ -920,7 +840,9 @@ class EEGAlignmentModel(pl.LightningModule):
                 assert self.prior_align_loss is not None
                 assert target_latent_2 is not None
 
-                pred, pred_2 = tensor_split(pred, -1, (target_latent.size(-1), target_latent_2.size(-1)))
+                pred, pred_2 = tensor_split(
+                    pred, -1, (target_latent.size(-1), target_latent_2.size(-1))
+                )
             else:
                 pred_2 = None
 
@@ -931,7 +853,9 @@ class EEGAlignmentModel(pl.LightningModule):
 
             ignore_mask = find_duplicates(idx)
             align_loss, _ = self.prior_align_loss(
-                F.normalize(pred_2), F.normalize(target_latent_2), ignore_mask=ignore_mask
+                F.normalize(pred_2),
+                F.normalize(target_latent_2),
+                ignore_mask=ignore_mask,
             )
             align_loss = align_loss * self.config.prior_align_loss_factor
             pred_mse_loss_2 = (
@@ -972,16 +896,33 @@ class EEGAlignmentModel(pl.LightningModule):
                 assert self.config.prior_img_encoder_2 is not None
                 assert target_latent_2 is not None
 
-                pred_full_50 = self.prior.sample(prior_target, condition, timesteps=timesteps_50, disable_cond_drop=True)
+                pred_full_50 = self.prior.sample(
+                    prior_target,
+                    condition,
+                    timesteps=timesteps_50,
+                    disable_cond_drop=True,
+                )
 
-                pred_50, pred_2_50 = tensor_split(pred_full_50, -1, (target_latent.size(-1), target_latent_2.size(-1)))
+                pred_50, pred_2_50 = tensor_split(
+                    pred_full_50, -1, (target_latent.size(-1), target_latent_2.size(-1))
+                )
             else:
-                pred_50 = self.prior.sample(prior_target, condition, timesteps=timesteps_50, disable_cond_drop=True)
+                pred_50 = self.prior.sample(
+                    prior_target,
+                    condition,
+                    timesteps=timesteps_50,
+                    disable_cond_drop=True,
+                )
                 if self.config.prior_align_second_mode == "condition":
                     assert self.prior_input_decoder is not None
-                    
+
                     assert prior_target_2 is not None
-                    pred_2_50 = self.prior.sample(prior_target_2, condition_2, timesteps=timesteps_50, disable_cond_drop=True)
+                    pred_2_50 = self.prior.sample(
+                        prior_target_2,
+                        condition_2,
+                        timesteps=timesteps_50,
+                        disable_cond_drop=True,
+                    )
 
                     pred_50 = self.prior_input_decoder["encoder_1"](pred_50)
                     pred_2_50 = self.prior_input_decoder["encoder_2"](pred_2_50)
@@ -990,9 +931,11 @@ class EEGAlignmentModel(pl.LightningModule):
 
             metrics.update(
                 {
-                    "prior/pred_cos": VCLR(torch.linalg.vecdot(
-                        F.normalize(target_latent), F.normalize(pred_50), dim=-1
-                    ))
+                    "prior/pred_cos": VCLR(
+                        torch.linalg.vecdot(
+                            F.normalize(target_latent), F.normalize(pred_50), dim=-1
+                        )
+                    )
                 }
             )
             if pred_2_50 is not None:
@@ -1001,13 +944,23 @@ class EEGAlignmentModel(pl.LightningModule):
                 assert (idx := batch.get("idx")) is not None
 
                 ignore_mask = find_duplicates(idx)
-                _, pred_2_align_logits = self.prior_align_loss(F.normalize(pred_2_50), F.normalize(target_latent_2), ignore_mask=ignore_mask)
+                _, pred_2_align_logits = self.prior_align_loss(
+                    F.normalize(pred_2_50),
+                    F.normalize(target_latent_2),
+                    ignore_mask=ignore_mask,
+                )
                 metrics.update(
                     {
-                        "prior/pred_cos_2": VCLR(torch.linalg.vecdot(
-                            F.normalize(target_latent_2), F.normalize(pred_2_50), dim=-1
-                        )),
-                        "prior/pred_2_align_top1": VCLR(get_top1_acc(pred_2_align_logits, axis=1))
+                        "prior/pred_cos_2": VCLR(
+                            torch.linalg.vecdot(
+                                F.normalize(target_latent_2),
+                                F.normalize(pred_2_50),
+                                dim=-1,
+                            )
+                        ),
+                        "prior/pred_2_align_top1": VCLR(
+                            get_top1_acc(pred_2_align_logits, axis=1)
+                        ),
                     }
                 )
 
@@ -1032,8 +985,6 @@ class EEGAlignmentModel(pl.LightningModule):
                         "debug/prior/noise_pred/norm": VCLR(pred.norm(dim=-1)),
                     }
                 )
-
-
 
     @torch.no_grad()
     def run_full_validation(
@@ -1165,7 +1116,7 @@ class EEGAlignmentModel(pl.LightningModule):
         pred, pred_2 = self.get_all_prior_preds(
             eeg_latent_normed.to(device),
             batch_size=self.data_module.config.get_batch_size(split),
-            generator=generator
+            generator=generator,
         )
         assert pred is not None
 
@@ -1178,7 +1129,7 @@ class EEGAlignmentModel(pl.LightningModule):
                 all_data,
                 split,
                 num_reconstructions=self.config.num_reconstructions,
-                generator=generator
+                generator=generator,
             )
             metrics.update(metrics_recon)
             img_outputs.update(img_outputs_recon)
@@ -1213,21 +1164,19 @@ class EEGAlignmentModel(pl.LightningModule):
             ignore_mask = find_duplicates(idx)
 
             align_loss, align_logits = self.align_loss(
-                pred_2_normed,
-                target_2_normed,
-                ignore_mask=ignore_mask
+                pred_2_normed, target_2_normed, ignore_mask=ignore_mask
             )
 
             metrics.update(
                 {
-                    "eval/prior/pred2_align_loss": VCLR(self.config.prior_align_loss_factor * align_loss),
+                    "eval/prior/pred2_align_loss": VCLR(
+                        self.config.prior_align_loss_factor * align_loss
+                    ),
                     "eval/prior/pred2_align_top1": VCLR(
                         get_top1_acc(align_logits, axis=1)
                     ),
                     "eval/prior/pred2_cos": VCLR(
-                        torch.linalg.vecdot(
-                            pred_2_normed, target_2_normed, dim=-1
-                        )
+                        torch.linalg.vecdot(pred_2_normed, target_2_normed, dim=-1)
                     ),
                 }
             )
@@ -1339,12 +1288,13 @@ class EEGAlignmentModel(pl.LightningModule):
         pred, pred_2 = self.get_all_prior_preds(
             eeg_latent_normed.to(device),
             batch_size=self.data_module.config.get_batch_size("test"),
-            generator=generator
+            generator=generator,
         )
         assert pred is not None
 
         recon = self.get_prior_reconstructions(
-            F.normalize(pred.to(device)), pipe_kwargs={"progress_bar": True, "generator": generator}
+            F.normalize(pred.to(device)),
+            pipe_kwargs={"progress_bar": True, "generator": generator},
         )
         # recon = torch.rand((200, 3, 512, 512))
         if recon is None:
@@ -1374,9 +1324,7 @@ class EEGAlignmentModel(pl.LightningModule):
 
             ignore_mask = find_duplicates(idx)
             _, align_logits = self.align_loss(
-                F.normalize(pred_2),
-                F.normalize(target_2),
-                ignore_mask=ignore_mask
+                F.normalize(pred_2), F.normalize(target_2), ignore_mask=ignore_mask
             )
             metric_values.update(
                 {
@@ -1480,7 +1428,7 @@ class EEGAlignmentModel(pl.LightningModule):
         stage: Literal["val", "test"],
         num_reconstructions: int | None = None,
         recon_idxs: torch.Tensor | None = None,
-        generator: torch.Generator | None = None
+        generator: torch.Generator | None = None,
     ):
         if recon_idxs is None:
             if num_reconstructions is None:
@@ -1500,7 +1448,9 @@ class EEGAlignmentModel(pl.LightningModule):
             [F.normalize(prior_pred), F.normalize(target_latent)], dim=0
         )
 
-        recon = self.get_prior_reconstructions(conditioning, pipe_kwargs={"generator":generator})
+        recon = self.get_prior_reconstructions(
+            conditioning, pipe_kwargs={"generator": generator}
+        )
 
         if recon is None:
             return {}, {}

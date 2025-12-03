@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 
+import torchvision.transforms.v2 as tv2
+from brain_image.model.img_encoder import DREAMSIM_IMAGE_ENCODER, DreamsimImageEncoder
+
 
 class CLIPLoss(nn.Module):
     def __init__(self, init_temperature: float = 0.07, max_scale: float = 100, ignore_idx = -100):
@@ -43,3 +46,30 @@ class CLIPLoss(nn.Module):
         loss = (loss_e + loss_i) * 0.5
 
         return loss, logits
+
+
+
+class DreamsimLoss(nn.Module):
+    def __init__(self, model_name: DREAMSIM_IMAGE_ENCODER = "synclr_vitb16", rescale_cutoff: float = 10, *args, **kwargs):
+        super().__init__()
+        self.dreamsim = DreamsimImageEncoder(model_name=model_name)
+        self.dreamsim.eval()
+
+        self.processor = tv2.Compose([
+            tv2.ToImage(),
+            tv2.Resize(224, interpolation=tv2.InterpolationMode.BICUBIC, antialias=True),
+            tv2.ToDtype(torch.float32),
+        ])
+        self.rescale_cutoff = rescale_cutoff
+
+    def forward(self, pred, gt):
+        pred = self.processor(pred)
+        gt = self.processor(gt)
+
+        if pred.max() > self.rescale_cutoff:
+            pred = pred / 255.0
+        if gt.max() > self.rescale_cutoff:
+            gt = gt / 255.0
+
+        cos = self.dreamsim.model(pred, gt)
+        return cos.mean()

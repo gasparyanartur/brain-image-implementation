@@ -27,6 +27,7 @@ from dreamsim.model import PerceptualModel
 
 IMAGE_ENCODER = typing.Literal["clip_vitl14", "clip_vith14", "sd_variations_v2", "ip_sdxl_turbo", "synclr_vitb16", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
 VAE_ENCODER = typing.Literal["sd_variations_v2", "ip_sdxl_turbo"]
+DREAMSIM_IMAGE_ENCODER = typing.Literal["synclr_vitb16", "unaligned_synclr_vitb16", "aligned_synclr_vitb16"]
 IMAGE_ENCODER_DIM: dict[IMAGE_ENCODER, int] = {
     "clip_vitl14": 768,
     "clip_vith14": 1024,
@@ -186,11 +187,10 @@ class VAEImageEncoder(BaseImageEncoder):
 class DreamsimImageEncoder(BaseImageEncoder):
     def __init__(
         self,
-        model_name: typing.Literal[
-            "synclr_vitb16", "unaligned_synclr_vitb16", "aligned_synclr_vitb16"
-        ] = "unaligned_synclr_vitb16",
+        model_name: DREAMSIM_IMAGE_ENCODER = "unaligned_synclr_vitb16",
         download_weights: bool = True,
         models_path: Path = Path("models"),
+        disable_grad: bool = True,
         *args,
         **kwargs,
     ):
@@ -250,7 +250,7 @@ class DreamsimImageEncoder(BaseImageEncoder):
             )
 
         self.processor = processor
-        self.model.requires_grad_(False)
+        self.model.requires_grad_(not disable_grad)
 
     def preprocess(self, img: torch.Tensor) -> torch.Tensor:
         img = self.processor(img, return_tensors="pt").pixel_values.to(

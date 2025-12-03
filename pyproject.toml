@@ -25,7 +25,7 @@ dependencies = [
     "seaborn",
     "Pillow",
     "jupyter",
-    "ipykernel",
+    "ipykernel==6.30.1",
     "plotly",
 
     "pytest",
