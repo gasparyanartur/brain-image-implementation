@@ -170,6 +170,8 @@ class LowLevelModule(TrainingModule):
             self.image_size = 512
         elif self.config.vae_encoder == "ip_sdxl_turbo_256":
             self.image_size = 256
+        elif self.config.vae_encoder == "ip_sdxl_turbo_128":
+            self.image_size = 256
         else:
             raise NotImplementedError
 

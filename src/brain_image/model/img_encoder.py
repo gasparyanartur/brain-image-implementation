@@ -25,19 +25,35 @@ import dreamsim
 from dreamsim.model import PerceptualModel
 
 
-IMAGE_ENCODER = typing.Literal["clip_vitl14", "clip_vith14", "sd_variations_v2", "ip_sdxl_turbo", "ip_sdxl_turbo_256", "synclr_vitb16", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
-VAE_ENCODER = typing.Literal["sd_variations_v2", "ip_sdxl_turbo", "ip_sdxl_turbo_256"]
-DREAMSIM_IMAGE_ENCODER = typing.Literal["synclr_vitb16", "unaligned_synclr_vitb16", "aligned_synclr_vitb16"]
+IMAGE_ENCODER = typing.Literal[
+    "clip_vitl14",
+    "clip_vith14",
+    "sd_variations_v2",
+    "ip_sdxl_turbo",
+    "ip_sdxl_turbo_256",
+    "ip_sdxl_turbo_128",
+    "synclr_vitb16",
+    "aligned_synclr_vitb16",
+    "unaligned_synclr_vitb16",
+]
+VAE_ENCODER = typing.Literal[
+    "sd_variations_v2", "ip_sdxl_turbo", "ip_sdxl_turbo_256", "ip_sdxl_turbo_128"
+]
+DREAMSIM_IMAGE_ENCODER = typing.Literal[
+    "synclr_vitb16", "unaligned_synclr_vitb16", "aligned_synclr_vitb16"
+]
 IMAGE_ENCODER_DIM: dict[IMAGE_ENCODER, int] = {
     "clip_vitl14": 768,
     "clip_vith14": 1024,
     "sd_variations_v2": 768,
     "ip_sdxl_turbo": 1024,
     "ip_sdxl_turbo_256": 1024,
+    "ip_sdxl_turbo_128": 1024,
     "synclr_vitb16": 768,
     "aligned_synclr_vitb16": 768,
     "unaligned_synclr_vitb16": 768,
 }
+
 
 def model_name_to_hf_name(model_name: IMAGE_ENCODER) -> str:
     match model_name:
@@ -47,7 +63,7 @@ def model_name_to_hf_name(model_name: IMAGE_ENCODER) -> str:
             return "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
         case "sd_variations_v2":
             return "lambdalabs/sd-image-variations-diffusers"
-        case "ip_sdxl_turbo" | "ip_sdxl_turbo_256":
+        case "ip_sdxl_turbo" | "ip_sdxl_turbo_256" | "ip_sdxl_turbo_128":
             return "stabilityai/sdxl-turbo"
         case "synclr_vitb16" | "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
             return "facebook/dino-vitb16"
@@ -60,7 +76,7 @@ class BaseImageEncoder(nn.Module):
         super().__init__()
         self.model_name = model_name
 
-    def preprocess(self, img: torch.Tensor)-> torch.Tensor:
+    def preprocess(self, img: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 
     def encode(self, img: torch.Tensor) -> torch.Tensor:
@@ -69,10 +85,6 @@ class BaseImageEncoder(nn.Module):
     def forward(self, img: torch.Tensor) -> torch.Tensor:
         return self.encode(img)
 
-
-def load_vae_encoder(model_name: typing.Literal["sd_variations_v2", "ip_sdxl_turbo"], *args, **kwargs) -> VAEImageEncoder:
-    enc = load_image_encoder(model_name, *args, **kwargs)
-    return enc
 
 def load_image_encoder(
     model_name: IMAGE_ENCODER,
@@ -87,9 +99,16 @@ def load_image_encoder(
     match model_name:
         case "clip_vitl14" | "clip_vith14":
             model = CLIPImageEncoder(model_name, *args, **kwargs)
-        case "sd_variations_v2" | "ip_sdxl_turbo" | "ip_sdxl_turbo_256":
+        case (
+            "sd_variations_v2"
+            | "ip_sdxl_turbo"
+            | "ip_sdxl_turbo_256"
+            | "ip_sdxl_turbo_128"
+        ):
             if model_name == "ip_sdxl_turbo_256":
                 kwargs["img_width"] = 256
+            elif model_name == "ip_sdxl_turbo_128":
+                kwargs["img_width"] = 128
             model = VAEImageEncoder(model_name, *args, **kwargs)
         case "synclr_vitb16" | "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
             model = DreamsimImageEncoder(
@@ -116,6 +135,11 @@ def load_image_encoder(
     return typing.cast(BaseImageEncoder, model)
 
 
+def load_vae_encoder(model_name: VAE_ENCODER, *args, **kwargs) -> VAEImageEncoder:
+    enc = typing.cast(VAEImageEncoder, load_image_encoder(model_name, *args, **kwargs))
+    return enc
+
+
 class CLIPImageEncoder(BaseImageEncoder):
     def __init__(self, model_name: IMAGE_ENCODER = "clip_vitl14", *args, **kwargs):
         super().__init__(model_name=model_name)
@@ -138,7 +162,14 @@ class CLIPImageEncoder(BaseImageEncoder):
 
 
 class VAEImageEncoder(BaseImageEncoder):
-    def __init__(self, model_name: IMAGE_ENCODER = "ip_sdxl_turbo", img_width: int = 512, img_height: int | None = None, *args, **kwargs):
+    def __init__(
+        self,
+        model_name: IMAGE_ENCODER = "ip_sdxl_turbo",
+        img_width: int = 512,
+        img_height: int | None = None,
+        *args,
+        **kwargs,
+    ):
         super().__init__(model_name=model_name)
         hf_name = model_name_to_hf_name(model_name)
 
@@ -165,8 +196,10 @@ class VAEImageEncoder(BaseImageEncoder):
     def _to_image(self, img: torch.Tensor):
         return tv2.functional.to_image(img)
 
-    def preprocess(self, img: torch.Tensor, skip_processor: bool = False) -> torch.Tensor:
-        img = self._to_image(img)   # type: ignore
+    def preprocess(
+        self, img: torch.Tensor, skip_processor: bool = False
+    ) -> torch.Tensor:
+        img = self._to_image(img)  # type: ignore
         img = self.preprocessor(img)
         if not skip_processor:
             img = self.processor.preprocess(img)
@@ -209,7 +242,7 @@ class DreamsimImageEncoder(BaseImageEncoder):
             model_name_parts = ["unaligned"] + model_name_parts
 
         aligned, _, patch_size = model_name_parts
-        
+
         match aligned:
             case "unaligned":
                 self.aligned = False
