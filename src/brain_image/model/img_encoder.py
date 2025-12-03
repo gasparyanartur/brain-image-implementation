@@ -25,14 +25,15 @@ import dreamsim
 from dreamsim.model import PerceptualModel
 
 
-IMAGE_ENCODER = typing.Literal["clip_vitl14", "clip_vith14", "sd_variations_v2", "ip_sdxl_turbo", "synclr_vitb16", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
-VAE_ENCODER = typing.Literal["sd_variations_v2", "ip_sdxl_turbo"]
+IMAGE_ENCODER = typing.Literal["clip_vitl14", "clip_vith14", "sd_variations_v2", "ip_sdxl_turbo", "ip_sdxl_turbo_256", "synclr_vitb16", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
+VAE_ENCODER = typing.Literal["sd_variations_v2", "ip_sdxl_turbo", "ip_sdxl_turbo_256"]
 DREAMSIM_IMAGE_ENCODER = typing.Literal["synclr_vitb16", "unaligned_synclr_vitb16", "aligned_synclr_vitb16"]
 IMAGE_ENCODER_DIM: dict[IMAGE_ENCODER, int] = {
     "clip_vitl14": 768,
     "clip_vith14": 1024,
     "sd_variations_v2": 768,
     "ip_sdxl_turbo": 1024,
+    "ip_sdxl_turbo_256": 1024,
     "synclr_vitb16": 768,
     "aligned_synclr_vitb16": 768,
     "unaligned_synclr_vitb16": 768,
@@ -46,7 +47,7 @@ def model_name_to_hf_name(model_name: IMAGE_ENCODER) -> str:
             return "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
         case "sd_variations_v2":
             return "lambdalabs/sd-image-variations-diffusers"
-        case "ip_sdxl_turbo":
+        case "ip_sdxl_turbo" | "ip_sdxl_turbo_256":
             return "stabilityai/sdxl-turbo"
         case "synclr_vitb16" | "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
             return "facebook/dino-vitb16"
@@ -86,7 +87,9 @@ def load_image_encoder(
     match model_name:
         case "clip_vitl14" | "clip_vith14":
             model = CLIPImageEncoder(model_name, *args, **kwargs)
-        case "sd_variations_v2" | "ip_sdxl_turbo":
+        case "sd_variations_v2" | "ip_sdxl_turbo" | "ip_sdxl_turbo_256":
+            if model_name == "ip_sdxl_turbo_256":
+                kwargs["img_width"] = 256
             model = VAEImageEncoder(model_name, *args, **kwargs)
         case "synclr_vitb16" | "aligned_synclr_vitb16" | "unaligned_synclr_vitb16":
             model = DreamsimImageEncoder(
