@@ -13,13 +13,13 @@ model:
   max_epochs: 500
   use_perceptual_loss: true
   perceptual_loss_model: "aligned_synclr_vitb16"
-  eval_batch_size: 16
+  eval_batch_size: 32
 
 trainer:
   checkpoint_monitor_early_stop: 150
   check_val_every_n_epochs: 10
 
 dataset:
-  batch_size: 8
-  val_batch_size: 16
-  test_batch_size: 16
+  batch_size: 32
+  val_batch_size: 64
+  test_batch_size: 64
