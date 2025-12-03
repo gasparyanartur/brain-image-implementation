@@ -4,7 +4,8 @@ eeg_encoder: "atms"
 vae_encoder: "ip_sdxl_turbo_128"
 
 use_perceptual_loss: false
-perceptual_loss_model: "synclr_vitb16"
+#perceptual_loss_model: "synclr_vitb16"
+perceptual_loss_model: "lpips"
 
 encoder_lr: 3e-4
 encoder_min_lr: 1e-6

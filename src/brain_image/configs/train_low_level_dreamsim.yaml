@@ -12,7 +12,8 @@ model:
   seed: 42
   max_epochs: 500
   use_perceptual_loss: true
-  perceptual_loss_model: "aligned_synclr_vitb16"
+  #perceptual_loss_model: "aligned_synclr_vitb16"
+  perceptual_loss_model: "lpips"
   eval_batch_size: 32
 
 trainer:

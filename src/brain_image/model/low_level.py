@@ -2,7 +2,7 @@ from typing import Literal
 import wandb
 from brain_image.metrics import get_metric_clip, get_metric_ssim
 from brain_image.model.img_encoder import DREAMSIM_IMAGE_ENCODER, VAE_ENCODER, load_vae_encoder
-from brain_image.model.loss import DreamsimLoss
+from brain_image.model.loss import DreamsimLoss, LPIPSLoss
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
 from brain_image.configs import get_device
@@ -128,7 +128,7 @@ class LowLevelConfig(TrainingModuleConfig):
     perceptual_loss_factor: float = 1.0
 
     use_perceptual_loss: bool = False
-    perceptual_loss_model: DREAMSIM_IMAGE_ENCODER = "synclr_vitb16"
+    perceptual_loss_model: str = "synclr_vitb16"
 
 
 class LowLevelModule(TrainingModule):
@@ -179,7 +179,10 @@ class LowLevelModule(TrainingModule):
         self.low_level_encoder = LowLevelModel(in_dim=self.eeg_dim, latent_size=self.latent_size)
 
         if self.config.perceptual_loss_model is not None and self.config.use_perceptual_loss:
-            self.perceptual_loss = DreamsimLoss(self.config.perceptual_loss_model)
+            if self.config.perceptual_loss_model == "lpips":
+                self.perceptual_loss = LPIPSLoss()
+            else:
+                self.perceptual_loss = DreamsimLoss(self.config.perceptual_loss_model)
         else:
             self.perceptual_loss = None
 
