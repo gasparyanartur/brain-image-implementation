@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=train_eeg
+#SBATCH --job-name=train_low_level
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=128G
 #SBATCH --gpus=1
 #SBATCH --time=1-00:00:00
-#SBATCH --output=logs/slurm/train_eeg/%j.out
+#SBATCH --output=logs/slurm/train_low_level/%j.out
 #SBATCH --account=Berzelius-2025-278
 
 
@@ -27,7 +27,7 @@ CLI_ARGS="$@"
 echo "CLI_ARGS: $CLI_ARGS"
 
 ./scripts/container/run_singularity.sh \
-    python /workspace/scripts/train_eeg.py $CLI_ARGS 
+    python /workspace/scripts/train_low_level.py $CLI_ARGS 
 
 if [ $? -eq 0 ]; then
     echo "Training completed successfully"
