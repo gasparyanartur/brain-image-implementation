@@ -6,7 +6,7 @@ from typing import Any, Optional, Dict, List, Literal
 import torch
 from torch.utils.data import DataLoader
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, ModelSummary
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger, CSVLogger
 from brain_image.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig, get_device_str
@@ -71,7 +71,7 @@ class Trainer:
 
 
     def create_pl_trainer(self) -> pl.Trainer:
-        callbacks: list[pl.Callback] = []
+        callbacks: list[pl.Callback] = [ModelSummary(max_depth=2)]
         loggers: list[Logger] = []
 
         if self.config.save_checkpoints:
