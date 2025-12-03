@@ -1,7 +1,7 @@
 from typing import Literal
 import wandb
 from brain_image.metrics import get_metric_clip, get_metric_ssim
-from brain_image.model.img_encoder import DREAMSIM_IMAGE_ENCODER, load_vae_encoder
+from brain_image.model.img_encoder import DREAMSIM_IMAGE_ENCODER, VAE_ENCODER, load_vae_encoder
 from brain_image.model.loss import DreamsimLoss
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
@@ -30,7 +30,7 @@ from torch import nn
 
 
 class LowLevelModel(torch.nn.Module):
-    def __init__(self, in_dim=1024, h=1024, n_blocks=4, use_cont=False, ups_mode="4x"):
+    def __init__(self, in_dim=1024, h=1024, n_blocks=4, upsample_scale: Literal[4, 8, 16] = 4, latent_size: int = 64):
         super().__init__()
         self.lin0 = nn.Sequential(
             nn.Linear(in_dim, h, bias=False),
@@ -50,85 +50,34 @@ class LowLevelModel(torch.nn.Module):
                 for _ in range(n_blocks)
             ]
         )
-        self.ups_mode = ups_mode
-        if ups_mode == "4x":
-            self.lin1 = nn.Linear(h, 16384, bias=False)
-            self.norm = nn.GroupNorm(1, 64)
 
-            self.upsampler = Decoder(
-                in_channels=64,
-                out_channels=4,
-                up_block_types=[
-                    "UpDecoderBlock2D",
-                    "UpDecoderBlock2D",
-                    "UpDecoderBlock2D",
-                ],
-                block_out_channels=[64, 128, 256],
-                layers_per_block=1,
-            )
+        self.upsample_scale = upsample_scale
+        self.latent_size = latent_size
+        self.side = latent_size // upsample_scale
 
-            if use_cont:
-                self.maps_projector = nn.Sequential(
-                    nn.Conv2d(64, 512, 1, bias=False),
-                    nn.GroupNorm(1, 512),
-                    nn.ReLU(True),
-                    nn.Conv2d(512, 512, 1, bias=False),
-                    nn.GroupNorm(1, 512),
-                    nn.ReLU(True),
-                    nn.Conv2d(512, 512, 1, bias=True),
-                )
-            else:
-                self.maps_projector = nn.Identity()
+        if upsample_scale == 4:
+            in_channel = 64
+            up_block_channels = [64, 128, 256]
+        elif upsample_scale == 8:
+            in_channel = 256
+            up_block_channels = [64, 128, 256, 256]
+        elif upsample_scale == 16:
+            in_channel = 256
+            up_block_channels = [64, 128, 256, 256, 256]
 
-        if ups_mode == "8x":  # prev best
-            self.lin1 = nn.Linear(h, 16384, bias=False)
-            self.norm = nn.GroupNorm(1, 256)
 
-            self.upsampler = Decoder(
-                in_channels=256,
-                out_channels=4,
-                up_block_types=[
-                    "UpDecoderBlock2D",
-                    "UpDecoderBlock2D",
-                    "UpDecoderBlock2D",
-                    "UpDecoderBlock2D",
-                ],
-                block_out_channels=[64, 128, 256, 256],
-                layers_per_block=1,
-            )
-            self.maps_projector = nn.Identity()
+        self.lin1 = nn.Linear(h, in_channel*self.side**2, bias=False)
+        self.norm = nn.GroupNorm(1, in_channel)
 
-        if ups_mode == "16x":
-            self.lin1 = nn.Linear(h, 8192, bias=False)
-            self.norm = nn.GroupNorm(1, 512)
+        self.upsampler = Decoder(
+            in_channels=in_channel,
+            out_channels=4,
+            up_block_types=tuple("UpDecoderBlock2D" for _ in up_block_channels),
+            block_out_channels=tuple(up_block_channels),
+            layers_per_block=1,
+        )
 
-            self.upsampler = Decoder(
-                in_channels=512,
-                out_channels=4,
-                up_block_types=[
-                    "UpDecoderBlock2D",
-                    "UpDecoderBlock2D",
-                    "UpDecoderBlock2D",
-                    "UpDecoderBlock2D",
-                    "UpDecoderBlock2D",
-                ],
-                block_out_channels=[64, 128, 256, 256, 512],
-                layers_per_block=1,
-            )
-            self.maps_projector = nn.Identity()
-
-            if use_cont:
-                self.maps_projector = nn.Sequential(
-                    nn.Conv2d(64, 512, 1, bias=False),
-                    nn.GroupNorm(1, 512),
-                    nn.ReLU(True),
-                    nn.Conv2d(512, 512, 1, bias=False),
-                    nn.GroupNorm(1, 512),
-                    nn.ReLU(True),
-                    nn.Conv2d(512, 512, 1, bias=True),
-                )
-            else:
-                self.maps_projector = nn.Identity()
+        self.maps_projector = nn.Identity()
 
     def forward(self, x, return_transformer_feats=False):
         x = self.lin0(x)
@@ -141,15 +90,8 @@ class LowLevelModel(torch.nn.Module):
         x = x.reshape(len(x), -1)
         x = self.lin1(x)  # bs, 4096
 
-        if self.ups_mode == "4x":
-            side = 16
-        if self.ups_mode == "8x":
-            side = 8
-        if self.ups_mode == "16x":
-            side = 4
-
         # decoder
-        x = self.norm(x.reshape(x.shape[0], -1, side, side).contiguous())
+        x = self.norm(x.reshape(x.shape[0], -1, self.side, self.side).contiguous())
         if return_transformer_feats:
             return self.upsampler.decode(x), self.maps_projector(x).flatten(2).permute(
                 0, 2, 1
@@ -165,7 +107,7 @@ class LowLevelConfig(TrainingModuleConfig):
     lr_warmup_epochs: int = 1
     seed: int = 42
     eeg_encoder: str = "atms"
-    vae_encoder: str = "ip_sdxl_turbo"
+    vae_encoder: VAE_ENCODER = "ip_sdxl_turbo"
 
     eval_batch_size: int = 32
 
@@ -194,7 +136,7 @@ class LowLevelModule(TrainingModule):
         self,
         config: LowLevelConfig,
         dataset_config: EEGDatasetConfig = EEGDatasetConfig(subs=[8]),
-        compile: bool = True,
+        compile: bool = False,
     ):
         super().__init__(config)
         self.automatic_optimization = False
@@ -202,7 +144,7 @@ class LowLevelModule(TrainingModule):
         self.config = config
         tensorcache = TensorCache()
         emb_map: EmbeddingsMap = {
-            "low_level_latent": "ip_sdxl_turbo",
+            "low_level_latent": self.config.vae_encoder,
             "align_img_latent": None,
             "prior_img_latent": None,
             "prior_img_latent_2": None,
@@ -223,7 +165,16 @@ class LowLevelModule(TrainingModule):
             self.config.eeg_encoder,
             output_dim=self.eeg_dim,
         )
-        self.low_level_encoder = LowLevelModel(in_dim=self.eeg_dim)
+
+        if self.config.vae_encoder == "ip_sdxl_turbo":
+            self.image_size = 512
+        elif self.config.vae_encoder == "ip_sdxl_turbo_256":
+            self.image_size = 256
+        else:
+            raise NotImplementedError
+
+        self.latent_size = self.image_size // 8
+        self.low_level_encoder = LowLevelModel(in_dim=self.eeg_dim, latent_size=self.latent_size)
 
         if self.config.perceptual_loss_model is not None and self.config.use_perceptual_loss:
             self.perceptual_loss = DreamsimLoss(self.config.perceptual_loss_model)

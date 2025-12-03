@@ -1,7 +1,7 @@
 
 #eeg_encoder: "nice"
 eeg_encoder: "atms"
-vae_encoder: "ip_sdxl_turbo"
+vae_encoder: "ip_sdxl_turbo_256"
 
 use_perceptual_loss: false
 perceptual_loss_model: "synclr_vitb16"

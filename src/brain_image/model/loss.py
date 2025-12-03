@@ -56,20 +56,21 @@ class DreamsimLoss(nn.Module):
         self.dreamsim.eval()
 
         self.processor = tv2.Compose([
-            tv2.ToImage(),
             tv2.Resize(224, interpolation=tv2.InterpolationMode.BICUBIC, antialias=True),
             tv2.ToDtype(torch.float32),
         ])
         self.rescale_cutoff = rescale_cutoff
 
-    def forward(self, pred, gt):
-        pred = self.processor(pred)
-        gt = self.processor(gt)
+    @torch.compiler.disable()
+    def _prep_latent(self, x):
+        x = self.processor(x)
+        if x.max() > self.rescale_cutoff:
+            x = x / 255.0
+        return x
 
-        if pred.max() > self.rescale_cutoff:
-            pred = pred / 255.0
-        if gt.max() > self.rescale_cutoff:
-            gt = gt / 255.0
+    def forward(self, pred, gt):
+        pred = self._prep_latent(pred)
+        gt = self._prep_latent(gt)
 
         cos = self.dreamsim.model(pred, gt)
         return cos.mean()
