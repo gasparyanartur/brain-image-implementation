@@ -6,6 +6,7 @@ from brain_image.model.loss import DreamsimLoss
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
 from brain_image.configs import get_device
+from brain_image.utils import batchify_operation
 import logging
 import pytorch_lightning as pl
 from brain_image.configs import BaseConfig
@@ -166,6 +167,8 @@ class LowLevelConfig(TrainingModuleConfig):
     eeg_encoder: str = "atms"
     vae_encoder: str = "ip_sdxl_turbo"
 
+    eval_batch_size: int = 32
+
     metric_log_epochs: int = 5
     highlighted_recons: list[int] | None = [
         161,  # Seaweed
@@ -303,7 +306,7 @@ class LowLevelModule(TrainingModule):
             losses["perceptual_loss"] = perceptual_loss * self.config.perceptual_loss_factor
 
         loss = sum(losses.values())
-        self.log(f"{stage}/losses/loss", loss, on_epoch=True)
+        self.log(f"{stage}/loss", loss, on_epoch=True)
         for k, v in losses.items():
             self.log(f"{stage}/losses/{k}", v, on_epoch=True)
 
@@ -350,6 +353,7 @@ class LowLevelModule(TrainingModule):
 
         return loss
 
+    @torch.no_grad()
     def validation_step(self, batch, batch_idx):
         loss = self.run_step(batch, batch_idx, "val")
 
@@ -362,12 +366,14 @@ class LowLevelModule(TrainingModule):
 
         return loss
 
+    @torch.no_grad()
     def test_step(self, batch, batch_idx):
         self.run_step(batch, batch_idx, "test")
 
         if batch_idx == self.data_module.get_num_batches("test") - 1:
             self.run_full_eval("test")
 
+    @torch.no_grad()
     def run_full_eval(self, stage):
         device = get_device()
         self.eval()
@@ -381,29 +387,39 @@ class LowLevelModule(TrainingModule):
         all_imgs = []
         all_gt_imgs = []
 
-        for batch in dataloader:
-            img_paths = batch["img_path"]
-            eeg_data = batch["eeg_data"].to(device)
-            eeg_latent = self.eeg_encoder(eeg_data)
-            low_level_latent = self.low_level_encoder(eeg_latent)
-            ex_imgs = self.vae_encoder.decode(low_level_latent)
-            gt_imgs = batch_load_images(img_paths)
+        with torch.no_grad():
+            for batch in dataloader:
+                img_paths = batch["img_path"]
+                eeg_data = batch["eeg_data"].to(device)
+                eeg_latent = self.eeg_encoder(eeg_data)
+                low_level_latent = self.low_level_encoder(eeg_latent)
 
-            all_latents.append(low_level_latent.cpu())
-            all_paths.extend(img_paths)
-            all_imgs.append(ex_imgs.cpu())
-            all_gt_imgs.append(gt_imgs.cpu())
+                ex_imgs = batchify_operation(self.vae_encoder.decode, low_level_latent, self.config.eval_batch_size)
+                gt_imgs = batch_load_images(img_paths)
+
+                all_latents.append(low_level_latent.cpu())
+                all_paths.extend(img_paths)
+                all_imgs.append(ex_imgs.cpu())
+                all_gt_imgs.append(gt_imgs.cpu())
 
         all_latents = torch.cat(all_latents, dim=0)
         all_imgs = torch.cat(all_imgs, dim=0)
         all_gt_imgs = torch.cat(all_gt_imgs, dim=0)
 
-        metrics = {
-            f"{prefix}/ssim": get_metric_ssim(
-                all_imgs.to(device), all_gt_imgs.to(device)
-            ),
-            f"{prefix}/clip": get_metric_clip(all_imgs.to(device), all_gt_imgs.to(device)),
-        }
+
+        dreamsim_loss_aligned = DreamsimLoss("aligned_synclr_vitb16").to(device)
+        dreamsim_loss_unaligned = DreamsimLoss("unaligned_synclr_vitb16").to(device)
+
+        with torch.no_grad():
+            metrics = {
+                f"{prefix}/ssim": get_metric_ssim(
+                    all_imgs.to(device), all_gt_imgs.to(device)
+                ),
+                f"{prefix}/clip": get_metric_clip(all_imgs.to(device), all_gt_imgs.to(device)),
+                f"{prefix}/dreamsim_aligned": dreamsim_loss_aligned(all_imgs.to(device), all_gt_imgs.to(device)),
+                f"{prefix}/dreamsim_unaligned": dreamsim_loss_unaligned(all_imgs.to(device), all_gt_imgs.to(device)),
+            }
+
         for metric_name, metric_value in metrics.items():
             self.log(metric_name, metric_value, on_step=False, on_epoch=True)
 

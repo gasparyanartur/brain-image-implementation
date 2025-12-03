@@ -432,3 +432,12 @@ def find_duplicates(x: torch.Tensor) -> torch.Tensor:
     dups[duplicate_idxs] = 1
 
     return dups
+
+
+
+def batchify_operation(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor, batch_size: int) -> torch.Tensor:
+    n = len(x)
+    res = []
+    for i in range(0, n, batch_size):
+        res.append(f(x[i:i+batch_size]))
+    return torch.cat(res, dim=0)

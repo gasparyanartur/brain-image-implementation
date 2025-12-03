@@ -135,16 +135,18 @@ class CLIPImageEncoder(BaseImageEncoder):
 
 
 class VAEImageEncoder(BaseImageEncoder):
-    def __init__(self, model_name: IMAGE_ENCODER = "ip_sdxl_turbo", *args, **kwargs):
+    def __init__(self, model_name: IMAGE_ENCODER = "ip_sdxl_turbo", img_width: int = 512, img_height: int | None = None, *args, **kwargs):
         super().__init__(model_name=model_name)
         hf_name = model_name_to_hf_name(model_name)
+
+        img_height = img_height or img_width
 
         self.vae = AutoencoderKL.from_pretrained(hf_name, subfolder="vae")
         self.vae_scale_factor = 2 ** (len(self.vae.config["block_out_channels"]) - 1)
         self.preprocessor = tv2.Compose(
             [
                 Resize(
-                    (512, 512),
+                    (img_height, img_width),
                     interpolation=InterpolationMode.BICUBIC,
                     antialias=True,
                 ),
@@ -160,10 +162,11 @@ class VAEImageEncoder(BaseImageEncoder):
     def _to_image(self, img: torch.Tensor):
         return tv2.functional.to_image(img)
 
-    def preprocess(self, img: torch.Tensor) -> torch.Tensor:
+    def preprocess(self, img: torch.Tensor, skip_processor: bool = False) -> torch.Tensor:
         img = self._to_image(img)   # type: ignore
         img = self.preprocessor(img)
-        img = self.processor.preprocess(img)
+        if not skip_processor:
+            img = self.processor.preprocess(img)
         return img
 
     def encode(self, img: torch.Tensor) -> torch.Tensor:

@@ -16,6 +16,8 @@ lr_scheduler: "cosine_anneal"
 betas: [0.9, 0.999]
 
 max_epochs: 500
+metric_log_epochs: 10
+eval_batch_size: 16
 
 highlighted_recons:
   - 161  # Seaweed
