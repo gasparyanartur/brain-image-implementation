@@ -236,7 +236,6 @@ class DataModule(LightningDataModule, ABC):
 class EmbeddingsMap(TypedDict):
     align_img_latent: IMAGE_ENCODER | None
     prior_img_latent: IMAGE_ENCODER | None
-    prior_img_latent_2: IMAGE_ENCODER | None
     low_level_latent: IMAGE_ENCODER | None
 
 
@@ -324,13 +323,14 @@ class EEGDataModule(DataModule):
         )
         img_paths = list(img_dir_path.rglob("*.jpg"))
 
-        embedding_types = [str(v) for k, v in self.embeddings_map.items() if k in self.embeddings_to_compute_stats and v is not None]
+        embedding_types = [str(v) for k, v in self.embeddings_map.items() if v in self.embeddings_to_compute_stats and v is not None]
         embedding_stats = get_embeddings_stats(
             tensorcache=self.tensor_cache,
             img_paths=img_paths,
             embedding_names=embedding_types,    # type: ignore
             split="train",
         )
+        print("EMB STATS", embedding_stats)
 
         mapped_stats = {k: embedding_stats[v] for k, v in self.embeddings_map.items() if v in embedding_stats}
         return mapped_stats

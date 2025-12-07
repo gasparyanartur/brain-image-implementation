@@ -8,7 +8,6 @@ model:
   do_recon_low: false
   
   eeg_encoder_path: null
-  #eeg_encoder_path: checkpoints/align-atms-clip_vith14-local-train/train_eeg-epoch_37-val-loss_0.2236.ckpt
 
   encoder_lr: 1e-3
   encoder_min_lr: 1e-7
