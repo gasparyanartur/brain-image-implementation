@@ -42,7 +42,8 @@ dependencies = [
 
     "gdown",
     "mne",
-    "scikit-image"
+    "scikit-image",
+    "google-genai"
 ]
 
 [project.optional-dependencies]
