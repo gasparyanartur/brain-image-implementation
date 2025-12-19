@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import torch
 import tqdm
 
-from brain_image.data import TensorCache
+from data.data import TensorCache
 from brain_image.model.img_encoder import IMAGE_ENCODER
 from brain_image.utils import casttensor, flatten_configs, setup_logging
 

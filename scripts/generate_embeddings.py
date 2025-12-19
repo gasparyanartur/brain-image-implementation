@@ -7,7 +7,7 @@ import torch
 import tqdm
 
 from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
-from brain_image.data import (
+from data.data import (
     TensorCache,
     batch_load_images,
     get_image_paths,

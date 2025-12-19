@@ -11,7 +11,7 @@ import logging
 import pytorch_lightning as pl
 from brain_image.configs import BaseConfig
 from brain_image.model.eeg_encoder import create_eeg_encoder
-from brain_image.data import (
+from data.data import (
     EEGDataModule,
     EEGDatasetConfig,
     EmbeddingsMap,

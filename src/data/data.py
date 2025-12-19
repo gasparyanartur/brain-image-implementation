@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Iterable, Literal, TypedDict, cast
 
 import numpy as np
+import requests
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset
@@ -76,8 +77,6 @@ class EEGDatasetConfig(DataConfig):
     
     prepared_eeg_dir: str = "prepared"      # Needs to be generated with "prepare_data.py"
 
-    train_imgs_per_concept: int = 10
-    test_imgs_per_concept: int = 1
     subs: list[int] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     preload_cache: bool = True
@@ -618,3 +617,62 @@ def get_embeddings_stats(
 
     logging.info(f"Finished getting embedding stats")
     return embedding_stats
+
+
+def download_to_file(
+    url,
+    file_path,
+    verbose: bool = True,
+    progress_bar: bool = True,
+    chunk_size: int = 1024,
+):
+    if verbose:
+        logging.info(f"Downloading file from {url} to {file_path}")
+
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"
+    }
+    response = requests.get(url, stream=True, headers=headers)
+    total_size = int(response.headers.get("content-length", 0))
+    written_size = 0
+    with open(file_path, "wb") as f:
+        with tqdm.tqdm(
+            response.iter_content(chunk_size=chunk_size),
+            total=total_size,
+            unit="B",
+            unit_scale=True,
+            desc="Downloading",
+            disable=not progress_bar,
+        ) as pbar:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                chunk_size = len(chunk)
+                if chunk_size == 0:
+                    continue
+
+                f.write(chunk)
+                written_size += chunk_size
+                pbar.update(chunk_size)
+
+    if total_size > 0 and (written_size != total_size):
+        raise ValueError(
+            f"Downloaded size does not match expected size: {written_size} != {total_size}"
+        )
+
+
+def merge_data(
+    sub: int, img_paths: list[Path], eeg_data: torch.Tensor, idxs: torch.Tensor
+) -> list[SampleType]:
+    merged_data = []
+
+    for i in range(eeg_data.size(0)):
+        idx = idxs[i]
+        img_path = img_paths[int(idx)]
+        eeg = eeg_data[i]
+
+        joined_object = {"img_path": str(img_path), "eeg": eeg, "sub": sub, "idx": idx}
+
+        merged_data.append(joined_object)
+
+    return merged_data

@@ -9,7 +9,7 @@ import tqdm
 import matplotlib.pyplot as plt
 import datetime
 
-from brain_image.data import TensorCache
+from data.data import TensorCache
 from brain_image.model.eeg_encoder import atms
 
 ALIGN_LOSS_SCALE = 1

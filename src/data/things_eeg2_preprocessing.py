@@ -309,10 +309,9 @@ def save_prepr(args, whitened_test, whitened_train, img_conditions_train,
 
 
 
-class GeneratePreprocessedDatasetConfig(BaseConfig):
+class ThingsEEG2DatasetPreprocessingConfig(BaseConfig):
     sub: int
     n_ses: int = 4
-    s_freq: int = 250
     mvnn_dim: str = "epochs"
     project_dir: str = "data/things-eeg2/eeg"
     sfreq: int = 250
@@ -321,7 +320,7 @@ class GeneratePreprocessedDatasetConfig(BaseConfig):
 def generate_preprocessed_dataset(eeg_dir: Path, sub: int, num_sessions: int = 4, frequency: int = 250, seed: int = 20200220, mvnn_dim: str = "epochs"):
     # Modified from https://github.com/NonaRjb/AlignVis/blob/main/src/dataset/things_eeg_preprocessing.py
 
-    args = GeneratePreprocessedDatasetConfig(sub=sub, n_ses=num_sessions, sfreq=frequency, mvnn_dim=mvnn_dim, project_dir=str(eeg_dir))
+    args = ThingsEEG2DatasetPreprocessingConfig(sub=sub, n_ses=num_sessions, sfreq=frequency, mvnn_dim=mvnn_dim, project_dir=str(eeg_dir))
 
     epoched_test, _, ch_names, times = epoching(args, 'test', seed)
     epoched_train, img_conditions_train, _, _ = epoching(args, 'training', seed)

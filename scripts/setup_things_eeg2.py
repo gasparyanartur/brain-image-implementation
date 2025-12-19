@@ -7,11 +7,11 @@ import gdown
 from pathlib import Path
 import zipfile
 from pydantic import BaseModel
-import requests
 import torch
-import tqdm
 
-from brain_image.data import EEGDataset, SampleType, get_image_paths, load_all_eeg_data
+from data.data import EEGDataset, get_image_paths, load_all_eeg_data
+from data.data import download_to_file
+from data.data import merge_data
 
 
 """
@@ -29,65 +29,6 @@ def _get_alignvis_hf_url(sub: int, split: Literal["train", "test"]):
 
 
 _IMG_URL = "https://files.de-1.osf.io/v1/resources/y63gw/providers/osfstorage/?zip="
-
-
-def _download_to_file(
-    url,
-    file_path,
-    verbose: bool = True,
-    progress_bar: bool = True,
-    chunk_size: int = 1024,
-):
-    if verbose:
-        logging.info(f"Downloading file from {url} to {file_path}")
-
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"
-    }
-    response = requests.get(url, stream=True, headers=headers)
-    total_size = int(response.headers.get("content-length", 0))
-    written_size = 0
-    with open(file_path, "wb") as f:
-        with tqdm.tqdm(
-            response.iter_content(chunk_size=chunk_size),
-            total=total_size,
-            unit="B",
-            unit_scale=True,
-            desc="Downloading",
-            disable=not progress_bar,
-        ) as pbar:
-            for chunk in response.iter_content(chunk_size=chunk_size):
-                chunk_size = len(chunk)
-                if chunk_size == 0:
-                    continue
-
-                f.write(chunk)
-                written_size += chunk_size
-                pbar.update(chunk_size)
-
-    if total_size > 0 and (written_size != total_size):
-        raise ValueError(
-            f"Downloaded size does not match expected size: {written_size} != {total_size}"
-        )
-
-
-def _merge_data(
-    sub: int, img_paths: list[Path], eeg_data: torch.Tensor, idxs: torch.Tensor
-) -> list[SampleType]:
-    merged_data = []
-
-    for i in range(eeg_data.size(0)):
-        idx = idxs[i]
-        img_path = img_paths[int(idx)]
-        eeg = eeg_data[i]
-
-        joined_object = {"img_path": str(img_path), "eeg": eeg, "sub": sub, "idx": idx}
-
-        merged_data.append(joined_object)
-
-    return merged_data
 
 
 class SetupDataArguments(BaseModel):
@@ -182,7 +123,7 @@ def main(args: SetupDataArguments):
                     raise FileNotFoundError(f"Directory not found: {extracted_path}")
 
                 if args.preprocess_data:
-                    from brain_image.data_preprocessing import (
+                    from data.things_eeg2_preprocessing import (
                         generate_preprocessed_dataset,
                     )
 
@@ -204,14 +145,14 @@ def main(args: SetupDataArguments):
 
                 if args.download_file:
                     if not (args.skip_existing and raw_file_train_path.exists()):
-                        _download_to_file(url_train, raw_file_train_path)
+                        download_to_file(url_train, raw_file_train_path)
                     else:
                         logging.info(
                             f"File already exists: {raw_file_train_path}, skipping this step..."
                         )
 
                     if not raw_file_test_path.exists():
-                        _download_to_file(url_test, raw_file_test_path)
+                        download_to_file(url_test, raw_file_test_path)
                     else:
                         logging.info(
                             f"File already exists: {raw_file_test_path}, skipping this step..."
@@ -250,7 +191,7 @@ def main(args: SetupDataArguments):
         test_img_path_zip = img_dir / "test_images.zip"
 
         if args.download_file and not imgs_zip.exists():
-            _download_to_file(_IMG_URL, imgs_zip)
+            download_to_file(_IMG_URL, imgs_zip)
         else:
             logging.info(f"File already exists: {imgs_zip}, skipping download...")
 
@@ -308,7 +249,7 @@ def main(args: SetupDataArguments):
 
             for i_sub, sub in enumerate(args.subs):
                 logging.info(f"Creating data for sub: {sub}")
-                merged_data = _merge_data(sub, img_paths, eeg_data[i_sub], idxs[i_sub])
+                merged_data = merge_data(sub, img_paths, eeg_data[i_sub], idxs[i_sub])
                 dst_path = prepared_dir / f"sub-{sub:02}" / f"{split}.pt"
                 dst_path.parent.mkdir(parents=True, exist_ok=True)
 

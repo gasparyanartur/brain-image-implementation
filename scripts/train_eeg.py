@@ -5,7 +5,7 @@ from omegaconf import DictConfig
 from brain_image.configs import BaseConfig
 from brain_image.trainer import EEGAlignTrainer, EEGAlignTrainerConfig
 from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
-from brain_image.data import EEGDatasetConfig
+from data.data import EEGDatasetConfig
 
 from pathlib import Path
 

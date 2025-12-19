@@ -16,7 +16,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from brain_image.configs import BaseConfig, get_device
-from brain_image.data import (
+from data.data import (
     EEGDataModule,
     EEGDatasetConfig,
     EmbeddingsMap,
