@@ -26,7 +26,7 @@ from data.data import (
 from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
 from brain_image.model.eeg_encoder import create_eeg_encoder
 from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM, VAE_ENCODER
-from brain_image.model.loss import CLIPLoss
+from brain_image.model.loss import CLIPLoss, InfoNCELoss
 
 from brain_image.model.model import (
     LinearLayerNorm,
@@ -92,7 +92,8 @@ class EEGAlignmentConfig(TrainingModuleConfig):
     skip_eval_first_epoch: bool = True
 
     num_reconstructions: int = 3
-    temperature_init: float = 0.07
+    clip_temperature: float = 0.07
+    clip_bias: float = 0.0
     log_gradients: bool = False
     log_on_step: bool = False
 
@@ -267,10 +268,15 @@ class EEGAlignmentModel(TrainingModule):
             checkpoint_path=eeg_encoder_path,
         )
 
-        if self.config.align_loss_type == "clip":
-            self.align_loss = CLIPLoss(self.config.temperature_init)
-        else:
-            raise ValueError(f"Unknown align_loss_type: {self.config.align_loss_type}")
+        match self.config.align_loss_type:
+            case "clip":
+                self.align_loss = CLIPLoss(self.config.clip_temperature)
+            case "infonce":
+                self.align_loss = InfoNCELoss(self.config.clip_temperature)
+            case "siglip":
+                self.align_loss = SigLipLoss(self.config.clip_temperature, self.config.clip_bias)
+            case _:
+                raise ValueError(f"Unknown align_loss_type: {self.config.align_loss_type}")
 
         if compile:
             compile_kwargs = {}

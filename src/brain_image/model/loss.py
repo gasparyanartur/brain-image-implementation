@@ -7,38 +7,55 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 from brain_image.model.img_encoder import DREAMSIM_IMAGE_ENCODER, DreamsimImageEncoder
 
-class CLIPLoss(nn.Module):
-    def __init__(self, init_temperature: float = 0.07, max_scale: float = 100, ignore_idx = -100):
+class InfoNCELoss(nn.Module):
+    def __init__(self, init_temperature: float = 0.07, max_scale: float = 100):
         super().__init__()
         self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / init_temperature)))
         self.max_scale = max_scale
-        self.ignore_idx = ignore_idx
-        self.loss_func = nn.CrossEntropyLoss(ignore_index=self.ignore_idx)
-
+        self.loss_func = nn.CrossEntropyLoss()
 
     def forward(
-        self, z_e: torch.Tensor, z_i: torch.Tensor, labels: torch.Tensor | None = None, ignore_mask: torch.Tensor | None = None
+        self, z_e: torch.Tensor, z_i: torch.Tensor, ignore_mask: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if z_i.size(0) != z_e.size(0):
+            raise ValueError(f"z_e and z_i should have the same batch size, but got {z_e.size(0)} and {z_i.size(0)}")
+
         device = z_e.device
-
-        B = z_e.size(0)
-
-        if z_i.size(0) != B:
-            raise ValueError(f"z_e and z_i should have the same batch size, but got {B} and {z_i.size(0)}")
-
         logits = z_e @ z_i.T 
         logits_scaled = logits * self.logit_scale.exp().clamp(max=self.max_scale)
         if ignore_mask is not None:
             keep_mask = ~ignore_mask.to(device)
             logits_scaled = logits_scaled[keep_mask][:, keep_mask]
-            B = logits_scaled.size(0)
 
-        if labels is None:
-            labels = torch.arange(B, device=device)
+        labels = torch.arange(z_e.size(0), device=device)
+        loss = self.loss_func(
+            logits_scaled, target=labels
+        )
 
-        if labels.ndim != 1 or labels.size(0) != B:
-            raise ValueError(f"Labels shape should be ({B},), but got {labels.shape}")
+        return loss, logits
 
+class CLIPLoss(nn.Module):
+    def __init__(self, init_temperature: float = 0.07, max_scale: float = 100):
+        super().__init__()
+        self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / init_temperature)))
+        self.max_scale = max_scale
+        self.loss_func = nn.CrossEntropyLoss()
+
+
+    def forward(
+        self, z_e: torch.Tensor, z_i: torch.Tensor, ignore_mask: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if z_i.size(0) != z_e.size(0):
+            raise ValueError(f"z_e and z_i should have the same batch size, but got {z_e.size(0)} and {z_i.size(0)}")
+
+        device = z_e.device
+        logits = z_e @ z_i.T 
+        logits_scaled = logits * self.logit_scale.exp().clamp(max=self.max_scale)
+        if ignore_mask is not None:
+            keep_mask = ~ignore_mask.to(device)
+            logits_scaled = logits_scaled[keep_mask][:, keep_mask]
+
+        labels = torch.arange(z_e.size(0), device=device)
         loss_e = self.loss_func(
             logits_scaled, target=labels
         )
@@ -48,6 +65,38 @@ class CLIPLoss(nn.Module):
         loss = (loss_e + loss_i) * 0.5
 
         return loss, logits
+
+
+class SigLipLoss(nn.Module):
+    def __init__(self, init_temperature: float = 0.07, init_bias: float = 0.0, max_scale: float = 100, ignore_idx = -100):
+        super().__init__()
+        self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / init_temperature)))
+        self.logit_bias = nn.Parameter(torch.tensor(init_bias))
+        self.max_scale = max_scale
+        self.ignore_idx = ignore_idx
+        self.loss_func = nn.BCEWithLogitsLoss()
+
+
+    def forward(
+        self, z_e: torch.Tensor, z_i: torch.Tensor, ignore_mask: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        device = z_e.device
+
+        if z_i.size(0) != z_e.size(0):
+            raise ValueError(f"z_e and z_i should have the same batch size, but got {z_e.size(0)} and {z_i.size(0)}")
+
+        logits = z_e @ z_i.T 
+        logits_scaled = logits * self.logit_scale.exp().clamp(max=self.max_scale) + self.logit_bias
+        if ignore_mask is not None:
+            keep_mask = ~ignore_mask.to(device)
+            logits_scaled = logits_scaled[keep_mask][:, keep_mask]
+
+        labels = torch.eye(z_e.size(0), device=device) * 2 - 1
+        #loss = self.loss_func(logits_scaled, labels)
+        loss = nn.functional.binary_cross_entropy_with_logits(logits_scaled, labels)
+
+        return loss, logits
+
 
 
 class DreamsimLoss(nn.Module):
