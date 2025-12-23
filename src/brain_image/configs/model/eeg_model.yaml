@@ -10,6 +10,7 @@ eeg_encoder: "atms"
 do_align: true
 do_recon: false
 do_recon_low: false
+align_loss_type: clip
 
 debug_prior_use_target_as_cond: false
 debug_metrics: false

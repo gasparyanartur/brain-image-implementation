@@ -26,7 +26,7 @@ from data.data import (
 from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
 from brain_image.model.eeg_encoder import create_eeg_encoder
 from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM, VAE_ENCODER
-from brain_image.model.loss import CLIPLoss, InfoNCELoss
+from brain_image.model.loss import CLIPLoss, InfoNCELoss, SigLipLoss
 
 from brain_image.model.model import (
     LinearLayerNorm,
@@ -81,7 +81,7 @@ class EEGAlignmentConfig(TrainingModuleConfig):
 
     debug_prior_use_target_as_cond: bool = False
 
-    align_loss_type: Literal["clip", "infonce"] = "infonce"
+    align_loss_type: Literal["clip", "infonce", "siglip"] = "infonce"
     align_loss_epoch: int = 0
     align_loss_factor: float = 0.1
     align_mse_loss_factor: float = 10.0
