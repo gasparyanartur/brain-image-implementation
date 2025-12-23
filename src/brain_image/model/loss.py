@@ -91,7 +91,7 @@ class SigLipLoss(nn.Module):
             keep_mask = ~ignore_mask.to(device)
             logits_scaled = logits_scaled[keep_mask][:, keep_mask]
 
-        labels = torch.eye(logits_scaled.size(0), device=device) * 2 - 1
+        labels = torch.eye(logits_scaled.size(0), device=device) 
         #loss = self.loss_func(logits_scaled, labels)
         loss = nn.functional.binary_cross_entropy_with_logits(logits_scaled, labels)
 
