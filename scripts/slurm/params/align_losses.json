@@ -24,8 +24,7 @@
                 "model.align_loss_type"
             ],
             "values": [
-                "clip",
-                "siglip"
+                ["clip", "siglip"]
             ]
         }
     ]
