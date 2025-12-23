@@ -82,6 +82,7 @@ class EEGAlignmentConfig(TrainingModuleConfig):
     debug_prior_use_target_as_cond: bool = False
 
     align_loss_type: Literal["clip", "infonce", "siglip"] = "infonce"
+    align_skip_duplicates: bool = False
     align_loss_epoch: int = 0
     align_loss_factor: float = 0.1
     align_mse_loss_factor: float = 10.0
@@ -646,8 +647,8 @@ class EEGAlignmentModel(TrainingModule):
             )
 
         with torch.no_grad():
-            # There might be duplicates (different subjects, same image)
-            ignore_mask = find_duplicates(idx)
+            # There might be duplicates (different subjects, same image)'
+            ignore_mask = find_duplicates(idx) if self.config.align_skip_duplicates else None
 
         align_clip_loss, align_logits = self.align_loss(
             eeg_latent_normed, align_img_latent_normed, ignore_mask=ignore_mask
