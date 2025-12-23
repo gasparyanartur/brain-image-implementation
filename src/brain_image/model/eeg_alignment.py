@@ -1233,20 +1233,21 @@ class EEGAlignmentModel(TrainingModule):
             json.dump(metrics, f, indent=4)
 
         # Reconstructions
-        reconstructions = imgs["prior/reconstruction"]
-        ground_truths = imgs["prior/ground_truth"]
-        idxs = outputs["prior/idx"]
-        img_paths = outputs["prior/img_path"]
-        img_dir = Path(output_dir / "reconstructions")
-        img_dir.mkdir(parents=True, exist_ok=True)
+        if self.config.do_recon:
+            reconstructions = imgs["prior/reconstruction"]
+            ground_truths = imgs["prior/ground_truth"]
+            idxs = outputs["prior/idx"]
+            img_paths = outputs["prior/img_path"]
+            img_dir = Path(output_dir / "reconstructions")
+            img_dir.mkdir(parents=True, exist_ok=True)
 
-        for reconstruction, ground_truth, idx, img_path in zip(
-            reconstructions, ground_truths, idxs, img_paths
-        ):
-            if selected_img_idxs is not None and idx not in selected_img_idxs:
-                continue
-            save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
-            save_image(ground_truth, img_dir / f"{idx}_recon_gt.jpg")
+            for reconstruction, ground_truth, idx, img_path in zip(
+                reconstructions, ground_truths, idxs, img_paths
+            ):
+                if selected_img_idxs is not None and idx not in selected_img_idxs:
+                    continue
+                save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
+                save_image(ground_truth, img_dir / f"{idx}_recon_gt.jpg")
 
     def log_test_output(self, metrics, imgs, outputs):
         if imgs and ((wandb_logger := self.get_wandb_logger()) is not None):

@@ -10,7 +10,6 @@ eeg_encoder: "atms"
 do_align: true
 do_recon: false
 do_recon_low: false
-align_loss_type: clip
 
 debug_prior_use_target_as_cond: false
 debug_metrics: false
@@ -19,7 +18,6 @@ plot_lowdim_proj: false
 low_dim_proj_pca: 50
 
 align_loss_type: clip
-prior_align_second_latent: false
 
 skip_eval_first_epoch: true
 full_eval_every_epochs: 5
