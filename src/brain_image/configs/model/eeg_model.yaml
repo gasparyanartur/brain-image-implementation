@@ -2,7 +2,6 @@
 align_img_encoder: "clip_vith14"
 low_level_encoder: "ip_sdxl_turbo"
 prior_img_encoder: "clip_vith14"
-prior_img_encoder_2: "unaligned_synclr_vitb16"
 
 #eeg_encoder: "nice"
 eeg_encoder: "atms"

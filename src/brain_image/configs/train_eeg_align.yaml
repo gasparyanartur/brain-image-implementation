@@ -11,6 +11,9 @@ model:
   encoder_min_lr: 1e-5
   encoder_warmup_epochs: 1
 
+  align_img_encoder: "aligned_synclr_vitb16"
+
+
   modules_to_train:
     - eeg_encoder
 

@@ -2,14 +2,15 @@
     "entries": [
         {
             "keys": [
-                "dataset.subs", "model.align_loss_type"
+                "dataset.subs", "model.align_loss_type", "model.align_img_encoder"
             ],
             "values": [
                 [
-                    "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[8]", "[9]", "[10]",
+                    "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[8]", "[9]", "[10]"
 
                 ],
-                ["clip", "siglip"]
+                ["clip", "siglip"],
+                ["unaligned_synclr_vitb16", "aligned_synclr_vitb16"]
             ]
         }
     ]
