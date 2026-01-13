@@ -2,7 +2,6 @@
 align_img_encoder: "clip_vith14"
 low_level_encoder: "ip_sdxl_turbo"
 prior_img_encoder: "clip_vith14"
-prior_img_encoder_2: "unaligned_synclr_vitb16"
 
 #eeg_encoder: "nice"
 eeg_encoder: "atms"
@@ -18,7 +17,6 @@ plot_lowdim_proj: false
 low_dim_proj_pca: 50
 
 align_loss_type: clip
-prior_align_second_latent: false
 
 skip_eval_first_epoch: true
 full_eval_every_epochs: 5

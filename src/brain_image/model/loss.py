@@ -27,7 +27,7 @@ class InfoNCELoss(nn.Module):
             keep_mask = ~ignore_mask.to(device)
             logits_scaled = logits_scaled[keep_mask][:, keep_mask]
 
-        labels = torch.arange(z_e.size(0), device=device)
+        labels = torch.arange(logits_scaled.size(0), device=device)
         loss = self.loss_func(
             logits_scaled, target=labels
         )
@@ -55,7 +55,7 @@ class CLIPLoss(nn.Module):
             keep_mask = ~ignore_mask.to(device)
             logits_scaled = logits_scaled[keep_mask][:, keep_mask]
 
-        labels = torch.arange(z_e.size(0), device=device)
+        labels = torch.arange(logits_scaled.size(0), device=device)
         loss_e = self.loss_func(
             logits_scaled, target=labels
         )
@@ -68,13 +68,14 @@ class CLIPLoss(nn.Module):
 
 
 class SigLipLoss(nn.Module):
-    def __init__(self, init_temperature: float = 0.07, init_bias: float = 0.0, max_scale: float = 100, ignore_idx = -100):
+    def __init__(self, init_temperature: float = 0.07, init_bias: float = 0.0, max_scale: float = 100, ignore_idx = -100, scale_factor: float = 100):
         super().__init__()
         self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / init_temperature)))
         self.logit_bias = nn.Parameter(torch.tensor(init_bias))
         self.max_scale = max_scale
         self.ignore_idx = ignore_idx
         self.loss_func = nn.BCEWithLogitsLoss()
+        self.scale_factor = scale_factor
 
 
     def forward(
@@ -91,9 +92,9 @@ class SigLipLoss(nn.Module):
             keep_mask = ~ignore_mask.to(device)
             logits_scaled = logits_scaled[keep_mask][:, keep_mask]
 
-        labels = torch.eye(z_e.size(0), device=device) * 2 - 1
-        #loss = self.loss_func(logits_scaled, labels)
-        loss = nn.functional.binary_cross_entropy_with_logits(logits_scaled, labels)
+        labels = torch.eye(logits_scaled.size(0), device=device) 
+        loss = self.loss_func(logits_scaled, labels)
+        loss = loss * self.scale_factor
 
         return loss, logits
 

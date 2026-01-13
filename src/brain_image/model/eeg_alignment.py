@@ -26,7 +26,7 @@ from data.data import (
 from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
 from brain_image.model.eeg_encoder import create_eeg_encoder
 from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM, VAE_ENCODER
-from brain_image.model.loss import CLIPLoss, InfoNCELoss
+from brain_image.model.loss import CLIPLoss, InfoNCELoss, SigLipLoss
 
 from brain_image.model.model import (
     LinearLayerNorm,
@@ -81,7 +81,8 @@ class EEGAlignmentConfig(TrainingModuleConfig):
 
     debug_prior_use_target_as_cond: bool = False
 
-    align_loss_type: Literal["clip", "infonce"] = "infonce"
+    align_loss_type: Literal["clip", "infonce", "siglip"] = "infonce"
+    align_skip_duplicates: bool = False
     align_loss_epoch: int = 0
     align_loss_factor: float = 0.1
     align_mse_loss_factor: float = 10.0
@@ -646,8 +647,8 @@ class EEGAlignmentModel(TrainingModule):
             )
 
         with torch.no_grad():
-            # There might be duplicates (different subjects, same image)
-            ignore_mask = find_duplicates(idx)
+            # There might be duplicates (different subjects, same image)'
+            ignore_mask = find_duplicates(idx) if self.config.align_skip_duplicates else None
 
         align_clip_loss, align_logits = self.align_loss(
             eeg_latent_normed, align_img_latent_normed, ignore_mask=ignore_mask
@@ -1233,20 +1234,21 @@ class EEGAlignmentModel(TrainingModule):
             json.dump(metrics, f, indent=4)
 
         # Reconstructions
-        reconstructions = imgs["prior/reconstruction"]
-        ground_truths = imgs["prior/ground_truth"]
-        idxs = outputs["prior/idx"]
-        img_paths = outputs["prior/img_path"]
-        img_dir = Path(output_dir / "reconstructions")
-        img_dir.mkdir(parents=True, exist_ok=True)
+        if self.config.do_recon:
+            reconstructions = imgs["prior/reconstruction"]
+            ground_truths = imgs["prior/ground_truth"]
+            idxs = outputs["prior/idx"]
+            img_paths = outputs["prior/img_path"]
+            img_dir = Path(output_dir / "reconstructions")
+            img_dir.mkdir(parents=True, exist_ok=True)
 
-        for reconstruction, ground_truth, idx, img_path in zip(
-            reconstructions, ground_truths, idxs, img_paths
-        ):
-            if selected_img_idxs is not None and idx not in selected_img_idxs:
-                continue
-            save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
-            save_image(ground_truth, img_dir / f"{idx}_recon_gt.jpg")
+            for reconstruction, ground_truth, idx, img_path in zip(
+                reconstructions, ground_truths, idxs, img_paths
+            ):
+                if selected_img_idxs is not None and idx not in selected_img_idxs:
+                    continue
+                save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
+                save_image(ground_truth, img_dir / f"{idx}_recon_gt.jpg")
 
     def log_test_output(self, metrics, imgs, outputs):
         if imgs and ((wandb_logger := self.get_wandb_logger()) is not None):
