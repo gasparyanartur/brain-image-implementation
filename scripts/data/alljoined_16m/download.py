@@ -56,7 +56,7 @@ def main(args):
         logging.info("Downloading stim-order files...")
         # The stim-order file is not downloaded with the EEG data, so we need to download it separately
         
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        with tempfile.TemporaryDirectory(dir=data_path) as tmp_dir:
             tmp_path = Path(tmp_dir)
             for sub in args["subs"]:
                 huggingface_hub.snapshot_download("Alljoined/Alljoined-1.6M", allow_patterns=f"*{sub:02}*/stim_order.parquet", repo_type="dataset", local_dir=tmp_path, revision=STIM_ORDER_REVISION)
