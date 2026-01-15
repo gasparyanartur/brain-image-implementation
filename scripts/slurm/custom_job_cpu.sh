@@ -1,9 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=custom
+#SBATCH --job-name=custom_cpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=64G
+#SBATCH --partition=berzelius-cpu
 #SBATCH --gpus=0
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/slurm/custom_cpu/%A_%a.out
