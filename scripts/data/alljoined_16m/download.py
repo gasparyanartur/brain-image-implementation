@@ -56,17 +56,17 @@ def main(args):
         logging.info("Downloading stim-order files...")
         # The stim-order file is not downloaded with the EEG data, so we need to download it separately
         
-        with tempfile.TemporaryDirectory(dir=data_path) as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            for sub in args["subs"]:
-                huggingface_hub.snapshot_download("Alljoined/Alljoined-1.6M", allow_patterns=f"*{sub:02}*/stim_order.parquet", repo_type="dataset", local_dir=tmp_path, revision=STIM_ORDER_REVISION)
-        
-                # Move the stim_order.parquet file to the correct location
-                _found_path = list(tmp_path.rglob(f"*/sub-{sub:02}*/stim_order.parquet"))
-                assert len(_found_path) == 1, f"Expected exactly one stim_order.parquet file for sub-{sub:02}, found {len(_found_path)}"
-                
-                _found_path[0].rename(data_path / args["raw_eeg_dir"] / f"sub-{sub:02}" / "stim_order.parquet")
+        stim_path = data_path / args["stim_dir"]
+        stim_path.mkdir(parents=True, exist_ok=True)
+        for sub in args["subs"]:
+            huggingface_hub.snapshot_download("Alljoined/Alljoined-1.6M", allow_patterns=f"*{sub:02}*/stim_order.parquet", repo_type="dataset", local_dir=stim_path, revision=STIM_ORDER_REVISION)
+    
+            # Move the stim_order.parquet file to the correct location
+            _found_path = list(stim_path.rglob(f"*/sub-{sub:02}*/stim_order.parquet"))
+            assert len(_found_path) == 1, f"Expected exactly one stim_order.parquet file for sub-{sub:02}, found {len(_found_path)}"
             
+            _found_path[0].rename(data_path / args["raw_eeg_dir"] / f"sub-{sub:02}" / "stim_order.parquet")
+        
 
 
 if __name__ == "__main__":
