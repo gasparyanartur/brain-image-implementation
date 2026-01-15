@@ -13,7 +13,7 @@ import torch
 import tqdm
 import pandas as pd
 
-from data.data import EEGDataset, SampleType, get_image_paths, load_all_eeg_data
+from brain_image.data.data import get_image_paths, load_all_eeg_data
 
 
 
@@ -98,7 +98,6 @@ def main(args: SetupDataArguments):
         logging.info(f"Preparing data...")
         prepared_dir = args.data_path / args.prepared_data_dir
         prepared_dir.mkdir(parents=True, exist_ok=True)
-
 
         all_metadatas = [
             [pd.read_parquet(preprocessed_eeg_dir / f"sub-{s:02}") / "experiment_metadata_categories.parquet" for s in args.subs]

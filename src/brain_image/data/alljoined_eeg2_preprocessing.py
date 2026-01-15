@@ -164,9 +164,8 @@ def _compute_sigma_cond(mvnn_dim: str, cond_data: np.ndarray) -> np.ndarray:
 
 def epoching(
     configs: Alljoined16MDatasetPreprocessingConfig,
-    sub: int,
     blocks,
-    project_dir: str,
+    raw_eeg_dir: str,
     verbose: bool = False,
 ):
     """Epoch and filter EEG data for a given subject.
@@ -193,10 +192,7 @@ def epoching(
     def _process_session(sess: int):
         """Helper that loads and epochs a single session."""
         data_dir = os.path.join(
-            project_dir,
-            "raw_eeg",
-            "Alljoined-1.6M",
-            f"sub-{sub:02d}",
+            raw_eeg_dir,
             f"session_{sess:02d}",
         )
         raws = []
@@ -475,10 +471,3 @@ class Alljoined16MDatasetPreprocessingConfig(BaseConfig):
     verbose: bool = False
 
 
-def generate_preprocessed_dataset(eeg_dir: Path, sub: int, frequency: int = 250, seed: int = 20200220 )
-    args = Alljoined16MDatasetPreprocessingConfig(
-        sfreq=frequency, 
-    )
-    
-    # TODO
-    raise NotImplementedError
