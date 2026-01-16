@@ -415,7 +415,7 @@ def save_data(
     )
     export_dict = {
         "preprocessed_eeg_data": merged,
-        "configs": dataclasses.asdict(configs),
+        "configs": configs.model_dump(),
         "ch_names": datas[0].info["ch_names"],
         "times": datas[0].times[start:end],
     }

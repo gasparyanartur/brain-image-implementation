@@ -1,3 +1,4 @@
+from __future__ import annotations
 # Copied from https://github.com/NonaRjb/AlignVis/blob/main/src/dataset/preprocessing_utils.py
 
 
@@ -203,7 +204,7 @@ def mvnn(args, epoched_test, epoched_train):
 	return whitened_test, whitened_train
 
 
-def save_prepr(args, whitened_test, whitened_train, img_conditions_train,
+def save_prepr(args: ThingsEEG2DatasetPreprocessingConfig, whitened_test, whitened_train, img_conditions_train,
 	ch_names, times, seed):
 	"""Merge the EEG data of all sessions together, shuffle the EEG repetitions
 	across sessions and reshaping the data to the format:
@@ -294,7 +295,8 @@ def save_prepr(args, whitened_test, whitened_train, img_conditions_train,
 	train_dict = {
 		'preprocessed_eeg_data': merged_train,
 		'ch_names': ch_names,
-		'times': times
+		'times': times,
+		'configs': args.model_dump()
 	}
 	del merged_train
 	# Create the directory if not existing and save the data
