@@ -7,7 +7,7 @@ import json
 import os
 import pickle
 from pathlib import Path
-from typing import Tuple, Dict
+from typing import Tuple, Dict, cast
 
 import mne
 import pandas as pd
@@ -167,7 +167,7 @@ def epoching(
     blocks,
     raw_eeg_dir: str,
     verbose: bool = False,
-):
+) -> list:
     """Epoch and filter EEG data for a given subject.
 
     Args:
@@ -247,7 +247,7 @@ def epoching(
         return epochs
 
     print("Epoching...")
-    return Parallel(n_jobs=-1)(delayed(_process_session)(s) for s in SESSIONS)
+    return cast(list, Parallel(n_jobs=-1)(delayed(_process_session)(s) for s in SESSIONS))
 
 
 def compute_dropped_trials(

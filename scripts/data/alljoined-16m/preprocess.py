@@ -17,12 +17,8 @@ from brain_image.data.alljoined_eeg2_preprocessing import (
     epoching,
     save_data,
     whiten,
-    Alljoined16MDatasetPreprocessingConfig
+    Alljoined16MDatasetPreprocessingConfig,
 )
-
-# --------------------------------------------------------------------------
-# helpers ------------------------------------------------------------------
-# --------------------------------------------------------------------------
 
 
 def _parse_float_tuple(text: str) -> Tuple[float | None, float]:
@@ -51,12 +47,12 @@ def _mvnn_arg(text: str) -> str | None:
         return None
     if t in {"epochs", "time"}:
         return t
-    raise argparse.ArgumentTypeError(
-        "mvnn_dim must be 'epochs', 'time', or 'None'"
-    )
+    raise argparse.ArgumentTypeError("mvnn_dim must be 'epochs', 'time', or 'None'")
 
 
-def _make_configs_from_args(args: argparse.Namespace) -> Alljoined16MDatasetPreprocessingConfig:
+def _make_configs_from_args(
+    args: argparse.Namespace,
+) -> Alljoined16MDatasetPreprocessingConfig:
     """Instantiate a Configs object from parsed CLI args."""
     return Alljoined16MDatasetPreprocessingConfig(
         baseline=args.baseline,
@@ -70,27 +66,25 @@ def _make_configs_from_args(args: argparse.Namespace) -> Alljoined16MDatasetPrep
         reject=args.reject,
     )
 
-# --------------------------------------------------------------------------
-# main ---------------------------------------------------------------------
-# --------------------------------------------------------------------------
 
 def main(args):
     mne.set_log_level("WARNING" if not args.verbose else "INFO")
 
-    SUB = args.sub
-    CONFIGS = _make_configs_from_args(args)
+    sub = args.sub
+    configs = _make_configs_from_args(args)
 
-    OUTPUT_DIR = (
-        args.output_dir / f"sub-{SUB:02d}"
-    )
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    RAW_EEG_DIR = args.raw_eeg_dir / f"sub-{SUB:02d}"
-    assert RAW_EEG_DIR.exists(), f"Raw EEG data not found at {RAW_EEG_DIR}"
+    data_path = args.data_path
 
-    stim_order = pd.read_parquet(RAW_EEG_DIR / "stim_order.parquet")
+    output_dir = data_path / args.output_dir / f"sub-{sub:02d}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    raw_eeg_dir = data_path / args.raw_eeg_dir / f"sub-{sub:02d}"
+    assert raw_eeg_dir.exists(), f"Raw EEG data not found at {raw_eeg_dir}"
+
+    stim_order = pd.read_parquet(raw_eeg_dir / "stim_order.parquet")
 
     # ---- subject-specific fix (trigger swap) ---------------------------------
-    if SUB == 6:
+    if sub == 6:
         print("Swapping mismatched triggers for subject 6")
         row_to_move = stim_order.iloc[73762]
         stim_order = pd.concat(
@@ -107,34 +101,35 @@ def main(args):
     TRAIN_BLOCKS: range = range(5, 20)
 
     epoched_test = epoching(
-        blocks=TEST_BLOCKS, raw_eeg_dir=RAW_EEG_DIR, configs=CONFIGS, verbose=args.verbose
+        blocks=TEST_BLOCKS,
+        raw_eeg_dir=raw_eeg_dir,
+        configs=configs,
+        verbose=args.verbose,
     )
     epoched_train = epoching(
-        blocks=TRAIN_BLOCKS, raw_eeg_dir=RAW_EEG_DIR, configs=CONFIGS, verbose=args.verbose
+        blocks=TRAIN_BLOCKS,
+        raw_eeg_dir=raw_eeg_dir,
+        configs=configs,
+        verbose=args.verbose,
     )
-    epoched_train = cast(list, epoched_train)
-    epoched_test = cast(list, epoched_test)
 
     # dropped-trial bookkeeping -------------------------------------------------
     test_df = stim_order.query("partition == 'stim_test'")
     train_df = stim_order.query("partition == 'stim_train'")
 
     test_keep = compute_dropped_trials(epoched_test, test_df, verbose=args.verbose)
-    train_keep = compute_dropped_trials(
-        epoched_train, train_df, verbose=args.verbose
-    )
-
+    train_keep = compute_dropped_trials(epoched_train, train_df, verbose=args.verbose)
 
     stim_order["dropped"] = True
     stim_order.loc[test_keep, "dropped"] = False
     stim_order.loc[train_keep, "dropped"] = False
-    stim_order.to_parquet(OUTPUT_DIR / "experiment_metadata.parquet")
+    stim_order.to_parquet(output_dir / "experiment_metadata.parquet")
 
     # --------------------------------------------------------------------------
     # MVNN whitening -----------------------------------------------------------
-    if CONFIGS.mvnn_dim is not None:
+    if configs.mvnn_dim is not None:
         whitening_mats = compute_whitening_matrix(
-            CONFIGS.mvnn_dim,
+            configs.mvnn_dim,
             epoched_train,
             stim_order.query("partition == 'stim_train'"),
             verbose=args.verbose,
@@ -142,30 +137,26 @@ def main(args):
         epoched_train = whiten(epoched_train, whitening_mats)
         epoched_test = whiten(epoched_test, whitening_mats)
 
-        with open(OUTPUT_DIR / "mvnn_whitening_matrices.pkl", "wb") as f:
+        with open(output_dir / "mvnn_whitening_matrices.pkl", "wb") as f:
             pickle.dump(whitening_mats, f)
 
     # --------------------------------------------------------------------------
     # save ---------------------------------------------------------------------
     save_data(
-        str(OUTPUT_DIR / "preprocessed_eeg_test_flat.npy"),
+        str(output_dir / "preprocessed_eeg_test_flat.npy"),
         epoched_test,
-        CONFIGS,
+        configs,
         verbose=args.verbose,
     )
     save_data(
-        str(OUTPUT_DIR / "preprocessed_eeg_training_flat.npy"),
+        str(output_dir / "preprocessed_eeg_training_flat.npy"),
         epoched_train,
-        CONFIGS,
+        configs,
         verbose=args.verbose,
     )
 
 
 if __name__ == "__main__":
-    # --------------------------------------------------------------------------
-    # CLI ----------------------------------------------------------------------
-    # --------------------------------------------------------------------------
-
     parser = argparse.ArgumentParser(
         prog="preprocessing.py",
         description=(
@@ -173,8 +164,6 @@ if __name__ == "__main__":
             "MVNN, and saving."
         ),
     )
-
-    # required
     parser.add_argument(
         "-s",
         "--sub",
@@ -182,8 +171,6 @@ if __name__ == "__main__":
         type=int,
         help="Subject number (e.g.  1 for sub-01)",
     )
-
-    # Configs-related ----------------------------------------------------------
     parser.add_argument(
         "--tmin",
         type=float,
@@ -198,8 +185,7 @@ if __name__ == "__main__":
         type=_parse_float_tuple,
         default="None,0",
         help=(
-            'Baseline tuple "None,0" or "-0.2,0" (use None for '
-            "no pre-stim baseline)"
+            'Baseline tuple "None,0" or "-0.2,0" (use None for ' "no pre-stim baseline)"
         ),
     )
     parser.add_argument(
@@ -234,11 +220,9 @@ if __name__ == "__main__":
         default="epochs",
         help="MVNN mode (off to skip whitening)",
     )
-
-    # misc ---------------------------------------------------------------------
-    parser.add_argument("--output_dir", type=Path, default="data/alljoined-1.6m/preprocessed_eeg")
-    parser.add_argument("--raw_eeg_dir", type=Path, default="data/alljoined-1.6m/raw_eeg")
-
+    parser.add_argument("-d", "--data_path", type=Path, default="data/alljoined-1.6m")
+    parser.add_argument("--output_dir", type=str, default="preprocessed-eeg")
+    parser.add_argument("--raw_eeg_dir", type=str, default="raw-eeg")
     parser.add_argument(
         "--verbose",
         action="store_true",

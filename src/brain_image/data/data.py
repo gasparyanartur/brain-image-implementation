@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Iterable, Literal, TypedDict, cast
 
+import gdown
 import numpy as np
 import requests
 import torch
@@ -50,7 +51,7 @@ class DataConfig(BaseConfig, ABC):
                 return False
             case "test":
                 return False
-            
+
     def get_limit_size(self, split: Literal["train", "val", "test"]):
         match split:
             case "train":
@@ -74,18 +75,19 @@ class EEGDatasetConfig(DataConfig):
     data_path: Path = Path("data") / "things-eeg2"
 
     imgs_dir: str = "imgs"
-    
-    prepared_eeg_dir: str = "prepared"      # Needs to be generated with "prepare_data.py"
+
+    prepared_eeg_dir: str = "prepared"  # Needs to be generated with "prepare_data.py"
 
     subs: list[int] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     preload_cache: bool = True
 
+
 class TensorCache:
     def __init__(
         self,
         cache_path: Path = Path("tensorcache"),
-        memory_cache_size: int = 1024*1024,
+        memory_cache_size: int = 1024 * 1024,
         use_encrypt: bool = False,
         overwrite: bool = True,
     ):
@@ -122,7 +124,9 @@ class TensorCache:
 
         torch.save(tensor, path)
 
-    def batch_get(self, items: Iterable[Iterable[str]], parallel: bool = True) -> torch.Tensor:
+    def batch_get(
+        self, items: Iterable[Iterable[str]], parallel: bool = True
+    ) -> torch.Tensor:
         def _get(key_list: list[str]) -> torch.Tensor:
             return self.get(*key_list)
 
@@ -168,9 +172,15 @@ class DataModule(LightningDataModule, ABC):
         super().__init__()
 
         self.config = config
-        self.num_batches: dict[str, int | None] = {"train": None, "val": None, "test": None}
+        self.num_batches: dict[str, int | None] = {
+            "train": None,
+            "val": None,
+            "test": None,
+        }
 
-        self.datasets: dict[str, Dataset | None] = {split: None for split in ["train", "val", "test"]}
+        self.datasets: dict[str, Dataset | None] = {
+            split: None for split in ["train", "val", "test"]
+        }
         self.dataloaders: dict[str, torch.utils.data.DataLoader | None] = {}
 
         self.embedding_stats = embedding_stats or {}
@@ -230,8 +240,6 @@ class DataModule(LightningDataModule, ABC):
             del self.dataloaders[key]
 
 
-
-
 class EmbeddingsMap(TypedDict):
     align_img_latent: IMAGE_ENCODER | None
     prior_img_latent: IMAGE_ENCODER | None
@@ -254,7 +262,7 @@ class EEGDataModule(DataModule):
         config: EEGDatasetConfig,
         tensor_cache: TensorCache = TensorCache(),
         embeddings_map: EmbeddingsMap = {},
-        embeddings_to_compute_stats: list[IMAGE_ENCODER] = []
+        embeddings_to_compute_stats: list[IMAGE_ENCODER] = [],
     ):
         self.config: EEGDatasetConfig = config
         self.tensor_cache = tensor_cache
@@ -269,17 +277,15 @@ class EEGDataModule(DataModule):
     def get_metadata(self) -> dict:
         return {}
 
-    def _create_dataset(
-        self, split: Literal["train", "val", "test"]
-    ) -> EEGDataset:
+    def _create_dataset(self, split: Literal["train", "val", "test"]) -> EEGDataset:
         return EEGDataset(
             self.config,
             split=split,
             tensor_cache=self.tensor_cache,
             embeddings_map=self.embeddings_map,
             limit_size=self.config.get_limit_size(split),
-            limit_shuffle=split=="train",
-            preload_cache=self.config.preload_cache
+            limit_shuffle=split == "train",
+            preload_cache=self.config.preload_cache,
         )
 
     def _create_dataloader(
@@ -291,12 +297,12 @@ class EEGDataModule(DataModule):
         match split:
             case "train":
                 shuffle = True
-                
+
             case "val":
                 shuffle = False
 
             case "test":
-                shuffle = False 
+                shuffle = False
 
         num_workers = self.config.num_workers or min(32, mp.cpu_count())
         device = get_device_str()
@@ -306,7 +312,7 @@ class EEGDataModule(DataModule):
             "num_workers": num_workers,
             "pin_memory": device != "cpu",
             "persistent_workers": (split == "train") and (num_workers > 0),
-            "drop_last": False
+            "drop_last": False,
         }
         dataloader_args.update(kwargs)
 
@@ -317,24 +323,28 @@ class EEGDataModule(DataModule):
         )
 
     def _get_embeddings_stats(self):
-        img_dir_path = (
-            self.config.data_path / self.config.imgs_dir / "training_images"
-        )
+        img_dir_path = self.config.data_path / self.config.imgs_dir / "training_images"
         img_paths = list(img_dir_path.rglob("*.jpg"))
 
-        embedding_types = [str(v) for k, v in self.embeddings_map.items() if v in self.embeddings_to_compute_stats and v is not None]
+        embedding_types = [
+            str(v)
+            for k, v in self.embeddings_map.items()
+            if v in self.embeddings_to_compute_stats and v is not None
+        ]
         embedding_stats = get_embeddings_stats(
             tensorcache=self.tensor_cache,
             img_paths=img_paths,
-            embedding_names=embedding_types,    # type: ignore
+            embedding_names=embedding_types,  # type: ignore
             split="train",
         )
         print("EMB STATS", embedding_stats)
 
-        mapped_stats = {k: embedding_stats[v] for k, v in self.embeddings_map.items() if v in embedding_stats}
+        mapped_stats = {
+            k: embedding_stats[v]
+            for k, v in self.embeddings_map.items()
+            if v in embedding_stats
+        }
         return mapped_stats
-
-
 
 
 class EEGDataset(Dataset):
@@ -355,7 +365,7 @@ class EEGDataset(Dataset):
         self.embeddings_map = embeddings_map
         self.standardize_embeddings = standardize_embeddings
         self.limit_size = limit_size
- 
+
         logging.info(f"Loading {split} dataset")
         prepared_data: list[dict] = []
         split_dir = "train" if split == "train" else "test"
@@ -373,18 +383,23 @@ class EEGDataset(Dataset):
 
         if self.limit_size < 1.0:
             new_size = int(len(self.prepared_data) * self.limit_size)
-            logging.info(f"Limiting dataset size to {self.limit_size * 100:.1f}% - {new_size} samples")
-            
-            idxs = np.random.choice(
-                len(self.prepared_data),
-                new_size,
-                replace=False,
-            ) if limit_shuffle else np.arange(new_size)
+            logging.info(
+                f"Limiting dataset size to {self.limit_size * 100:.1f}% - {new_size} samples"
+            )
+
+            idxs = (
+                np.random.choice(
+                    len(self.prepared_data),
+                    new_size,
+                    replace=False,
+                )
+                if limit_shuffle
+                else np.arange(new_size)
+            )
             self.prepared_data = [self.prepared_data[i] for i in idxs]
 
         if preload_cache:
             self._preload_cache()
-
 
     def __len__(self):
         return len(self.prepared_data)
@@ -397,7 +412,7 @@ class EEGDataset(Dataset):
             "eeg_data": item["eeg"],
             "idx": item["idx"],
             "sub": item["sub"],
-            **self._get_embeddings(item["img_path"])
+            **self._get_embeddings(item["img_path"]),
         }
 
         return sample
@@ -456,7 +471,13 @@ def batch_load_images(
 ) -> Tensor:
     if parallel:
         with ThreadPoolExecutor() as pool:
-            imgs = list(pool.map(functools.partial(load_image_from_path, mode=mode), paths, timeout=10))
+            imgs = list(
+                pool.map(
+                    functools.partial(load_image_from_path, mode=mode),
+                    paths,
+                    timeout=10,
+                )
+            )
     else:
         imgs = [
             load_image_from_path(path, mode=mode)
@@ -581,8 +602,6 @@ def load_all_eeg_data(
     return torch.stack(all_eeg_data), torch.stack(all_idxs), all_times, all_ch_names
 
 
-
-
 @torch.no_grad()
 def get_embeddings_stats(
     tensorcache: TensorCache,
@@ -590,13 +609,14 @@ def get_embeddings_stats(
     embedding_names: list[IMAGE_ENCODER],
     split: Literal["train", "test"],
 ) -> dict[str, dict[str, torch.Tensor]]:
-    logging.info(f"Getting embedding stats for {embedding_names} - {len(img_paths)} images")
+    logging.info(
+        f"Getting embedding stats for {embedding_names} - {len(img_paths)} images"
+    )
     _running_embeddings = {}
 
     for emb_name in embedding_names:
         arg_list = ((str(img_path), emb_name, split) for img_path in img_paths)
         _running_embeddings[emb_name] = tensorcache.batch_get(arg_list)
-    
 
     logging.info(f"Keys gathered: {_running_embeddings.keys()}")
 
@@ -625,40 +645,51 @@ def download_to_file(
     verbose: bool = True,
     progress_bar: bool = True,
     chunk_size: int = 1024,
+    skip_if_exists: bool = True,
+    backend: Literal["gdown", "requests"] = "requests",
 ):
+    if skip_if_exists and file_path.exists():
+        logging.info(f"File {file_path} already exists, skipping download")
+        return
+
     if verbose:
-        logging.info(f"Downloading file from {url} to {file_path}")
+        logging.info(
+            f"Downloading file from {url} to {file_path} with backend {backend}"
+        )
 
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"
-    }
-    response = requests.get(url, stream=True, headers=headers)
-    total_size = int(response.headers.get("content-length", 0))
-    written_size = 0
-    with open(file_path, "wb") as f:
-        with tqdm.tqdm(
-            response.iter_content(chunk_size=chunk_size),
-            total=total_size,
-            unit="B",
-            unit_scale=True,
-            desc="Downloading",
-            disable=not progress_bar,
-        ) as pbar:
-            for chunk in response.iter_content(chunk_size=chunk_size):
-                chunk_size = len(chunk)
-                if chunk_size == 0:
-                    continue
+    if backend == requests:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"
+        }
+        response = requests.get(url, stream=True, headers=headers)
+        total_size = int(response.headers.get("content-length", 0))
+        written_size = 0
+        with open(file_path, "wb") as f:
+            with tqdm.tqdm(
+                response.iter_content(chunk_size=chunk_size),
+                total=total_size,
+                unit="B",
+                unit_scale=True,
+                desc="Downloading",
+                disable=not progress_bar,
+            ) as pbar:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    chunk_size = len(chunk)
+                    if chunk_size == 0:
+                        continue
 
-                f.write(chunk)
-                written_size += chunk_size
-                pbar.update(chunk_size)
+                    f.write(chunk)
+                    written_size += chunk_size
+                    pbar.update(chunk_size)
 
-    if total_size > 0 and (written_size != total_size):
-        raise ValueError(
-            f"Downloaded size does not match expected size: {written_size} != {total_size}"
-        )
+        if total_size > 0 and (written_size != total_size):
+            raise ValueError(
+                f"Downloaded size does not match expected size: {written_size} != {total_size}"
+            )
+    elif backend == "gdown":
+        gdown.download(output=str(file_path), id=url)
 
 
 def merge_data(
