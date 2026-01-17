@@ -19,7 +19,7 @@ from brain_image.configs import BaseConfig, get_device
 from data.data import (
     EEGDataModule,
     EEGDatasetConfig,
-    EmbeddingsMap,
+    LatentTypeMapT,
     TensorCache,
     batch_load_images,
 )
@@ -213,7 +213,7 @@ class EEGAlignmentModel(TrainingModule):
         )
 
         tensor_cache = TensorCache(cache_dir)
-        embeddings_map: EmbeddingsMap = {
+        embeddings_map: LatentTypeMapT = {
             "align_img_latent": (
                 self.config.align_img_encoder if self.config.do_align else None
             ),

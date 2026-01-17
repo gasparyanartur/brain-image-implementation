@@ -14,7 +14,7 @@ from brain_image.model.eeg_encoder import create_eeg_encoder
 from data.data import (
     EEGDataModule,
     EEGDatasetConfig,
-    EmbeddingsMap,
+    LatentTypeMapT,
     TensorCache,
     batch_load_images,
 )
@@ -143,7 +143,7 @@ class LowLevelModule(TrainingModule):
 
         self.config = config
         tensorcache = TensorCache()
-        emb_map: EmbeddingsMap = {
+        emb_map: LatentTypeMapT = {
             "low_level_latent": self.config.vae_encoder,
             "align_img_latent": None,
             "prior_img_latent": None,
