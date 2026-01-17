@@ -22,12 +22,16 @@ if [ -z "$image_path" ]; then
     image_path=$(ls -t images/brain_*.sif | head -n 1)
 fi
 
+dataset=$1
+echo "Dataset: $dataset"
 
-CLI_ARGS="$@"
+CLI_ARGS="${@:2}"
 echo "CLI_ARGS: $CLI_ARGS"
 
-./scripts/container/run_singularity.sh \
-    /workspace/scripts/data/prepare.sh $CLI_ARGS 
+cmd=/workspace/scripts/data/${dataset}/prepare.sh $CLI_ARGS 
+echo "Preparing data with command: $cmd"
+
+./scripts/container/run_singularity.sh $cmd
 
 if [ $? -eq 0 ]; then
     echo "Prepared data successfully"
