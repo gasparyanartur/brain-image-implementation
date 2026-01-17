@@ -662,40 +662,43 @@ def download_to_file(
 
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if backend == requests:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"
-        }
-        response = requests.get(url, stream=True, headers=headers)
-        total_size = int(response.headers.get("content-length", 0))
-        written_size = 0
+    match backend:
+        case "requests":
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"
+            }
+            response = requests.get(url, stream=True, headers=headers)
+            total_size = int(response.headers.get("content-length", 0))
+            written_size = 0
 
-        _log(f"Using requests backend, saving in {file_path}")
-        with open(file_path, "wb") as f:
-            with tqdm.tqdm(
-                response.iter_content(chunk_size=chunk_size),
-                total=total_size,
-                unit="B",
-                unit_scale=True,
-                desc="Downloading",
-                disable=not progress_bar,
-            ) as pbar:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    chunk_size = len(chunk)
-                    if chunk_size == 0:
-                        continue
+            _log(f"Using requests backend, saving in {file_path}")
+            with open(file_path, "wb") as f:
+                with tqdm.tqdm(
+                    response.iter_content(chunk_size=chunk_size),
+                    total=total_size,
+                    unit="B",
+                    unit_scale=True,
+                    desc="Downloading",
+                    disable=not progress_bar,
+                ) as pbar:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        chunk_size = len(chunk)
+                        if chunk_size == 0:
+                            continue
 
-                    f.write(chunk)
-                    written_size += chunk_size
-                    pbar.update(chunk_size)
+                        f.write(chunk)
+                        written_size += chunk_size
+                        pbar.update(chunk_size)
 
-        if total_size > 0 and (written_size != total_size):
-            raise ValueError(
-                f"Downloaded size does not match expected size: {written_size} != {total_size}"
-            )
-    elif backend == "gdown":
-        _log(f"Using gdown backend, saving in {file_path}")
-        gdown.download(output=str(file_path), id=url)
+            if total_size > 0 and (written_size != total_size):
+                raise ValueError(
+                    f"Downloaded size does not match expected size: {written_size} != {total_size}"
+                )
+        case "gdown":
+            _log(f"Using gdown backend, saving in {file_path}")
+            gdown.download(output=str(file_path), id=url)
+        case _:
+            raise ValueError(f"Unknown backend: {backend}")
 
 
     if not file_path.exists():

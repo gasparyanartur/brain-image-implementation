@@ -58,6 +58,7 @@ def main(args):
 
             download_to_file(url, raw_file_path, verbose=True, skip_if_exists=True, backend="gdown")
 
+            logging.info(f"Extracting file to {extracted_path}")
             with zipfile.ZipFile(raw_file_path, "r") as zf:
                 zf.extractall(extracted_path.parent)
 
