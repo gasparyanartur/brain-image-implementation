@@ -75,8 +75,8 @@ def main(args):
 
     data_path = args.data_path
 
-    output_dir = data_path / args.output_dir / f"sub-{sub:02d}"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    preprocessed_eeg_dir = data_path / args.preprocessed_eeg_dir / f"sub-{sub:02d}"
+    preprocessed_eeg_dir.mkdir(parents=True, exist_ok=True)
 
     raw_eeg_dir = data_path / args.raw_eeg_dir / f"sub-{sub:02d}"
     assert raw_eeg_dir.exists(), f"Raw EEG data not found at {raw_eeg_dir}"
@@ -123,7 +123,7 @@ def main(args):
     stim_order["dropped"] = True
     stim_order.loc[test_keep, "dropped"] = False
     stim_order.loc[train_keep, "dropped"] = False
-    stim_order.to_parquet(output_dir / "experiment_metadata.parquet")
+    stim_order.to_parquet(preprocessed_eeg_dir / "experiment_metadata.parquet")
 
     # --------------------------------------------------------------------------
     # MVNN whitening -----------------------------------------------------------
@@ -137,19 +137,19 @@ def main(args):
         epoched_train = whiten(epoched_train, whitening_mats)
         epoched_test = whiten(epoched_test, whitening_mats)
 
-        with open(output_dir / "mvnn_whitening_matrices.pkl", "wb") as f:
+        with open(preprocessed_eeg_dir / "mvnn_whitening_matrices.pkl", "wb") as f:
             pickle.dump(whitening_mats, f)
 
     # --------------------------------------------------------------------------
     # save ---------------------------------------------------------------------
     save_data(
-        str(output_dir / "preprocessed_eeg_test_flat.npy"),
+        str(preprocessed_eeg_dir / "preprocessed_eeg_test_flat.npy"),
         epoched_test,
         configs,
         verbose=args.verbose,
     )
     save_data(
-        str(output_dir / "preprocessed_eeg_training_flat.npy"),
+        str(preprocessed_eeg_dir / "preprocessed_eeg_training_flat.npy"),
         epoched_train,
         configs,
         verbose=args.verbose,

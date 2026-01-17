@@ -374,11 +374,11 @@ def save_prepr(
 	file_name_train = "preprocessed_eeg_training.npy"
 
 	# Create the directory if not existing and save the data
-	output_dir = args.data_path / args.output_dir
-	if not output_dir.exists():
-		output_dir.mkdir(parents=True, exist_ok=True)
+	preprocessed_eeg_dir = args.data_path / args.preprocessed_eeg_dir
+	if not preprocessed_eeg_dir.exists():
+		preprocessed_eeg_dir.mkdir(parents=True, exist_ok=True)
 
-	with open(output_dir / file_name_test, "wb") as f:
+	with open(preprocessed_eeg_dir / file_name_test, "wb") as f:
 		pickle.dump(test_dict, f, protocol=4)
 
 	del test_dict
@@ -428,7 +428,7 @@ def save_prepr(
 	}
 	del merged_train
 
-	with open(output_dir / file_name_train, "wb") as f:
+	with open(preprocessed_eeg_dir / file_name_train, "wb") as f:
 		pickle.dump(train_dict, f, protocol=4)
 
 	del train_dict
@@ -439,6 +439,6 @@ class ThingsEEG2DatasetPreprocessingConfig(BaseConfig):
 	n_ses: int = 4
 	mvnn_dim: str = "epochs"
 	data_path: Path = Path("data/things-eeg2")
-	output_dir: str = "preprocessed-eeg"
+	preprocessed_eeg_dir: str = "preprocessed-eeg"
 	raw_eeg_dir: str = "raw_eeg"
 	sfreq: int = 250

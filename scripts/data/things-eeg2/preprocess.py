@@ -15,7 +15,7 @@ def _make_configs_from_args(args: argparse.Namespace) -> ThingsEEG2DatasetPrepro
 		sfreq=args.sfreq,
 		mvnn_dim=args.mvnn_dim,
 		data_path=args.data_path,
-		output_dir=args.output_dir,
+		preprocessed_eeg_dir=args.preprocessed_eeg_dir,
 		raw_eeg_dir=args.raw_eeg_dir,
     )
 
