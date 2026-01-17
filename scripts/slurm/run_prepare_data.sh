@@ -28,7 +28,7 @@ echo "Dataset: $dataset"
 CLI_ARGS="${@:2}"
 echo "CLI_ARGS: $CLI_ARGS"
 
-cmd=/workspace/scripts/data/${dataset}/prepare.sh $CLI_ARGS 
+cmd="/workspace/scripts/data/${dataset}/prepare.sh $CLI_ARGS"
 echo "Preparing data with command: $cmd"
 
 ./scripts/container/run_singularity.sh $cmd
