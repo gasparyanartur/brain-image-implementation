@@ -49,8 +49,6 @@ fi
 cmd="/workspace/scripts/data/${dataset}/prepare.sh ${cli_args[@]}"
 echo "Preparing data with command: $cmd"
 
-exit 1;
-
 ./scripts/container/run_singularity.sh $cmd
 
 if [ $? -eq 0 ]; then
