@@ -11,6 +11,7 @@
 
 
 echo "Job ID: $SLURM_JOB_ID"
+echo "Array Index: $SLURM_ARRAY_TASK_ID"
 echo "Job Name: $SLURM_JOB_NAME"
 echo "Node: $SLURM_NODELIST"
 echo "Working Directory: $(pwd)"
@@ -25,11 +26,30 @@ fi
 dataset=$1
 echo "Dataset: $dataset"
 
-CLI_ARGS="${@:2}"
-echo "CLI_ARGS: $CLI_ARGS"
+cli_args=("${@:2}")
+echo "cli_args: ${cli_args[@]}"
 
-cmd="/workspace/scripts/data/${dataset}/prepare.sh $CLI_ARGS"
+# If sub is not defined, we check if it's a slurm array. 
+# If it is, we set sub to the array index.
+has_sub=0
+for arg in ${cli_args[@]}; do
+    if [[ $arg == "--sub" ]]; then
+        has_sub=1
+        break   
+    fi
+done
+if [ $has_sub == 0 ]; then
+    if [ -n "$SLURM_ARRAY_TASK_ID" ]; then
+        echo "Sub not defined, setting to array index $SLURM_ARRAY_TASK_ID"  
+        cli_args+=(--sub $SLURM_ARRAY_TASK_ID)
+    fi
+fi
+
+
+cmd="/workspace/scripts/data/${dataset}/prepare.sh ${cli_args[@]}"
 echo "Preparing data with command: $cmd"
+
+exit 1;
 
 ./scripts/container/run_singularity.sh $cmd
 
