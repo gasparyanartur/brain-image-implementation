@@ -69,7 +69,7 @@ if __name__ == "__main__":
 	parser.add_argument('--sfreq', default=250, type=int)
 	parser.add_argument('--mvnn_dim', default='epochs', type=str)
 	parser.add_argument("-d", "--data_path", default="data/things-eeg2")
-	parser.add_argument("--output_dir", type=str, default='preprocessed-eeg')
+	parser.add_argument("--preprocessed_eeg_dir", type=str, default='preprocessed-eeg')
 	parser.add_argument("--raw_eeg_dir", type=str, default="raw-eeg")
 	parser.add_argument("--seed", type=int, default=42)
 	args = parser.parse_args()

@@ -12,7 +12,7 @@ declare -A download_member=(
     ["--subs"]=1
     ["-s"]=1
     ["--raw_eeg_dir"]=1
-    ["--stim_dir"]=1
+    ["--img_dir"]=1
 )
 
 declare -A preprocess_member=(

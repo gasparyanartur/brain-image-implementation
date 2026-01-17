@@ -221,7 +221,7 @@ if __name__ == "__main__":
         help="MVNN mode (off to skip whitening)",
     )
     parser.add_argument("-d", "--data_path", type=Path, default="data/alljoined-1.6m")
-    parser.add_argument("--output_dir", type=str, default="preprocessed-eeg")
+    parser.add_argument("--preprocessed_eeg_dir", type=str, default="preprocessed-eeg")
     parser.add_argument("--raw_eeg_dir", type=str, default="raw-eeg")
     parser.add_argument(
         "--verbose",
