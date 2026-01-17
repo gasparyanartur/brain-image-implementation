@@ -648,14 +648,17 @@ def download_to_file(
     skip_if_exists: bool = True,
     backend: Literal["gdown", "requests"] = "requests",
 ):
+    def _log(s):
+        if verbose:
+            logging.info(s)
+
     if skip_if_exists and file_path.exists():
-        logging.info(f"File {file_path} already exists, skipping download")
+        _log(f"File {file_path} already exists, skipping download")
         return
 
-    if verbose:
-        logging.info(
-            f"Downloading file from {url} to {file_path} with backend {backend}"
-        )
+    _log(
+        f"Downloading file from {url} to {file_path} with backend {backend}"
+    )
 
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -666,6 +669,8 @@ def download_to_file(
         response = requests.get(url, stream=True, headers=headers)
         total_size = int(response.headers.get("content-length", 0))
         written_size = 0
+
+        _log(f"Using requests backend, saving in {file_path}")
         with open(file_path, "wb") as f:
             with tqdm.tqdm(
                 response.iter_content(chunk_size=chunk_size),
@@ -689,7 +694,14 @@ def download_to_file(
                 f"Downloaded size does not match expected size: {written_size} != {total_size}"
             )
     elif backend == "gdown":
+        _log(f"Using gdown backend, saving in {file_path}")
         gdown.download(output=str(file_path), id=url)
+
+
+    if not file_path.exists():
+        raise ValueError(f"Failed to download {url} to {file_path}")
+    else:
+        _log(f"Successfully downloaded {url} to {file_path}")
 
 
 def merge_data(
