@@ -23,7 +23,6 @@ import tqdm
 from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
 import multiprocessing as mp
 
-from brain_image.data.things_eeg2_dataset import ThingsEEG2DatasetFactory
 from brain_image.model.eeg_encoder.eeg_encoder import EEG_ENCODER
 from brain_image.model.img_encoder import IMAGE_ENCODER
 
@@ -284,15 +283,19 @@ class EEGDataModule(DataModule):
         embeddings_stats = self.get_embeddings_stats()
         logging.info(f"Got embedding stats for: {embeddings_stats.keys()}")
 
-        match config.dataset:
+        self.factory = self._create_factory(config, tensor_cache, embeddings_map)
+
+        super().__init__(config, embedding_stats=embeddings_stats)
+
+    def _create_factory(self, config, tensor_cache, embeddings_map) -> EEGDatasetFactory:
+        match config.factory:
             case "things-eeg2":
-                self.factory = ThingsEEG2DatasetFactory(self.config, self.tensor_cache, self.embeddings_map) # type: ignore
+                from brain_image.data.things_eeg2_dataset import ThingsEEG2DatasetFactory
+                return ThingsEEG2DatasetFactory(config, tensor_cache, embeddings_map) # type: ignore
             case "alljoined":
                 raise NotImplementedError
             case _:
                 raise ValueError(f"Unrecognized dataset type: {config.dataset}")
-
-        super().__init__(config, embedding_stats=embeddings_stats)
 
     def get_metadata(self) -> dict:
         return {}
@@ -336,6 +339,7 @@ class EEGDataset(Dataset):
         self,
         config: EEGDatasetConfig,
         split: Literal["train", "val", "test"],
+        sub: int,
         tensor_cache: TensorCache | None = None,
         embeddings_map: LatentTypeMapT | None = None,
         embeddings_to_compute_stats: Sequence[str] = ("prior_img_latent",),
@@ -357,6 +361,7 @@ class EEGDataset(Dataset):
 
         self.config = config
         self.split: Literal["train", "val", "test"] = split
+        self.sub: int = sub
         self.tensor_cache = tensor_cache
         self.embeddings_map = embeddings_map
         self.embeddings_to_compute_stats = embeddings_to_compute_stats
@@ -364,13 +369,14 @@ class EEGDataset(Dataset):
         self.compute_stats = compute_stats
         self.embedding_stats: dict[LatentTypeT, LatentStats] = {}
 
+        logging.info(f"Reducing dataset size to {limit_size * 100:.2f}%")
+        self.limit_data_size(limit_size, limit_shuffle)
+        logging.info(f"Reduced dataset size to: {len(self)}")
+
         logging.info(f"Preparing {split} dataset...")
         self.prepare()
         logging.info(f"Prepared dataset of size: {len(self)}")
 
-        logging.info(f"Reducing dataset size to {limit_size * 100:.2f}%")
-        self.limit_data_size(limit_size, limit_shuffle)
-        logging.info(f"Reduced dataset size to: {len(self)}")
 
         if preload_cache:
             self._preload_cache()

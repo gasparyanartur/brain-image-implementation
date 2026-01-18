@@ -370,11 +370,11 @@ def save_prepr(
 	del merged_test
 
 	# Saving directories
-	file_name_test = "preprocessed_eeg_test.npy"
-	file_name_train = "preprocessed_eeg_training.npy"
+	file_name_test = "test.npy"
+	file_name_train = "training.npy"
 
 	# Create the directory if not existing and save the data
-	preprocessed_eeg_dir = args.data_path / args.preprocessed_eeg_dir
+	preprocessed_eeg_dir = args.data_path / args.preprocessed_eeg_dir / f"sub-{args.sub:02}"
 	if not preprocessed_eeg_dir.exists():
 		preprocessed_eeg_dir.mkdir(parents=True, exist_ok=True)
 
