@@ -6,8 +6,11 @@ import torch
 from brain_image.data.data import (
     EEGDataset,
     EEGDatasetConfig,
+    EEGDatasetFactory,
     EEGSampleT,
+    LatentStats,
     LatentTypeMapT,
+    LatentTypeT,
     TensorCache,
 )
 
@@ -23,9 +26,9 @@ class ThingsEEG2Dataset(EEGDataset):
         tensor_cache: TensorCache | None = None,
         embeddings_map: LatentTypeMapT | None = None,
         standardize_embeddings: Sequence[str] = ("prior_img_latent",),
-        limit_size: float = 1.0,
+        limit_size: float | None = None,
         limit_shuffle: bool = True,
-        preload_cache: bool = True,
+        preload_cache: bool | None = None,
     ):
         super().__init__(
             config,
@@ -83,7 +86,26 @@ class ThingsEEG2Dataset(EEGDataset):
             "eeg_data": item["eeg"],
             "idx": item["idx"],
             "sub": item["sub"],
-            **self._get_embeddings(item["img_path"]),
+            **self.get_embeddings(item["img_path"]),
         }
 
         return sample
+
+
+
+class ThingsEEG2DatasetFactory(EEGDatasetFactory):
+    def __init__(self, config: ThingsEEG2DatasetConfig, tensorcache: TensorCache, embeddings_map: LatentTypeMapT):
+        self.config = config
+        self.tensorcache = tensorcache
+        self.embeddings_map = embeddings_map
+
+    def create_dataset(self, split: Literal["train", "val", "test"], **dataset_kwargs) -> EEGDataset: 
+        return ThingsEEG2Dataset(
+            self.config,
+            split=split,
+            tensor_cache=self.tensorcache,
+            embeddings_map=self.embeddings_map,
+            limit_size=self.config.get_limit_size(split),
+            limit_shuffle=split == "train",
+            preload_cache=self.config.preload_cache,
+        )

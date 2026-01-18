@@ -7,7 +7,7 @@ import hashlib
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Iterable, Literal, Sequence, TypedDict, cast
+from typing import Iterable, Literal, Sequence, TypedDict, Union, cast
 
 import gdown
 import numpy as np
@@ -23,8 +23,40 @@ import tqdm
 from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
 import multiprocessing as mp
 
+from brain_image.data.things_eeg2_dataset import ThingsEEG2DatasetFactory
+from brain_image.model.eeg_encoder.eeg_encoder import EEG_ENCODER
 from brain_image.model.img_encoder import IMAGE_ENCODER
-from brain_image.utils import flatten_configs
+
+
+LatentTypeT = Literal[
+    "prior_img_latent", "eeg_latent", "align_img_latent", "low_level_latent"
+]
+EncoderTypeT = Union[EEG_ENCODER, IMAGE_ENCODER]
+
+
+class LatentTypeMapT(TypedDict):
+    """Maps the role of the latent to the specific encoder used."""
+
+    align_img_latent: IMAGE_ENCODER | None
+    prior_img_latent: IMAGE_ENCODER | None
+    low_level_latent: IMAGE_ENCODER | None
+    eeg_latent: EEG_ENCODER | None
+
+
+class LatentGroupT(TypedDict):
+    """A collection of latents."""
+
+    align_img_latent: torch.Tensor | None
+    prior_img_latent: torch.Tensor | None
+    low_level_latent: torch.Tensor | None
+    eeg_latent: EEG_ENCODER | None
+
+
+class EEGSampleT(LatentGroupT):
+    img_path: str
+    idx: int
+    sub: int
+    eeg_data: torch.Tensor
 
 
 class DataConfig(BaseConfig, ABC):
@@ -73,6 +105,7 @@ class DataConfig(BaseConfig, ABC):
 
 class EEGDatasetConfig(DataConfig):
     data_path: Path = Path("data") / "things-eeg2"
+    dataset: Literal["things-eeg2", "alljoined"]
 
     imgs_dir: str = "imgs"
 
@@ -87,41 +120,29 @@ class TensorCache:
     def __init__(
         self,
         cache_path: Path = Path("tensorcache"),
-        memory_cache_size: int = 1024 * 1024,
-        use_encrypt: bool = False,
-        overwrite: bool = True,
     ):
         self.cache_path = cache_path
         self.cache_path.mkdir(parents=True, exist_ok=True)
 
-        self._path_cache = {}
+    @lru_cache(maxsize=1024 * 1024)
+    @staticmethod
+    def _load_tensor_from_path(path: Path) -> Tensor:
+        tensor = torch.load(path)
+        return tensor
 
-        self.memory_cache_size = memory_cache_size
-        self.memory_cache = {}
-        self.memory_cache_keys = []
-        self.use_encrypt = use_encrypt
-        self.overwrite = overwrite
+    @staticmethod
+    def _encode_keys(keys: tuple[str, ...]) -> str:
+        return "/".join(keys)
 
-    def _get_tensor_path(self, *keys: str) -> Path:
-        keys = tuple(keys)
-        if keys in self._path_cache:
-            return self._path_cache[keys]
-
-        encoded_path = self._encode_keys(*keys, use_encrypt=self.use_encrypt)
+    def _get_tensor_path(self, keys: Sequence[str]) -> Path:
+        encoded_path = self._encode_keys(tuple(keys))
         full_path = self.cache_path / encoded_path
         full_path = full_path.with_suffix(".pt")
-        self._path_cache[keys] = full_path
         return full_path
 
     def save(self, tensor: torch.Tensor, *keys: str):
         path = self._get_tensor_path(*keys)
-        self._add_to_memory_cache(path, tensor)
-
         path.parent.mkdir(parents=True, exist_ok=True)
-
-        if path.exists() and not self.overwrite:
-            raise FileExistsError(f"File already exists: {path}")
-
         torch.save(tensor, path)
 
     def batch_get(
@@ -140,31 +161,29 @@ class TensorCache:
 
     def get(self, *keys: str) -> torch.Tensor:
         path = self._get_tensor_path(*keys)
-        if path in self.memory_cache:
-            return self.memory_cache[path]
+        tensor = self._load_tensor_from_path(path)
 
-        tensor = torch.load(path)
-
-        self._add_to_memory_cache(path, tensor)
         return tensor
 
-    def _add_to_memory_cache(self, path: Path, tensor: torch.Tensor):
-        self.memory_cache_keys.append(path)
-        self.memory_cache[path] = tensor
+    def get_latent(
+        self,
+        source_path: Path,
+        model_name: EncoderTypeT,
+        split: Literal["train", "val", "test"],
+    ) -> Tensor:
+        split = "train" if split == "train" else "test"
+        return self.get(str(source_path), model_name, split)
 
-        if len(self.memory_cache_keys) > self.memory_cache_size:
-            oldest_key = self.memory_cache_keys.pop(0)
-            self.memory_cache.pop(oldest_key)
 
-    @staticmethod
-    def _encode_keys(*keys: str, use_encrypt: bool = False) -> str:
-        if use_encrypt:
-            h = hashlib.sha1()
-            for key in keys:
-                h.update(key.encode())
-            return h.hexdigest()
-        else:
-            return "/".join(keys)
+class EEGDatasetFactory(ABC):
+    def __init__(self, config: EEGDatasetConfig, tensorcache: TensorCache, embeddings_map: dict[LatentTypeT, LatentStats]):
+        self.config = config
+        self.tensorcache = tensorcache
+        self.embeddings_map = embeddings_map
+
+    @abstractmethod
+    def create_dataset(self, split: Literal["train", "val", "test"], **dataset_kwargs) -> EEGDataset: 
+        raise NotImplementedError
 
 
 class DataModule(LightningDataModule, ABC):
@@ -216,7 +235,7 @@ class DataModule(LightningDataModule, ABC):
 
         return num_batches
 
-    def _get_dataset(self, split: Literal["train", "val", "test"]) -> Dataset:
+    def get_dataset(self, split: Literal["train", "val", "test"]) -> Dataset:
         if (dataset := self.datasets.get(split)) is not None:
             return dataset
 
@@ -240,25 +259,6 @@ class DataModule(LightningDataModule, ABC):
             del self.dataloaders[key]
 
 
-class LatentTypeMapT(TypedDict):
-    align_img_latent: IMAGE_ENCODER | None
-    prior_img_latent: IMAGE_ENCODER | None
-    low_level_latent: IMAGE_ENCODER | None
-
-
-class LatentGroupT(TypedDict):
-    align_img_latent: torch.Tensor | None
-    prior_img_latent: torch.Tensor | None
-    low_level_latent: torch.Tensor | None
-
-
-class EEGSampleT(LatentGroupT):
-    img_path: str
-    idx: int
-    sub: int
-    eeg_data: torch.Tensor
-
-
 class EEGDataModule(DataModule):
     def __init__(
         self,
@@ -272,6 +272,7 @@ class EEGDataModule(DataModule):
             "align_img_latent": None,
             "prior_img_latent": None,
             "low_level_latent": None,
+            "eeg_latent": None,
         }
         embeddings_to_compute_stats = embeddings_to_compute_stats or []
 
@@ -280,24 +281,24 @@ class EEGDataModule(DataModule):
         self.embeddings_map = embeddings_map
         self.embeddings_to_compute_stats = embeddings_to_compute_stats
 
-        embeddings_stats = self._get_embeddings_stats()
+        embeddings_stats = self.get_embeddings_stats()
         logging.info(f"Got embedding stats for: {embeddings_stats.keys()}")
+
+        match config.dataset:
+            case "things-eeg2":
+                self.factory = ThingsEEG2DatasetFactory(self.config, self.tensor_cache, self.embeddings_map) # type: ignore
+            case "alljoined":
+                raise NotImplementedError
+            case _:
+                raise ValueError(f"Unrecognized dataset type: {config.dataset}")
 
         super().__init__(config, embedding_stats=embeddings_stats)
 
     def get_metadata(self) -> dict:
         return {}
 
-    def _create_dataset(self, split: Literal["train", "val", "test"]) -> EEGDataset:
-        return EEGDataset(
-            self.config,
-            split=split,
-            tensor_cache=self.tensor_cache,
-            embeddings_map=self.embeddings_map,
-            limit_size=self.config.get_limit_size(split),
-            limit_shuffle=split == "train",
-            preload_cache=self.config.preload_cache,
-        )
+    def _create_dataset(self, split: Literal["train", "val", "test"], **dataset_kwargs) -> EEGDataset:
+        return  self.factory.create_dataset(split, **dataset_kwargs)
 
     def _create_dataloader(
         self,
@@ -327,13 +328,97 @@ class EEGDataModule(DataModule):
         }
         dataloader_args.update(kwargs)
 
-        dataset = self._get_dataset(split)
+        dataset = self.get_dataset(split)
         return torch.utils.data.DataLoader(
             dataset,
             **dataloader_args,
         )
 
-    def _get_embeddings_stats(self):
+    def get_dataset(self, split: Literal["train", "val", "test"]) -> EEGDataset:
+        return cast(EEGDataset, super().get_dataset(split))
+
+    def get_embeddings_stats(self):
+        return self.get_dataset("train").get_embedding_stats()
+
+class EEGDataset(Dataset):
+    def __init__(
+        self,
+        config: EEGDatasetConfig,
+        split: Literal["train", "val", "test"],
+        tensor_cache: TensorCache | None = None,
+        embeddings_map: LatentTypeMapT | None = None,
+        embeddings_to_compute_stats: Sequence[str] = ("prior_img_latent",),
+        limit_size: float | None = None,
+        limit_shuffle: bool = True,
+        preload_cache: bool | None = None,
+        compute_stats: bool | None = None,
+    ):
+        tensor_cache = tensor_cache or TensorCache()
+        embeddings_map = embeddings_map or {
+            "align_img_latent": None,
+            "prior_img_latent": None,
+            "low_level_latent": None,
+            "eeg_latent": None,
+        }
+        compute_stats = split == "train" if compute_stats is None else compute_stats
+        limit_size = config.get_limit_size(split) if limit_size is None else limit_size
+        preload_cache = config.preload_cache if preload_cache is None else preload_cache
+
+        self.config = config
+        self.split: Literal["train", "val", "test"] = split
+        self.tensor_cache = tensor_cache
+        self.embeddings_map = embeddings_map
+        self.embeddings_to_compute_stats = embeddings_to_compute_stats
+        self.limit_size = limit_size
+        self.compute_stats = compute_stats
+        self.embedding_stats: dict[LatentTypeT, LatentStats] = {}
+
+        logging.info(f"Preparing {split} dataset...")
+        self.prepare()
+        logging.info(f"Prepared dataset of size: {len(self)}")
+
+        logging.info(f"Reducing dataset size to {limit_size * 100:.2f}%")
+        self.limit_data_size(limit_size, limit_shuffle)
+        logging.info(f"Reduced dataset size to: {len(self)}")
+
+        if preload_cache:
+            self._preload_cache()
+
+        if compute_stats:
+            self.embedding_stats = self._compute_embedding_stats()
+
+    @abstractmethod
+    def get_image_paths(self) -> list[Path]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def __len__(self) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def __getitem__(self, idx: int) -> EEGSampleT:
+        raise NotImplementedError
+
+    @abstractmethod
+    def prepare(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def limit_data_size(self, limit_size: float, limit_shuffle: bool = True) -> None:
+        raise NotImplementedError
+
+    def get_embeddings(self, img_path: Path) -> LatentGroupT:
+        return cast(
+            LatentGroupT,
+            {
+                key: self._get_image_latent_from_cache(img_path, cast(EncoderTypeT, value), self.split)
+                for key, value in self.embeddings_map.items()
+                if value is not None
+            },
+        )
+
+    def _compute_embedding_stats(self) -> dict[LatentTypeT, LatentStats]:
+        img_paths = self.get_image_paths()
         img_dir_path = self.config.data_path / self.config.imgs_dir / "training_images"
         img_paths = list(img_dir_path.rglob("*.jpg"))
 
@@ -349,82 +434,23 @@ class EEGDataModule(DataModule):
             split="train",
         )
 
+        # Convert from specific encoder name to general encoding role
+        # E.g. ATMS -> EEG_encoder
         mapped_stats = {
             k: embedding_stats[v]
             for k, v in self.embeddings_map.items()
             if v in embedding_stats
         }
+        mapped_stats = cast(dict[LatentTypeT, LatentStats], mapped_stats)
         return mapped_stats
 
-
-class EEGDataset(Dataset):
-    def __init__(
-        self,
-        config: EEGDatasetConfig,
-        split: Literal["train", "val", "test"],
-        tensor_cache: TensorCache | None = None,
-        embeddings_map: LatentTypeMapT | None = None,
-        standardize_embeddings: Sequence[str] = ("prior_img_latent",),
-        limit_size: float = 1.0,
-        limit_shuffle: bool = True,
-        preload_cache: bool = True,
-    ):
-        tensor_cache = tensor_cache or TensorCache()
-        embeddings_map = embeddings_map or {
-            "align_img_latent": None,
-            "prior_img_latent": None,
-            "low_level_latent": None,
-        }
-
-        self.config = config
-        self.split: Literal["train", "val", "test"] = split
-        self.tensor_cache = tensor_cache
-        self.embeddings_map = embeddings_map
-        self.standardize_embeddings = standardize_embeddings
-        self.limit_size = limit_size
-
-        logging.info(f"Preparing {split} dataset...")
-        self.prepare()
-        logging.info(f"Prepared dataset of size: {len(self)}")
-
-        logging.info(f"Reducing dataset size to {limit_size * 100:.2f}%")
-        self.limit_data_size(limit_size, limit_shuffle)
-        logging.info(f"Reduced dataset size to: {len(self)}")
-
-        if preload_cache:
-            self._preload_cache()
-
-    @abstractmethod
-    def __len__(self) -> int:
-        raise NotImplementedError
-
-    @abstractmethod
-    def __getitem__(self, idx: int) -> EEGSampleT:
-        raise NotImplementedError
-        
-    @abstractmethod
-    def prepare(self) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def limit_data_size(self, limit_size: float, limit_shuffle: bool = True) -> None:
-        raise NotImplementedError
-
-    def _get_embeddings(self, img_path: Path) -> LatentGroupT:
-        return cast(
-            LatentGroupT,
-            {
-                key: self._get_image_latent_from_cache(img_path, str(value), self.split)
-                for key, value in self.embeddings_map.items()
-                if value is not None
-            },
-        )
-
     def _get_image_latent_from_cache(
-        self, img_path: Path, model_name: str, split: Literal["train", "val", "test"]
+        self,
+        img_path: Path,
+        model_name: EncoderTypeT,
+        split: Literal["train", "val", "test"],
     ) -> torch.Tensor:
-        split = "train" if split == "train" else "test"
-        return self.tensor_cache.get(str(img_path), model_name, split)
+        return self.tensor_cache.get_latent(img_path, model_name, split)
 
     def _preload_cache(self, parallel: bool = True):
         if parallel:
@@ -438,6 +464,9 @@ class EEGDataset(Dataset):
         else:
             for i in tqdm.tqdm(range(len(self)), desc="Preloading latents"):
                 self.__getitem__(i)
+
+    def get_embedding_stats(self) -> dict[LatentTypeT, LatentStats]: 
+        return self.embedding_stats
 
 
 def load_image_from_path(path: Path | str, mode: str | None = None) -> Tensor:
@@ -598,17 +627,28 @@ def load_all_eeg_data(
     return torch.stack(all_eeg_data), torch.stack(all_idxs), all_times, all_ch_names
 
 
+class LatentStats(TypedDict):
+    mean: Tensor
+    std: Tensor
+    min: Tensor
+    max: Tensor
+    norm: Tensor
+
+
 @torch.no_grad()
 def get_embeddings_stats(
     tensorcache: TensorCache,
     img_paths: list[Path],
     embedding_names: list[IMAGE_ENCODER],
     split: Literal["train", "test"],
-) -> dict[str, dict[str, torch.Tensor]]:
+) -> dict[IMAGE_ENCODER, LatentStats]:
+    """Compute a mapping from encoder name to stats.
+    E.g. stable_diffusion_v2 -> {mean: 0, std: 1}..."""
+
     logging.info(
         f"Getting embedding stats for {embedding_names} - {len(img_paths)} images"
     )
-    _running_embeddings = {}
+    _running_embeddings: dict[IMAGE_ENCODER, Tensor] = {}
 
     for emb_name in embedding_names:
         arg_list = ((str(img_path), emb_name, split) for img_path in img_paths)
@@ -616,11 +656,7 @@ def get_embeddings_stats(
 
     logging.info(f"Keys gathered: {_running_embeddings.keys()}")
 
-    _running_latents = _running_embeddings
-
-    logging.info(f"Finished getting embeddings {_running_latents.keys()}")
-
-    embedding_stats: dict[str, dict[str, torch.Tensor]] = {
+    embedding_stats: dict[IMAGE_ENCODER, LatentStats] = {
         k: {
             "mean": torch.mean(v, dim=0),
             "std": torch.std(v, dim=0),
@@ -628,7 +664,7 @@ def get_embeddings_stats(
             "max": torch.max(v, dim=0).values,
             "norm": v.norm(dim=-1).mean(),
         }
-        for k, v in _running_latents.items()
+        for k, v in _running_embeddings.items()
     }
 
     logging.info(f"Finished getting embedding stats")
