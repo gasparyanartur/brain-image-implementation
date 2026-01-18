@@ -306,16 +306,7 @@ class EEGDataModule(DataModule):
         **kwargs,
     ) -> torch.utils.data.DataLoader:
 
-        match split:
-            case "train":
-                shuffle = True
-
-            case "val":
-                shuffle = False
-
-            case "test":
-                shuffle = False
-
+        shuffle = split == "train"
         num_workers = self.config.num_workers or min(32, mp.cpu_count())
         device = get_device_str()
         dataloader_args = {
