@@ -79,6 +79,8 @@ def main(args):
                     local_dir=data_path,
                 )
 
+                shutil.move(data_path / "raw_eeg" / sub, sub_path)
+
             # The stim-order file is not downloaded with the EEG data, so we need to download it separately
             stim_order_path = sub_path / "stim_order.parquet"
             if stim_order_path.exists():
