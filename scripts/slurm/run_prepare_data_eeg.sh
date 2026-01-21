@@ -60,7 +60,7 @@ if [ $dataset == "things-eeg2" ]; then
     done
 
     if [ $has_eeg_flag -eq 0 ]; then
-       cli_args+=("--download_types" "imgs")
+       cli_args+=("--download_types" "eeg")
     fi
 
 elif [ $dataset == "alljoined-16m" ]; then
