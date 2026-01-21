@@ -13,6 +13,8 @@ declare -A download_member=(
     ["-s"]=1
     ["--raw_eeg_dir"]=1
     ["--img_dir"]=1
+    ["-t"]=1
+    ["--download_types"]=1
 )
 
 declare -A preprocess_member=(
