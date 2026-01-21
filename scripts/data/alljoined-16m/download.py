@@ -8,6 +8,7 @@ import huggingface_hub
 
 from brain_image.utils import setup_logging
 import tempfile
+import shutil
 
 
 ALLJOINED_URL = "Alljoined/Alljoined-1.6M"
@@ -105,7 +106,7 @@ def main(args):
                     ), f"Expected exactly one stim_order.parquet file for {sub}, found {len(_found_path)}"
 
                     _found_path = cast(Path, _found_path[0])
-                    _found_path.rename(stim_order_path)
+                    shutil.move(_found_path, stim_order_path)
 
 
 if __name__ == "__main__":
