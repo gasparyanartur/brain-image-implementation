@@ -23,7 +23,7 @@ def main(args):
     data_path = args["data_path"]
     data_path.mkdir(parents=True, exist_ok=True)
 
-    subs = list(args["subs"]) or list(range(1, 21))
+    subs = list(args["subs"])  if args["subs"] else  list(range(1, 21))
     sub_names = [f"sub-{sub:02d}" for sub in subs]
 
     download_types = set(args["download_types"])

@@ -1,92 +1,86 @@
-"""
-Raw EEG Data taken from https://drive.google.com/drive/folders/1KnOcV38RthPcpZR2vtiSm0jtZ6p63RNt
-Find more information here: https://osf.io/crxs4/overview"""
-
-from argparse import ArgumentParser
-import logging
 from pathlib import Path
-from typing import Literal
+import argparse
+import logging
+from typing import cast
 import zipfile
 
-import gdown
+import huggingface_hub
 
-from brain_image.data.data import download_to_file
 from brain_image.utils import setup_logging
+import tempfile
 
-# From the Things EEG2 dataset Google Drive folder
-# https://drive.google.com/drive/folders/1KnOcV38RthPcpZR2vtiSm0jtZ6p63RNt
-_THINGS_DATA_URL: dict[str, str] = {
-    "sub-01": "1GCEoU_VFAnxwhX3wOXgzpcqdMkzK2j4d",
-    "sub-02": "1fmzu5I_sP11zmARpG4up_inn8wbG4GQE",
-    "sub-03": "1gKB-9AuueH9pfbT0hIKe0hstMuCbC9m4",
-    "sub-04": "1hEJuZbw9EAXsdZk7G8Joif5V64-mrC3x",
-    "sub-05": "19Q0s9oZdlxt1Ct0VuGVwCJVo8uXMnwuS",
-    "sub-06": "1puOoIkZjWXCNWf3iIzYackAOFxmwqSH0",
-    "sub-07": "1Z-FtP6kR02N-5G9p24mdfY12z9XUhUEB",
-    "sub-08": "1mkOEFmoSyEZiIqa7fZ47Q00V0PDJxqjQ",
-    "sub-09": "1NV9bL_M2jSlL8iZ2qI69azbxiW8Pptfb",
-    "sub-10": "1f29e8A5Pr3Iu8el7aPkhJSRfd-rrAE0W",
-}
 
-_IMG_URL = "https://files.de-1.osf.io/v1/resources/y63gw/providers/osfstorage/?zip="
+THINGS_URL = "gasparyanartur/things-eeg2"
+SUB_MIN = 1
+SUB_MAX = 10
 
 
 def main(args):
     setup_logging()
-    logging.info(f"Downloading THINGS-EEG2 dataset with configs:")
+    logging.info(f"Downloaded Things EEG dataset with configs:")
+
     for k, v in args.items():
         logging.info(f"{k}: {v}")
 
     data_path = args["data_path"]
     data_path.mkdir(parents=True, exist_ok=True)
 
-    download_types = set(args["download_types"])
-
-    subs = list(args["subs"]) if args["subs"] else list(range(1, 11))
+    subs = list(args["subs"]) if args["subs"] else list(range(SUB_MIN, SUB_MAX))
     sub_names = [f"sub-{sub:02d}" for sub in subs]
 
-    if "eeg" in download_types:
-        raw_eeg_path = data_path / args["raw_eeg_dir"]
-        raw_eeg_path.mkdir(parents=True, exist_ok=True)
-        for sub in sub_names:
-            logging.info(f"Downloading {sub}...")
-
-            raw_file_path = raw_eeg_path / f"{sub}.zip"
-            extracted_path = raw_eeg_path / sub
-
-            url = _THINGS_DATA_URL[sub]
-
-            download_to_file(url, raw_file_path, verbose=True, skip_if_exists=True, backend="gdown")
-
-            logging.info(f"Extracting file to {extracted_path}")
-            with zipfile.ZipFile(raw_file_path, "r") as zf:
-                zf.extractall(extracted_path.parent)
+    download_types = set(args["download_types"])
 
     if "imgs" in download_types:
         logging.info("Downloading images...")
+        imgs_path = data_path / args["img_dir"]
 
-        img_dir = data_path / args["img_dir"]
-        imgs_zip = img_dir / "raw.zip"
-        training_img_path_zip = img_dir / "training_images.zip"
-        test_img_path_zip = img_dir / "test_images.zip"
+        train_zip_path = imgs_path / "training_images.zip"
+        test_zip_path = imgs_path / "test_images.zip"
 
-        download_to_file(_IMG_URL, imgs_zip)
+        if train_zip_path.exists() and test_zip_path.exists():
+            logging.info("Images already downloaded")
+        else:
+            logging.info("Downloading images from Hugging Face Hub...")
+            imgs_path.mkdir(parents=True, exist_ok=True)
 
-        img_dir.mkdir(parents=True, exist_ok=True)
+            huggingface_hub.snapshot_download(
+                    THINGS_URL,
+                    allow_patterns="imgs*",
+                    repo_type="dataset",
+                    local_dir=data_path,
+                )
 
-        logging.info(f"Extracting file to {img_dir}")
-        with zipfile.ZipFile(imgs_zip, "r") as zf:
-            zf.extractall(img_dir)
+        assert train_zip_path.exists() and test_zip_path.exists(), "Images not downloaded"
+        logging.info("Extracting images...")
+        with zipfile.ZipFile(train_zip_path, "r") as zip_ref:
+            zip_ref.extractall(imgs_path)
+        
+        with zipfile.ZipFile(test_zip_path, "r") as zip_ref:
+            zip_ref.extractall(imgs_path)
 
-        with zipfile.ZipFile(training_img_path_zip, "r") as zf:
-            zf.extractall(img_dir)
+    if "eeg" in download_types:
+        logging.info("Downloading EEG data...")
 
-        with zipfile.ZipFile(test_img_path_zip, "r") as zf:
-            zf.extractall(img_dir)
+        for sub in sub_names:
+            sub_path = data_path / args["raw_eeg_dir"] / sub
+            if (
+                len(list(sub_path.rglob("*/raw_eeg_training.py"))) > 0
+                and len(list(sub_path.rglob("*/raw_eeg_test.py"))) > 0
+            ):
+                logging.info(f"EEG data for {sub} already exists. Skipping download.")
+            else:
+                logging.info(f"Downloading {sub}...")
+                huggingface_hub.snapshot_download(
+                    THINGS_URL,
+                    allow_patterns=f"raw-eeg/{sub}/*",
+                    repo_type="dataset",
+                    local_dir=data_path,
+                )
+
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
+    parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--subs", type=int, nargs="+", default=None)
     parser.add_argument(
         "-d", "--data_path", type=Path, default=Path("data/things-eeg2")
