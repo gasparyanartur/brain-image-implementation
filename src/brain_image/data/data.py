@@ -104,13 +104,7 @@ class DataConfig(BaseConfig, ABC):
 
 class EEGDatasetConfig(DataConfig):
     data_path: Path = Path("data") / "things-eeg2"
-    dataset: Literal["things-eeg2", "alljoined"]
-
-    imgs_dir: str = "imgs"
-
-    prepared_eeg_dir: str = "prepared"  # Needs to be generated with "prepare_data.py"
-
-    subs: list[int] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    dataset: Literal["things-eeg2", "alljoined-eeg2"]
 
     preload_cache: bool = True
 
@@ -414,8 +408,6 @@ class EEGDataset(Dataset):
 
     def _compute_embedding_stats(self) -> dict[LatentTypeT, LatentStats]:
         img_paths = self.get_image_paths()
-        img_dir_path = self.config.data_path / self.config.imgs_dir / "training_images"
-        img_paths = list(img_dir_path.rglob("*.jpg"))
 
         embedding_types = [
             str(v)

@@ -24,6 +24,7 @@ class ThingsEEG2DatasetConfig(EEGDatasetConfig):
     img_dir: str = "imgs"
     preprocessed_eeg_dir: str = "preprocessed-eeg"
     dataset: Literal['things-eeg2', 'alljoined'] = "things-eeg2"
+    subs: list[int] = list(range(1, 11))
 
 
 class ThingsEEG2Dataset(EEGDataset):
