@@ -30,7 +30,6 @@ cli_args=("${@:2}")
 echo "cli_args: ${cli_args[@]}"
 
 # If data type is not given, we manually set
-# If it is, we set sub to the array index.
 if [ $dataset == "things-eeg2" ]; then
     has_img_flag=0
     for ((i=0; i < ${#cli_args[@]}; i++)); do

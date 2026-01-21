@@ -46,6 +46,41 @@ if [ $has_sub == 0 ]; then
 fi
 
 
+# If data type is not given, we manually set it to eeg
+if [ $dataset == "things-eeg2" ]; then
+    has_eeg_flag=0
+    for ((i=0; i < ${#cli_args[@]}; i++)); do
+        arg=${cli_args[$i]}
+        value=${cli_args[$i+1]}
+        
+        if [ [ $arg == "--download_types" ] || [ $arg == "-t" ] ] && [ $value == "eeg" ]; then
+           has_img_flag=1
+           break
+        fi
+    done
+
+    if [ $has_img_flag -eq 0 ]; then
+       cli_args+=("--download_types" "imgs")
+    fi
+
+elif [ $dataset == "alljoined-16m" ]; then
+    has_img_flag=0
+    for ((i=0; i < ${#cli_args[@]}; i++)); do
+        arg=${cli_args[$i]}
+        value=${cli_args[$i+1]}
+        
+        if [ [ $arg == "--download_types" ] || [ $arg == "-t" ] ] && [ $value == "eeg" ]; then
+           has_img_flag=1
+           break
+        fi
+    done
+
+    if [ $has_img_flag -eq 0 ]; then
+       cli_args+=("--download_types" "eeg" "stim-order")
+    fi
+fi
+
+
 cmd="/workspace/scripts/data/${dataset}/prepare.sh ${cli_args[@]}"
 echo "Preparing data with command: $cmd"
 
