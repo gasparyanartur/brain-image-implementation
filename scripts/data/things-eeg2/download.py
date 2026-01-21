@@ -34,29 +34,36 @@ def main(args):
         logging.info("Downloading images...")
         imgs_path = data_path / args["img_dir"]
 
-        train_zip_path = imgs_path / "training_images.zip"
-        test_zip_path = imgs_path / "test_images.zip"
+        train_unzipped_path = imgs_path / "training_images"
+        test_unzipped_path = imgs_path / "test_images"
 
-        if train_zip_path.exists() and test_zip_path.exists():
-            logging.info("Images already downloaded")
+        if train_unzipped_path.exists() and test_unzipped_path.exists():
+            logging.info("Images already downloaded and extracted, skipping...")
+
         else:
-            logging.info("Downloading images from Hugging Face Hub...")
-            imgs_path.mkdir(parents=True, exist_ok=True)
+            train_zip_path = imgs_path / "training_images.zip"
+            test_zip_path = imgs_path / "test_images.zip"
 
-            huggingface_hub.snapshot_download(
-                    THINGS_URL,
-                    allow_patterns="imgs*",
-                    repo_type="dataset",
-                    local_dir=data_path,
-                )
+            if train_zip_path.exists() and test_zip_path.exists():
+                logging.info("Images already downloaded")
+            else:
+                logging.info("Downloading images from Hugging Face Hub...")
+                imgs_path.mkdir(parents=True, exist_ok=True)
 
-        assert train_zip_path.exists() and test_zip_path.exists(), "Images not downloaded"
-        logging.info("Extracting images...")
-        with zipfile.ZipFile(train_zip_path, "r") as zip_ref:
-            zip_ref.extractall(imgs_path)
-        
-        with zipfile.ZipFile(test_zip_path, "r") as zip_ref:
-            zip_ref.extractall(imgs_path)
+                huggingface_hub.snapshot_download(
+                        THINGS_URL,
+                        allow_patterns="imgs*",
+                        repo_type="dataset",
+                        local_dir=data_path,
+                    )
+
+            assert train_zip_path.exists() and test_zip_path.exists(), "Images not downloaded"
+            logging.info("Extracting images...")
+            with zipfile.ZipFile(train_zip_path, "r") as zip_ref:
+                zip_ref.extractall(imgs_path)
+            
+            with zipfile.ZipFile(test_zip_path, "r") as zip_ref:
+                zip_ref.extractall(imgs_path)
 
     if "eeg" in download_types:
         logging.info("Downloading EEG data...")

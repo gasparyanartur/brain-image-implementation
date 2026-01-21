@@ -32,26 +32,32 @@ def main(args):
         logging.info("Downloading stimulus data...")
         stim_path = data_path / args["stim_dir"]
 
-        stim_zip_path = data_path / "stimuli.zip"
-        if not stim_zip_path.exists():
-            huggingface_hub.snapshot_download(
-                ALLJOINED_URL,
-                allow_patterns="stimuli*",
-                repo_type="dataset",
-                local_dir=data_path,
+        stim_unzipped_path = stim_path / "stimuli"
+        if stim_unzipped_path.exists():
+            logging.info(
+                f"Stimulus data already exists at {stim_unzipped_path}. Skipping download."
             )
         else:
-            logging.info(
-                f"Stimulus zip file already exists at {stim_zip_path}. Skipping download."
-            )
+            stim_zip_path = data_path / "stimuli.zip"
+            if not stim_zip_path.exists():
+                huggingface_hub.snapshot_download(
+                    ALLJOINED_URL,
+                    allow_patterns="stimuli*",
+                    repo_type="dataset",
+                    local_dir=data_path,
+                )
+            else:
+                logging.info(
+                    f"Stimulus zip file already exists at {stim_zip_path}. Skipping download."
+                )
 
-        assert (
-            stim_zip_path.exists()
-        ), f"Stimulus zip file not found at {stim_zip_path} after download."
+            assert (
+                stim_zip_path.exists()
+            ), f"Stimulus zip file not found at {stim_zip_path} after download."
 
-        with zipfile.ZipFile(stim_zip_path, "r") as zip_ref:
-            logging.info(f"Extracting stimulus data to {stim_path}")
-            zip_ref.extractall(stim_path)
+            with zipfile.ZipFile(stim_zip_path, "r") as zip_ref:
+                logging.info(f"Extracting stimulus data to {stim_path}")
+                zip_ref.extractall(stim_path)
 
     if "eeg" in download_types:
         logging.info("Downloading EEG data...")
