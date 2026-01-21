@@ -33,10 +33,10 @@ echo "cli_args: ${cli_args[@]}"
 if [ $dataset == "things-eeg2" ]; then
     has_img_flag=0
     for ((i=0; i < ${#cli_args[@]}; i++)); do
-        arg=${cli_args[$i]}
-        value=${cli_args[$i+1]}
+        arg="${cli_args[$i]}"
+        value="${cli_args[$i+1]}"
         
-        if [ [ $arg == "--download_types" ] || [ $arg == "-t" ] ] && [ $value == "imgs" ]; then
+        if [ $arg == "--download_types" ] || [ $arg == "-t" ] && [ $value == "imgs" ]; then
            has_img_flag=1
            break
         fi
@@ -49,10 +49,10 @@ if [ $dataset == "things-eeg2" ]; then
 elif [ $dataset == "alljoined-16m" ]; then
     has_img_flag=0
     for ((i=0; i < ${#cli_args[@]}; i++)); do
-        arg=${cli_args[$i]}
-        value=${cli_args[$i+1]}
+        arg="${cli_args[$i]}"
+        value="${cli_args[$i+1]}"
         
-        if [ [ $arg == "--download_types" ] || [ $arg == "-t" ] ] && [ $value == "stim" ]; then
+        if [ $arg == "--download_types" ] || [ $arg == "-t" ] && [ $value == "stim" ]; then
            has_img_flag=1
            break
         fi
@@ -62,9 +62,6 @@ elif [ $dataset == "alljoined-16m" ]; then
        cli_args+=("--download_types" "stim")
     fi
 fi
-
-echo ${cli_args[@]}
-exit 1
 
 cmd="/workspace/scripts/data/${dataset}/prepare.sh ${cli_args[@]}"
 echo "Preparing data with command: $cmd"
