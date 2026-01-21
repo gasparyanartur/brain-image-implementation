@@ -339,7 +339,6 @@ class EEGDataset(Dataset):
         self,
         config: EEGDatasetConfig,
         split: Literal["train", "val", "test"],
-        sub: int,
         tensor_cache: TensorCache | None = None,
         embeddings_map: LatentTypeMapT | None = None,
         embeddings_to_compute_stats: Sequence[str] = ("prior_img_latent",),
@@ -361,7 +360,6 @@ class EEGDataset(Dataset):
 
         self.config = config
         self.split: Literal["train", "val", "test"] = split
-        self.sub: int = sub
         self.tensor_cache = tensor_cache
         self.embeddings_map = embeddings_map
         self.embeddings_to_compute_stats = embeddings_to_compute_stats

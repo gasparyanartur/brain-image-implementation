@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from typing import Literal, Sequence, cast
 
 import numpy as np
@@ -16,6 +17,9 @@ from brain_image.data.data import (
 )
 
 
+def _load_eeg_from_path(path: Path) -> torch.Tensor:
+    return torch.from_numpy(np.load(path, allow_pickle=True)["preprocessed_eeg_data"])
+
 class ThingsEEG2DatasetConfig(EEGDatasetConfig):
     img_dir: str = "imgs"
     preprocessed_eeg_dir: str = "preprocessed-eeg"
@@ -27,7 +31,6 @@ class ThingsEEG2Dataset(EEGDataset):
         self,
         config: ThingsEEG2DatasetConfig,
         split: Literal["train", "val", "test"],
-        sub: int,
         tensor_cache: TensorCache | None = None,
         embeddings_map: LatentTypeMapT | None = None,
         standardize_embeddings: Sequence[str] = ("prior_img_latent",),
@@ -42,19 +45,18 @@ class ThingsEEG2Dataset(EEGDataset):
             extensions=(".jpg",),
         )
 
-        self.eeg_path = (
-            config.data_path
+        eeg_paths = [
+            (config.data_path
             / config.preprocessed_eeg_dir
             / f"sub-{sub:02}"
-            / f"{'training' if split == "train" else 'test'}.npy"
-        )
+            / f"{'training' if split == "train" else 'test'}.npy")
+        for sub in config.subs] 
 
-        self.eeg: torch.Tensor = torch.from_numpy(np.load(self.eeg_path, allow_pickle=True)["preprocessed_eeg_data"])
+        self.eeg = torch.stack([_load_eeg_from_path(eeg_path) for eeg_path in eeg_paths])  # <sub, image, channel, space, time>
 
         super().__init__(
             config,
             split,
-            sub,
             tensor_cache,
             embeddings_map,
             standardize_embeddings,
@@ -64,7 +66,7 @@ class ThingsEEG2Dataset(EEGDataset):
         )
 
     def prepare(self) -> None:
-        self.eeg: torch.Tensor = self.eeg.mean(dim=1)
+        self.eeg: torch.Tensor = self.eeg.mean(dim=2)  # <sub, image, space, time>)
 
     def get_image_paths(self):
         return self.img_paths
@@ -87,19 +89,21 @@ class ThingsEEG2Dataset(EEGDataset):
             if limit_shuffle
             else np.arange(new_size)
         )
-        self.eeg = self.eeg[idxs]
+        self.eeg = self.eeg[:, idxs]
         self.img_paths = [self.img_paths[i] for i in idxs]
 
     def __len__(self) -> int:
-        return len(self.eeg)
+        return self.eeg.shape[0] * self.eeg.shape[1]
 
     def __getitem__(self, idx: int) -> EEGSampleT:
-        img_path = self.img_paths[idx]
+        sub, img_idx = divmod(idx, self.eeg.shape[1])
+
+        img_path = self.img_paths[img_idx]
         sample = {
             "img_path": str(img_path),
-            "eeg_data": self.eeg[idx],
+            "eeg_data": self.eeg[sub, img_idx],
             "idx": idx,
-            "sub": self.sub,
+            "sub": sub + 1,
             **self.get_embeddings(img_path),
         }
 
