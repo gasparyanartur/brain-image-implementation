@@ -41,7 +41,7 @@ done
 if [ $has_sub == 0 ]; then
     if [ -n "$SLURM_ARRAY_TASK_ID" ]; then
         echo "Sub not defined, setting to array index $SLURM_ARRAY_TASK_ID"  
-        cli_args+=(--sub $SLURM_ARRAY_TASK_ID)
+        cli_args+=(-s $SLURM_ARRAY_TASK_ID)
     fi
 fi
 
