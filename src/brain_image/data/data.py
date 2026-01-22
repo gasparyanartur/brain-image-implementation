@@ -103,7 +103,7 @@ class DataConfig(BaseConfig, ABC):
 
 
 class EEGDatasetConfig(DataConfig):
-    data_path: Path = Path("data") / "things-eeg2"
+    data_path: Path 
     dataset: Literal["things-eeg2", "alljoined-eeg2"]
 
     preload_cache: bool = True

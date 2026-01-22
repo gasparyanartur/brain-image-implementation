@@ -20,7 +20,20 @@ from brain_image.data.data import (
 def _load_eeg_from_path(path: Path) -> torch.Tensor:
     return torch.from_numpy(np.load(path, allow_pickle=True)["preprocessed_eeg_data"])
 
+def load_eeg_values(eeg_path: Path, subs: list[int], split: Literal["train", "test"]) -> torch.Tensor:
+    file_name = "training.npy" if split == "train" else "test.npy"
+    eeg_paths = [
+            eeg_path
+            / f"sub-{sub:02}"
+            / file_name
+        for sub in subs
+    ] 
+    eeg = torch.stack([_load_eeg_from_path(eeg_path) for eeg_path in eeg_paths])  # <sub, image, channel, space, time>
+    return eeg
+
+
 class ThingsEEG2DatasetConfig(EEGDatasetConfig):
+    data_path: Path = Path("data/things-eeg2")
     img_dir: str = "imgs"
     preprocessed_eeg_dir: str = "preprocessed-eeg"
     dataset: Literal['things-eeg2', 'alljoined'] = "things-eeg2"
@@ -45,16 +58,8 @@ class ThingsEEG2Dataset(EEGDataset):
             split="train" if split == "train" else "test",
             extensions=(".jpg",),
         )
-
-        eeg_paths = [
-            (config.data_path
-            / config.preprocessed_eeg_dir
-            / f"sub-{sub:02}"
-            / f"{'training' if split == "train" else 'test'}.npy")
-        for sub in config.subs] 
-
-        self.eeg = torch.stack([_load_eeg_from_path(eeg_path) for eeg_path in eeg_paths])  # <sub, image, channel, space, time>
-
+        self.eeg = load_eeg_values(config.data_path / config.preprocessed_eeg_dir, config.subs, split="train" if split == "train" else "test")
+         
         super().__init__(
             config,
             split,
