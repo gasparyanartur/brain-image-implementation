@@ -134,9 +134,20 @@ class TensorCache:
         return full_path
 
     def save(self, tensor: torch.Tensor, *keys: str):
-        path = self._get_tensor_path(*keys)
+        path = self._get_tensor_path(keys)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(tensor, path)
+
+    def batch_save(self, args: Iterable[tuple], parallel: bool = True) -> None:
+        if parallel:
+            with mp.Pool() as pool:
+                pool.starmap(self.save, args)
+
+        else:
+            for arg in args:
+                tensor, *keys = arg
+                self.save(tensor, *cast(Sequence[str], keys))
+
 
     def batch_get(
         self, items: Iterable[Iterable[str]], parallel: bool = True
@@ -153,7 +164,7 @@ class TensorCache:
         return torch.stack(item_list, dim=0)
 
     def get(self, *keys: str) -> torch.Tensor:
-        path = self._get_tensor_path(*keys)
+        path = self._get_tensor_path(keys)
         tensor = self._load_tensor_from_path(path)
 
         return tensor

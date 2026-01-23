@@ -48,8 +48,12 @@ def run_generation(
 
                 latent = encoder.encode(imgs).detach().cpu()
 
-                for i_path, path in enumerate(paths):
-                    cache.save(latent[i_path], str(path), *encoder_configs)
+                cache_save_args = [
+                    (latent[i_path], str(path), *encoder_configs) for i_path, path in enumerate(paths)
+                ]
+                cache.batch_save(cache_save_args, parallel=False)
+
+                pbar.update(1)
 
     logging.info(f"Finished generating {split} embeddings for model {model_name}")
 
