@@ -1,0 +1,9 @@
+defaults:
+  - eeg_dataset
+  - _self_
+
+#subs: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+_target_: brain_image.data.alljoined_eeg2_dataset.AlljoinedEEG2DatasetConfig
+subs: [1]
+data_path: data/alljoined-1.6m
+dataset: alljoined-eeg2

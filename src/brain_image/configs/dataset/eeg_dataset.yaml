@@ -1,5 +1,3 @@
-data_path: data/things-eeg2
-
 batch_size: 256
 val_batch_size: null
 test_batch_size: null

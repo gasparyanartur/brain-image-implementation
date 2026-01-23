@@ -187,7 +187,7 @@ class EEGDatasetFactory(ABC):
 
 
 class DataModule(LightningDataModule, ABC):
-    def __init__(self, config: DataConfig, embedding_stats: dict = {}):
+    def __init__(self, config: DataConfig):
         super().__init__()
 
         self.config = config
@@ -202,7 +202,7 @@ class DataModule(LightningDataModule, ABC):
         }
         self.dataloaders: dict[str, torch.utils.data.DataLoader | None] = {}
 
-        self.embedding_stats = embedding_stats or {}
+        self.embedding_stats = {}
 
     @abstractmethod
     def get_metadata(self) -> dict:
@@ -267,6 +267,8 @@ class EEGDataModule(DataModule):
         embeddings_map: LatentTypeMapT | None = None,
         embeddings_to_compute_stats: list[IMAGE_ENCODER] | None = None,
     ):
+        super().__init__(config)
+
         tensor_cache = tensor_cache or TensorCache()
         embeddings_map = embeddings_map or {
             "align_img_latent": None,
@@ -275,32 +277,32 @@ class EEGDataModule(DataModule):
             "eeg_latent": None,
         }
         embeddings_to_compute_stats = embeddings_to_compute_stats or []
-
         self.config: EEGDatasetConfig = config
         self.tensor_cache = tensor_cache
         self.embeddings_map = embeddings_map
         self.embeddings_to_compute_stats = embeddings_to_compute_stats
-
-        embeddings_stats = self.get_embeddings_stats()
-        logging.info(f"Got embedding stats for: {embeddings_stats.keys()}")
-
         self.factory = self._create_factory(config, tensor_cache, embeddings_map)
 
-        super().__init__(config, embedding_stats=embeddings_stats)
+        self.embeddings_stats = self.get_embeddings_stats()
+        logging.info(f"Got embedding stats for: {self.embeddings_stats.keys()}")
+
+
 
     def _create_factory(
         self, config, tensor_cache, embeddings_map
     ) -> EEGDatasetFactory:
-        match config.factory:
+        match config.dataset:
             case "things-eeg2":
                 from brain_image.data.things_eeg2_dataset import (
                     ThingsEEG2DatasetFactory,
                 )
-
                 return ThingsEEG2DatasetFactory(config, tensor_cache, embeddings_map)  # type: ignore
-            case "alljoined":
-                raise NotImplementedError
-            case _:
+            case "alljoined-eeg2":
+                from brain_image.data.alljoined_eeg2_dataset import (
+                    AlljoinedEEG2DatasetFactory
+                )   
+                return AlljoinedEEG2DatasetFactory(config, tensor_cache, embeddings_map)  # type: ignore
+            case _:         
                 raise ValueError(f"Unrecognized dataset type: {config.dataset}")
 
     def get_metadata(self) -> dict:

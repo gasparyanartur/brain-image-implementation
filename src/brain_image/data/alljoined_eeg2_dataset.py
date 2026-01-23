@@ -11,6 +11,7 @@ import torch
 from brain_image.data.data import (
     EEGDataset,
     EEGDatasetConfig,
+    EEGDatasetFactory,
     EEGSampleT,
     LatentTypeMapT,
     TensorCache,
@@ -202,3 +203,30 @@ class AlljoinedEEG2Dataset(EEGDataset):
             **self.get_embeddings(img_path),
         }
         return cast(EEGSampleT, sample)
+
+
+
+class AlljoinedEEG2DatasetFactory(EEGDatasetFactory):
+    def __init__(
+        self,
+        config: AlljoinedEEG2DatasetConfig,
+        tensorcache: TensorCache,
+        embeddings_map: LatentTypeMapT,
+    ):
+        self.config = config
+        self.tensorcache = tensorcache
+        self.embeddings_map = embeddings_map
+
+    def create_dataset(
+        self, split: Literal["train", "val", "test"], **dataset_kwargs
+    ) -> EEGDataset:
+        return AlljoinedEEG2Dataset(
+            self.config,
+            split=split,
+            tensor_cache=self.tensorcache,
+            embeddings_map=self.embeddings_map,
+            limit_size=self.config.get_limit_size(split),
+            limit_shuffle=split == "train",
+            preload_cache=self.config.preload_cache,
+            **dataset_kwargs
+        )

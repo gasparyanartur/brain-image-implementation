@@ -139,4 +139,5 @@ class ThingsEEG2DatasetFactory(EEGDatasetFactory):
             limit_size=self.config.get_limit_size(split),
             limit_shuffle=split == "train",
             preload_cache=self.config.preload_cache,
+            **dataset_kwargs,
         )

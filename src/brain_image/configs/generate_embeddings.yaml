@@ -1,14 +1,14 @@
 defaults:
   - base
+  - dataset: things-eeg2
   - _self_
 
-model_names: 
+model_names:
 - aligned_synclr_vitb16
 - unaligned_synclr_vitb16
 - clip_vith14  
 - clip_vitl14
 
-batch_size: 128
 splits:
   - train
   - test
@@ -18,5 +18,4 @@ dtype: float32
 device: null
 download_weights: true
 cache_dir: tensorcache
-img_dir: data/things-eeg2/imgs
 compile: true

@@ -14,7 +14,7 @@ from brain_image.data.data import EEGDataModule, EEGDatasetConfig, TensorCache, 
 
 
 class EmbeddingGenerationConfig(BaseConfig):
-    dataset_config: EEGDatasetConfig
+    dataset: EEGDatasetConfig
     model_names: list[IMAGE_ENCODER] = ["clip_vith14", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
     batch_size: int = 512
     splits: list[Literal["train", "test"]] = ["train", "test"]
@@ -43,7 +43,7 @@ def run_generation(
 
     with torch.no_grad(), tqdm.tqdm(total=len(dataloader), desc="Generating embeddings...") as pbar:
             for batch in dataloader:
-                paths = batch["image_path"]
+                paths = batch["img_path"]
                 imgs = batch_load_images(paths).to(device=device)
 
                 latent = encoder.encode(imgs).detach().cpu()
@@ -56,7 +56,7 @@ def run_generation(
 
 def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
     dataset_module = EEGDataModule(
-        config.dataset_config
+        config.dataset
     )
 
     dataloaders = {

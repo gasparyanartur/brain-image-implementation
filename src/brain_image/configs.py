@@ -8,11 +8,32 @@ from pathlib import Path
 import tomllib
 from typing import Any, Generic, TypeVar, cast
 from omegaconf import DictConfig, OmegaConf
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+from hydra.utils import instantiate
 import torch
 
 
 C = TypeVar("C", bound=BaseModel)
+
+
+def _instantiate_targets(obj: Any) -> Any:
+    """Recursively instantiate Hydra nodes that declare a target class.
+
+    Supports both Hydra's `_target_` and the legacy `__target__` key.
+    """
+    if isinstance(obj, dict):
+        if "_target_" in obj or "__target__" in obj:
+            payload = dict(obj)
+            if "__target__" in payload and "_target_" not in payload:
+                payload["_target_"] = payload.pop("__target__")
+            return instantiate(OmegaConf.create(payload), _convert_="all")
+
+        return {k: _instantiate_targets(v) for k, v in obj.items()}
+
+    if isinstance(obj, list):
+        return [_instantiate_targets(v) for v in obj]
+
+    return obj
 
 
 
@@ -20,12 +41,22 @@ class BaseConfig(BaseModel, ABC, Generic[C]):
     @classmethod
     def from_hydra_config(cls, cfg: DictConfig) -> C:
         raw_dict = OmegaConf.to_container(cfg, resolve=True)
+
         if not isinstance(raw_dict, dict):
             raise ValueError("Config must be a dictionary")
+        
         if not all(isinstance(k, str) for k in raw_dict):
             raise ValueError("Config keys must be strings")
         raw_dict = cast(dict[str, Any], raw_dict)
-        return cls.construct(**raw_dict)
+        raw_dict = cast(dict[str, Any], _instantiate_targets(raw_dict))
+
+        try:
+            return cls.construct(**raw_dict)
+        except ValidationError as e:
+            logging.error(f"Attempted to construct {cls.__name__} from dictionary with keys:")
+            for k, v in raw_dict.items():
+                logging.error(f"{k}: type: {type(v)}, value: {v}")
+            raise e
 
 
     @classmethod
