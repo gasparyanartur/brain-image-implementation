@@ -103,7 +103,7 @@ class DataConfig(BaseConfig, ABC):
 
 
 class EEGDatasetConfig(DataConfig):
-    data_path: Path 
+    data_path: Path
     dataset: Literal["things-eeg2", "alljoined-eeg2"]
 
     preload_cache: bool = True
@@ -169,13 +169,20 @@ class TensorCache:
 
 
 class EEGDatasetFactory(ABC):
-    def __init__(self, config: EEGDatasetConfig, tensorcache: TensorCache, embeddings_map: dict[LatentTypeT, LatentStats]):
+    def __init__(
+        self,
+        config: EEGDatasetConfig,
+        tensorcache: TensorCache,
+        embeddings_map: dict[LatentTypeT, LatentStats],
+    ):
         self.config = config
         self.tensorcache = tensorcache
         self.embeddings_map = embeddings_map
 
     @abstractmethod
-    def create_dataset(self, split: Literal["train", "val", "test"], **dataset_kwargs) -> EEGDataset: 
+    def create_dataset(
+        self, split: Literal["train", "val", "test"], **dataset_kwargs
+    ) -> EEGDataset:
         raise NotImplementedError
 
 
@@ -205,7 +212,7 @@ class DataModule(LightningDataModule, ABC):
         if (dataloader := self.dataloaders.get(split)) is not None:
             return dataloader
 
-        dataloader = self._create_dataloader(split)
+        dataloader = self.create_dataloader(split)
         self.dataloaders[split] = dataloader
         return dataloader
 
@@ -232,16 +239,16 @@ class DataModule(LightningDataModule, ABC):
         if (dataset := self.datasets.get(split)) is not None:
             return dataset
 
-        dataset = self._create_dataset(split)
+        dataset = self.create_dataset(split)
         self.datasets[split] = dataset
         return dataset
 
     @abstractmethod
-    def _create_dataset(self, split) -> Dataset:
+    def create_dataset(self, split) -> Dataset:
         raise NotImplementedError
 
     @abstractmethod
-    def _create_dataloader(self, split) -> torch.utils.data.DataLoader:
+    def create_dataloader(self, split) -> torch.utils.data.DataLoader:
         raise NotImplementedError
 
     def cleanup(self) -> None:
@@ -281,11 +288,16 @@ class EEGDataModule(DataModule):
 
         super().__init__(config, embedding_stats=embeddings_stats)
 
-    def _create_factory(self, config, tensor_cache, embeddings_map) -> EEGDatasetFactory:
+    def _create_factory(
+        self, config, tensor_cache, embeddings_map
+    ) -> EEGDatasetFactory:
         match config.factory:
             case "things-eeg2":
-                from brain_image.data.things_eeg2_dataset import ThingsEEG2DatasetFactory
-                return ThingsEEG2DatasetFactory(config, tensor_cache, embeddings_map) # type: ignore
+                from brain_image.data.things_eeg2_dataset import (
+                    ThingsEEG2DatasetFactory,
+                )
+
+                return ThingsEEG2DatasetFactory(config, tensor_cache, embeddings_map)  # type: ignore
             case "alljoined":
                 raise NotImplementedError
             case _:
@@ -294,10 +306,12 @@ class EEGDataModule(DataModule):
     def get_metadata(self) -> dict:
         return {}
 
-    def _create_dataset(self, split: Literal["train", "val", "test"], **dataset_kwargs) -> EEGDataset:
-        return  self.factory.create_dataset(split, **dataset_kwargs)
+    def create_dataset(
+        self, split: Literal["train", "val", "test"], **dataset_kwargs
+    ) -> EEGDataset:
+        return self.factory.create_dataset(split, **dataset_kwargs)
 
-    def _create_dataloader(
+    def create_dataloader(
         self,
         split: Literal["train", "val", "test"],
         **kwargs,
@@ -327,6 +341,7 @@ class EEGDataModule(DataModule):
 
     def get_embeddings_stats(self):
         return self.get_dataset("train").get_embedding_stats()
+
 
 class EEGDataset(Dataset):
     def __init__(
@@ -369,7 +384,6 @@ class EEGDataset(Dataset):
         self.prepare()
         logging.info(f"Prepared dataset of size: {len(self)}")
 
-
         if preload_cache:
             self._preload_cache()
 
@@ -400,7 +414,9 @@ class EEGDataset(Dataset):
         return cast(
             LatentGroupT,
             {
-                key: self._get_image_latent_from_cache(img_path, cast(EncoderTypeT, value), self.split)
+                key: self._get_image_latent_from_cache(
+                    img_path, cast(EncoderTypeT, value), self.split
+                )
                 for key, value in self.embeddings_map.items()
                 if value is not None
             },
@@ -452,7 +468,7 @@ class EEGDataset(Dataset):
             for i in tqdm.tqdm(range(len(self)), desc="Preloading latents"):
                 self.__getitem__(i)
 
-    def get_embedding_stats(self) -> dict[LatentTypeT, LatentStats]: 
+    def get_embedding_stats(self) -> dict[LatentTypeT, LatentStats]:
         return self.embedding_stats
 
 

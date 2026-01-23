@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 from collections.abc import Callable
+import logging
 from pathlib import Path
 import typing
 from torch import nn
@@ -96,6 +97,8 @@ def load_image_encoder(
     *args,
     **kwargs,
 ) -> BaseImageEncoder:
+    logging.info(f"Loading image encoder for model {model_name} on device {device}")
+
     match model_name:
         case "clip_vitl14" | "clip_vith14":
             model = CLIPImageEncoder(model_name, *args, **kwargs)
@@ -125,12 +128,16 @@ def load_image_encoder(
     model.eval()
 
     if compile:
+        logging.info("Compiling model")
         model = torch.compile(model)
 
     if device is not None:
+        logging.info(f"Moving model to device: {device}")
         model.to(device)
 
-    model = model.to(dtype=dtype)
+    if dtype is not None:
+        logging.info(f"Casting model to dtype: {dtype}")
+        model = model.to(dtype=dtype)
 
     return typing.cast(BaseImageEncoder, model)
 

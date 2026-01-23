@@ -1,18 +1,9 @@
 data_path: data/things-eeg2
-imgs_dir: imgs    # Relative to data_path
-prepared_eeg_dir: prepared
-latents_dir: img-latents
-cachedir: tensorcache
-
-train_imgs_per_concept: 10
-test_imgs_per_concept: 1
-#subs: [1,2,3,4,5,6,7,8,9,10]
-subs: [8]
 
 batch_size: 256
 val_batch_size: null
 test_batch_size: null
-shuffle_train: true
+
 limit_train_size: 1.0
 limit_val_size: 1.0
 limit_test_size: 1.0
