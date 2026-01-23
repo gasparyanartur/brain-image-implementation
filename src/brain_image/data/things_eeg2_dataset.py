@@ -70,6 +70,7 @@ class ThingsEEG2Dataset(EEGDataset):
             limit_shuffle,
             preload_cache,
         )
+        self.config = config
 
     def prepare(self) -> None:
         self.eeg: torch.Tensor = self.eeg.mean(dim=2)  # <sub, image, space, time>)
