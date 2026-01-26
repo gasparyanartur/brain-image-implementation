@@ -11,7 +11,7 @@ import logging
 import pytorch_lightning as pl
 from brain_image.configs import BaseConfig
 from brain_image.model.eeg_encoder import create_eeg_encoder
-from data.data import (
+from brain_image.data.data import (
     EEGDataModule,
     EEGDatasetConfig,
     LatentTypeMapT,
@@ -135,7 +135,7 @@ class LowLevelModule(TrainingModule):
     def __init__(
         self,
         config: LowLevelConfig,
-        dataset_config: EEGDatasetConfig = EEGDatasetConfig(subs=[8]),
+        dataset_config: EEGDatasetConfig,
         compile: bool = False,
     ):
         super().__init__(config)

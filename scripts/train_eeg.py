@@ -5,7 +5,7 @@ from omegaconf import DictConfig
 from brain_image.configs import BaseConfig
 from brain_image.trainer import EEGAlignTrainer, EEGAlignTrainerConfig
 from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
-from data.data import EEGDatasetConfig
+from brain_image.data.data import EEGDatasetConfig
 
 from pathlib import Path
 
@@ -14,9 +14,9 @@ from brain_image.utils import flatten_configs, get_dtype, setup
 
 
 class TrainEEGConfig(BaseConfig):
-    dataset: EEGDatasetConfig = EEGDatasetConfig()
-    model: EEGAlignmentConfig = EEGAlignmentConfig()
-    trainer: EEGAlignTrainerConfig = EEGAlignTrainerConfig()
+    dataset: EEGDatasetConfig 
+    model: EEGAlignmentConfig 
+    trainer: EEGAlignTrainerConfig 
 
     checkpoint_path: str | None = None
     resume_training: bool = False

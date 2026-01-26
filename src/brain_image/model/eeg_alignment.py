@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from brain_image.configs import BaseConfig, get_device
 from brain_image.model.eeg_encoder.eeg_encoder import EEG_ENCODER
-from data.data import (
+from brain_image.data.data import (
     EEGDataModule,
     EEGDatasetConfig,
     LatentTypeMapT,
@@ -224,6 +224,7 @@ class EEGAlignmentModel(TrainingModule):
             "low_level_latent": (
                 self.config.low_level_encoder if self.config.do_recon_low else None
             ),
+            "eeg_latent": None
         }
 
         self.data_module = EEGDataModule(

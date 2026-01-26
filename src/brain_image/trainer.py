@@ -8,9 +8,8 @@ from torch.utils.data import DataLoader
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, ModelSummary
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger, CSVLogger
-from data.data import EEGDatasetConfig
 from brain_image.configs import BaseConfig, get_device_str
-from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
+from brain_image.model.eeg_alignment import EEGAlignmentModel
 from brain_image.model.low_level import LowLevelModule
 from brain_image.model.model import TrainingModule
 from brain_image.utils import create_model_id, get_dtype, init_wandb

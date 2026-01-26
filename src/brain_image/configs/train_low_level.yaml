@@ -1,6 +1,6 @@
 defaults:
   - base
-  - dataset: eeg_dataset
+  - dataset: things-eeg2
   - model: low_level_model
   - trainer: low_level_trainer
   - _self_

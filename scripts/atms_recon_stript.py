@@ -9,7 +9,7 @@ import tqdm
 import matplotlib.pyplot as plt
 import datetime
 
-from data.data import TensorCache
+from brain_image.data.data import TensorCache
 from brain_image.model.eeg_encoder import atms
 
 ALIGN_LOSS_SCALE = 1
@@ -29,7 +29,7 @@ class EEGDataset(torch.utils.data.Dataset):
         self.sub = sub
         self.img_encoder = img_encoder
 
-        self._tensorcache = TensorCache(memory_cache_size=128000)
+        self._tensorcache = TensorCache()
         self.data = torch.load(data_path / "prepared" / f"sub-{sub:02}" / f"{split}.pt")
 
     def __len__(self):

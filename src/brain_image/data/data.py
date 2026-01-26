@@ -108,6 +108,20 @@ class EEGDatasetConfig(DataConfig):
 
     preload_cache: bool = True
 
+@lru_cache(maxsize=1024 * 1024)
+def _load_cached_tensor_from_path(path: Path) -> Tensor:
+    tensor = torch.load(path)
+    return tensor
+
+def _encode_tensor_keys(keys: tuple[str, ...]) -> str:
+    return "/".join(keys)
+
+@lru_cache(maxsize=1024 * 1024)
+def _get_cached_tensor_path(cache_path: Path, keys: tuple[str, ...]) -> Path:
+    encoded_path = _encode_tensor_keys(keys)
+    full_path = cache_path / encoded_path
+    full_path = full_path.with_suffix(".pt")
+    return full_path
 
 class TensorCache:
     def __init__(
@@ -117,24 +131,9 @@ class TensorCache:
         self.cache_path = cache_path
         self.cache_path.mkdir(parents=True, exist_ok=True)
 
-    @lru_cache(maxsize=1024 * 1024)
-    @staticmethod
-    def _load_tensor_from_path(path: Path) -> Tensor:
-        tensor = torch.load(path)
-        return tensor
-
-    @staticmethod
-    def _encode_keys(keys: tuple[str, ...]) -> str:
-        return "/".join(keys)
-
-    def _get_tensor_path(self, keys: Sequence[str]) -> Path:
-        encoded_path = self._encode_keys(tuple(keys))
-        full_path = self.cache_path / encoded_path
-        full_path = full_path.with_suffix(".pt")
-        return full_path
-
     def save(self, tensor: torch.Tensor, *keys: str):
-        path = self._get_tensor_path(keys)
+        keys = tuple(keys)
+        path = _get_cached_tensor_path(self.cache_path, keys)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(tensor, path)
 
@@ -164,8 +163,9 @@ class TensorCache:
         return torch.stack(item_list, dim=0)
 
     def get(self, *keys: str) -> torch.Tensor:
-        path = self._get_tensor_path(keys)
-        tensor = self._load_tensor_from_path(path)
+        keys = tuple(keys)
+        path = _get_cached_tensor_path(self.cache_path, keys)
+        tensor = _load_cached_tensor_from_path(path)
 
         return tensor
 
@@ -376,6 +376,11 @@ class EEGDataset(Dataset):
             "low_level_latent": None,
             "eeg_latent": None,
         }
+
+        logging.info(f"Setting up latents loader with embeddings map:")
+        for k, v in embeddings_map.items():
+            logging.info(f"  {k}: {v}")
+
         compute_stats = split == "train" if compute_stats is None else compute_stats
         limit_size = config.get_limit_size(split) if limit_size is None else limit_size
         preload_cache = config.preload_cache if preload_cache is None else preload_cache

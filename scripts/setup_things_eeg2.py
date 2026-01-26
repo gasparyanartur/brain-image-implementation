@@ -9,9 +9,9 @@ import zipfile
 from pydantic import BaseModel
 import torch
 
-from data.data import EEGDataset, get_image_paths, load_all_eeg_data
-from data.data import download_to_file
-from data.data import merge_data
+from brain_image.data.data import EEGDataset, get_image_paths, load_all_eeg_data
+from brain_image.data.data import download_to_file
+from brain_image.data.data import merge_data
 
 
 """

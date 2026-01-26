@@ -131,3 +131,15 @@ This is done mainly for two things: `Hugging Face Hub` and `Weights and Biases`
 Create a .env file in the root of the project,.
 
 TODO: Talk about wandb, under configs/... Mention setting up WANDB_API_KEY in your environment 
+
+
+### Step 6: Train
+
+Train the model using the following command:
+```
+python scripts/train_eeg.py --config-name=[CONFIG_NAME] dataset=[DATASET]
+```
+See the corresponding config files in `src/brain_image/configs/` for more details.
+
+For example, to train the EEG alignment on the Things-EEG2 dataset, run:
+python scripts/train_eeg.py --config-name=train_eeg_align dataset=things-eeg2
