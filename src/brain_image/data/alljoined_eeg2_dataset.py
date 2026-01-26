@@ -15,11 +15,12 @@ from brain_image.data.data import (
     EEGSampleT,
     LatentTypeMapT,
     TensorCache,
+    get_image_paths,
 )
 
 
 SORT_ORDER = ["subject", "session", "block_id", "sequence_id", "sequence_image_id"]
-
+ALL_SUBS = list(range(1, 21))
 
 @lru_cache
 def extract_image_id(image_path: str, re_pattern=re.compile(r".+\/(\d+)\.jpg")):
@@ -109,7 +110,7 @@ class AlljoinedEEG2DatasetConfig(EEGDatasetConfig):
     img_dir: str = "stimuli/images"
     preprocessed_eeg_dir: str = "preprocessed-eeg"
     dataset: Literal["things-eeg2", "alljoined-eeg2"] = "alljoined-eeg2"
-    subs: list[int] = list(range(1, 21))
+    subs: list[int] | None = None
 
 
 class AlljoinedEEG2Dataset(EEGDataset):
@@ -117,13 +118,11 @@ class AlljoinedEEG2Dataset(EEGDataset):
         self,
         config: AlljoinedEEG2DatasetConfig,
         split: Literal["train", "val", "test"],
-        tensor_cache: TensorCache | None = None,
-        embeddings_map: LatentTypeMapT | None = None,
-        standardize_embeddings: Sequence[str] = ("prior_img_latent",),
-        limit_size: float | None = None,
-        limit_shuffle: bool = True,
-        preload_cache: bool | None = None,
+        **kwargs
     ):
+        if config.subs is None:
+            config.subs = ALL_SUBS
+
         self.img_dir = config.data_path / config.img_dir
         self.metadata = load_metadatas(
             config.data_path / config.preprocessed_eeg_dir,
@@ -141,12 +140,7 @@ class AlljoinedEEG2Dataset(EEGDataset):
         super().__init__(
             config,
             split,
-            tensor_cache,
-            embeddings_map,
-            standardize_embeddings,
-            limit_size,
-            limit_shuffle,
-            preload_cache,
+            **kwargs
         )
         self.config = config
 
@@ -174,6 +168,7 @@ class AlljoinedEEG2Dataset(EEGDataset):
     def get_image_paths(self):
         query_result = self.query_metadata()
         image_paths = query_result["image_path"].to_list()
+        image_paths = list(sorted(set(image_paths)))
         return image_paths
 
     def query_metadata(self, sub: int | None = None):
@@ -191,15 +186,16 @@ class AlljoinedEEG2Dataset(EEGDataset):
     def __getitem__(self, idx: int) -> EEGSampleT:
         sub, img_idx = divmod(idx, self.eeg.shape[1])
 
+        sub_idx = self.config.subs[sub]
         eeg = self.eeg[sub, img_idx]
-        meta = self.meta_subs[sub + 1].iloc[img_idx]
+        meta = self.meta_subs[sub_idx].iloc[img_idx]
         img_path = Path(meta["image_path"])
         
         sample = {
             "img_path": str(img_path),
             "eeg_data": eeg,
             "idx": idx,
-            "sub": sub + 1,
+            "sub": sub_idx,
             **self.get_embeddings(img_path),
         }
         return cast(EEGSampleT, sample)
@@ -220,13 +216,16 @@ class AlljoinedEEG2DatasetFactory(EEGDatasetFactory):
     def create_dataset(
         self, split: Literal["train", "val", "test"], **dataset_kwargs
     ) -> EEGDataset:
+        kwargs = {
+            "split": split,
+            "tensor_cache": self.tensorcache,
+            "embeddings_map": self.embeddings_map,
+            "limit_size": self.config.get_limit_size(split),
+            "limit_shuffle": split == "train",
+            "preload_cache": self.config.preload_cache,
+        }
+        kwargs.update(dataset_kwargs)
         return AlljoinedEEG2Dataset(
             self.config,
-            split=split,
-            tensor_cache=self.tensorcache,
-            embeddings_map=self.embeddings_map,
-            limit_size=self.config.get_limit_size(split),
-            limit_shuffle=split == "train",
-            preload_cache=self.config.preload_cache,
-            **dataset_kwargs
+            **kwargs
         )

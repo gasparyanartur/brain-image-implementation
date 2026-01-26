@@ -19,3 +19,6 @@ device: null
 download_weights: true
 cache_dir: tensorcache
 compile: true
+
+dataset:
+  subs: null

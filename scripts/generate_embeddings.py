@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
 from brain_image.model.img_encoder import IMAGE_ENCODER, BaseImageEncoder, load_image_encoder
 from brain_image.utils import DTYPE, get_dtype, setup
-from brain_image.data.data import EEGDataModule, EEGDatasetConfig, TensorCache, batch_load_images
+from brain_image.data.data import EEGDataModule, EEGDataset, EEGDatasetConfig, TensorCache, batch_load_images
 
 
 class EmbeddingGenerationConfig(BaseConfig):
@@ -26,9 +26,10 @@ class EmbeddingGenerationConfig(BaseConfig):
     cache_dir: Path = Path("tensorcache")
 
 def run_generation(
-    dataloader: DataLoader,
+    dataset: EEGDataset,
     output_dir: Path,
     split: Literal["train", "test"],
+    batch_size: int,
     encoder: BaseImageEncoder,
     device: str | None = None,
 ) -> None:
@@ -41,19 +42,21 @@ def run_generation(
     cache = TensorCache(cache_path=output_dir)
     logging.info(f"Saving embeddings with model configs {encoder_configs} to cache directory: {output_dir}")
 
-    with torch.no_grad(), tqdm.tqdm(total=len(dataloader), desc="Generating embeddings...") as pbar:
-            for batch in dataloader:
-                paths = batch["img_path"]
-                imgs = batch_load_images(paths).to(device=device)
+    img_paths = dataset.get_image_paths()
 
-                latent = encoder.encode(imgs).detach().cpu()
+    with torch.no_grad(), tqdm.tqdm(total=len(img_paths), desc="Generating embeddings...") as pbar:
+        for i in range(0, len(img_paths), batch_size):
+            paths = [img_paths[i] for i in range(i, min(i + batch_size, len(img_paths)))]
+            imgs = batch_load_images(paths).to(device=device)
 
-                cache_save_args = [
-                    (latent[i_path], str(path), *encoder_configs) for i_path, path in enumerate(paths)
-                ]
-                cache.batch_save(cache_save_args, parallel=False)
+            latent = encoder.encode(imgs).detach().cpu()
 
-                pbar.update(1)
+            cache_save_args = [
+                (latent[i_path], str(path), *encoder_configs) for i_path, path in enumerate(paths)
+            ]
+            cache.batch_save(cache_save_args, parallel=False)
+
+            pbar.update(batch_size)
 
     logging.info(f"Finished generating {split} embeddings for model {model_name}")
 
@@ -63,8 +66,8 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
         config.dataset
     )
 
-    dataloaders = {
-        split:  dataset_module.create_dataloader("train", shuffle=False)
+    datasets = {
+        split:  dataset_module.create_dataset(split, preload_cache=False, embeddings_to_compute_stats=[], compute_stats=False)
         for split in config.splits
     }
 
@@ -83,8 +86,9 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
 
         for split in config.splits:
             run_generation(
-                dataloader=dataloaders[split],
+                dataset=datasets[split],
                 output_dir=config.cache_dir,
+                batch_size=config.batch_size,
                 encoder=encoder,
                 split=split,
                 device=device,

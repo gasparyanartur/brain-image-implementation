@@ -105,6 +105,7 @@ class DataConfig(BaseConfig, ABC):
 class EEGDatasetConfig(DataConfig):
     data_path: Path
     dataset: Literal["things-eeg2", "alljoined-eeg2"]
+    subs: list[int] | None
 
     preload_cache: bool = True
 
@@ -475,9 +476,10 @@ class EEGDataset(Dataset):
 
     def _preload_cache(self, parallel: bool = True):
         if parallel:
-            with ThreadPoolExecutor() as executor:
+            num_workers = self.config.num_workers or None
+            with ThreadPoolExecutor(num_workers) as executor:
                 logging.info(
-                    f"Preloading latents in parallel with {executor._max_workers} workers"
+                    f"Preloading latents in parallel with {executor._max_workers if num_workers is None else num_workers} workers"
                 )
                 outs = executor.map(self.__getitem__, range(len(self)))
                 num_items = sum(1 for _ in outs)
