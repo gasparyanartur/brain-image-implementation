@@ -1,10 +1,13 @@
+defaults:
+  - /eeg_encoder: atms
+  - _self_
+
 #align_target_encoder: "unaligned_synclr_vitb16"
 align_img_encoder: "clip_vith14"
 low_level_encoder: "ip_sdxl_turbo"
 prior_img_encoder: "clip_vith14"
 
 #eeg_encoder: "nice"
-eeg_encoder: "atms"
 
 do_align: true
 do_recon: false

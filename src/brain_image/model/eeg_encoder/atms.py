@@ -1,11 +1,17 @@
 import numpy as np
+from pydantic import BaseModel
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
 
 
-from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder
+from brain_image.model.eeg_encoder.eeg_encoder import (
+    EEG_ENCODER,
+    EEGEncoder,
+    EEGEncoderConfig,
+)
+from brain_image.model.eeg_encoder.utils import EEGProjection, PatchEmbedding
 
 # From https://github.com/ncclab-sustech/EEG_Image_decode/
 
@@ -79,7 +85,6 @@ class TriangularCausalMask:
         return self._mask
 
 
-
 class FullAttention(nn.Module):
     def __init__(
         self,
@@ -117,7 +122,6 @@ class FullAttention(nn.Module):
             return V.contiguous(), None
 
 
-
 class AttentionLayer(nn.Module):
     def __init__(self, attention, d_model, n_heads, d_keys=None, d_values=None):
         super(AttentionLayer, self).__init__()
@@ -147,7 +151,6 @@ class AttentionLayer(nn.Module):
         out = out.view(B, L, -1)
 
         return self.out_projection(out), attn
-
 
 
 class PositionalEmbedding(nn.Module):
@@ -321,175 +324,131 @@ class DataEmbedding(nn.Module):
         return self.dropout(x)
 
 
+class iTransformerConfig(BaseModel):
+    task_name: str = "classification"  # Example task name
+    seq_len: int = 250  # Sequence length
+    pred_len: int = 250  # Prediction length
+    num_channels: int = 63  # Number of EEG channel
 
-class iTransformerConfig:
-    def __init__(self):
-        self.task_name = "classification"  # Example task name
-        self.seq_len = 250  # Sequence length
-        self.pred_len = 250  # Prediction length
-        self.output_attention = False  # Whether to output attention weights
-        self.d_model = 250  # Model dimension
-        self.embed = "timeF"  # Time encoding method
-        self.freq = "h"  # Time frequency
-        self.dropout = 0.25  # Dropout rate
-        self.factor = 1  # Attention scaling factor
-        self.n_heads = 4  # Number of attention heads
-        self.e_layers = 1  # Number of encoder layers
-        self.d_ff = 256  # Dimension of the feedforward network
-        self.activation = "gelu"  # Activation function
-        self.enc_in = 63  # Encoder input dimension (example value)
+    output_attention: bool = False  # Whether to output attention weights
+    d_model: int = 250  # Model dimension
+    embed: str = "timeF"  # Time encoding method
+    freq: str = "h"  # Time frequency
+    dropout: float = 0.25  # Dropout rate
+    factor: int = 1  # Attention scaling factor
+    n_heads: int = 4  # Number of attention heads
+    e_layers: int = 1  # Number of encoder layers
+    d_ff: int = 256  # Dimension of the feedforward network
+    activation: str = "gelu"  # Activation function
 
 
 class iTransformer(nn.Module):
     def __init__(
         self,
-        configs: iTransformerConfig,
+        config: iTransformerConfig,
         joint_train=False,
         num_subjects=None,
     ):
         super(iTransformer, self).__init__()
-        self.task_name = configs.task_name
-        self.seq_len = configs.seq_len
-        self.pred_len = configs.pred_len
-        self.output_attention = configs.output_attention
-        # Embedding
+        self.config = config
+        self.task_name = config.task_name
+        self.seq_len = config.seq_len
+        self.pred_len = config.pred_len
+        self.output_attention = config.output_attention
+
         self.enc_embedding = DataEmbedding(
-            configs.seq_len,
-            configs.d_model,
-            configs.embed,
-            configs.freq,
-            configs.dropout,
+            config.seq_len,
+            config.d_model,
+            config.embed,
+            config.freq,
+            config.dropout,
             joint_train=False,
             num_subjects=num_subjects,
         )
-        self.num_channels = 63
-        # Encoder
+
         self.encoder = Encoder(
             [
                 EncoderLayer(
                     AttentionLayer(
                         FullAttention(
                             False,
-                            configs.factor,
-                            attention_dropout=configs.dropout,
-                            output_attention=configs.output_attention,
+                            config.factor,
+                            attention_dropout=config.dropout,
+                            output_attention=config.output_attention,
                         ),
-                        configs.d_model,
-                        configs.n_heads,
+                        config.d_model,
+                        config.n_heads,
                     ),
-                    configs.d_model,
-                    configs.d_ff,
-                    dropout=configs.dropout,
-                    activation=configs.activation,
+                    config.d_model,
+                    config.d_ff,
+                    dropout=config.dropout,
+                    activation=config.activation,
                 )
-                for l in range(configs.e_layers)
+                for l in range(config.e_layers)
             ],
-            norm_layer=torch.nn.LayerNorm(configs.d_model),
+            norm_layer=torch.nn.LayerNorm(config.d_model),
         )
 
     def forward(self, x_enc, x_mark_enc, subject_ids=None):
         # Embedding
         enc_out = self.enc_embedding(x_enc, x_mark_enc, subject_ids)
         enc_out, attns = self.encoder(enc_out, attn_mask=None)
-        enc_out = enc_out[:, : self.num_channels, :]
+        enc_out = enc_out[:, : self.config.num_channels, :]
         # print("enc_out", enc_out.shape)
         return enc_out
 
 
-from einops.layers.torch import Rearrange, Reduce
-
-
-class PatchEmbedding(nn.Module):
-    def __init__(self, emb_size=40):
-        super().__init__()
-        # Revised from ShallowNet
-        self.tsconv = nn.Sequential(
-            nn.Conv2d(1, 40, (1, 25), stride=(1, 1)),
-            nn.AvgPool2d((1, 51), (1, 5)),
-            nn.BatchNorm2d(40),
-            nn.ELU(),
-            nn.Conv2d(40, 40, (63, 1), stride=(1, 1)),
-            nn.BatchNorm2d(40),
-            nn.ELU(),
-            nn.Dropout(0.5),
-        )
-
-        self.projection = nn.Sequential(
-            nn.Conv2d(40, emb_size, (1, 1), stride=(1, 1)),
-            Rearrange("b e (h) (w) -> b (h w) e"),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # b, _, _, _ = x.shape
-        x = x.unsqueeze(1)
-        # print("x", x.shape)
-        x = self.tsconv(x)
-        # print("tsconv", x.shape)
-        x = self.projection(x)
-        # print("projection", x.shape)
-        return x
-
-
-class ResidualAdd(nn.Module):
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-
-    def forward(self, x, **kwargs):
-        res = x
-        x = self.fn(x, **kwargs)
-        x += res
-        return x
-
-
-class FlattenHead(nn.Sequential):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        x = x.contiguous().view(x.size(0), -1)
-        return x
-
-
-class Enc_eeg(nn.Sequential):
-    def __init__(self, emb_size=40, **kwargs):
-        super().__init__(PatchEmbedding(emb_size), FlattenHead())
-
-
-class Proj_eeg(nn.Sequential):
-    def __init__(self, embedding_dim=1440, proj_dim=1024, drop_proj=0.5):
-        super().__init__(
-            nn.Linear(embedding_dim, proj_dim),
-            ResidualAdd(
-                nn.Sequential(
-                    nn.GELU(),
-                    nn.Linear(proj_dim, proj_dim),
-                    nn.Dropout(drop_proj),
-                )
-            ),
-            nn.LayerNorm(proj_dim),
-        )
+class AtmsEEGEncoderConfig(EEGEncoderConfig):
+    eeg_encoder: EEG_ENCODER = "atms"
+    dropout: float = 0.5
+    embed_dim: int = 40
+    patch_out_size: int = 36
+    hidden_dim: int = 1024
+    flatten: bool = True
 
 
 class AtmsEEGEncoder(EEGEncoder):
     def __init__(
         self,
-        num_channels=63,
-        sequence_length=250,
-        num_subjects=None,
-        num_features=64,
-        output_dim=1024,
-        num_blocks=1,
+        config: AtmsEEGEncoderConfig = AtmsEEGEncoderConfig(),
     ):
         super(AtmsEEGEncoder, self).__init__()
-        self.encoder = iTransformer(iTransformerConfig())
-        self.enc_eeg = Enc_eeg()
-        self.proj_eeg = Proj_eeg(proj_dim=output_dim)
-        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
+        self.config = config
+        self.encoder = iTransformer(
+            iTransformerConfig(seq_len=config.d_time, pred_len=config.d_time)
+        )
+
+        assert (
+            config.d_channels is not None
+        ), "d_channels must be specified for NiceEEGEncoder"
+
+        self.patch_embedding = PatchEmbedding(
+            d_embed=config.embed_dim,
+            num_channels=config.d_channels,
+            dropout=config.dropout,
+        )
+
+        self.proj = EEGProjection(
+            d_input=config.patch_out_size * config.embed_dim,
+            d_output=config.d_output,
+            dropout=config.dropout,
+        )
+
+        if not config.flatten:
+            raise NotImplementedError("Non-flattened case not implemented yet")
 
     def forward(self, x, sub: torch.Tensor | None = None):
         x = self.encoder(x, None, sub)
-        eeg_embedding = self.enc_eeg(x)
 
-        out = self.proj_eeg(eeg_embedding)
-        return out
+        x = self.patch_embedding(x)
+        if x.size(1) != self.config.patch_out_size:
+            raise ValueError(
+                f"Expected patch_out_size {self.config.patch_out_size}, got {x.size(1)} for output of size {x.size()}. Please adjust the patch_out_size in the config."
+            )
+
+        x = x.flatten(start_dim=1)
+        x = self.proj(x)
+
+        # TODO: Handle non-flattened case
+
+        return x

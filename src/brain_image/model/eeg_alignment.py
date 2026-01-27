@@ -16,7 +16,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from brain_image.configs import BaseConfig, get_device
-from brain_image.model.eeg_encoder.eeg_encoder import EEG_ENCODER
+from brain_image.model.eeg_encoder.eeg_encoder import EEG_ENCODER, EEGEncoderConfig
 from brain_image.data.data import (
     EEGDataModule,
     EEGDatasetConfig,
@@ -69,7 +69,8 @@ class EEGAlignmentConfig(TrainingModuleConfig):
     align_img_encoder: IMAGE_ENCODER = "unaligned_synclr_vitb16"
     low_level_encoder: VAE_ENCODER = "ip_sdxl_turbo"
     prior_img_encoder: IMAGE_ENCODER = "clip_vitl14"
-    eeg_encoder: EEG_ENCODER = "nice"
+
+    eeg_encoder: EEGEncoderConfig
 
     do_align: bool = True
     do_recon_low: bool = False
@@ -265,9 +266,13 @@ class EEGAlignmentModel(TrainingModule):
             )
 
         eeg_encoder_path = eeg_encoder_path or self.config.eeg_encoder_path
+
+        self.config.eeg_encoder.d_channels = dataset_config.num_channels
+        self.config.eeg_encoder.d_time = dataset_config.time_length
+        self.config.eeg_encoder.d_output = self.eeg_dim
+
         self.eeg_encoder = create_eeg_encoder(
             self.config.eeg_encoder,
-            output_dim=self.eeg_dim,
             checkpoint_path=eeg_encoder_path,
         )
 

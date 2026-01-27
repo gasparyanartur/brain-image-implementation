@@ -106,6 +106,8 @@ class EEGDatasetConfig(DataConfig):
     data_path: Path
     dataset: Literal["things-eeg2", "alljoined-eeg2"]
     subs: list[int] | None
+    num_channels: int
+    time_length: int
 
     preload_cache: bool = True
 

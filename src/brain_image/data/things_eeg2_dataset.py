@@ -41,6 +41,8 @@ class ThingsEEG2DatasetConfig(EEGDatasetConfig):
     preprocessed_eeg_dir: str = "preprocessed-eeg"
     dataset: Literal['things-eeg2', 'alljoined'] = "things-eeg2"
     subs: list[int] | None = None
+    num_channels: int = 63
+    time_length: int = 250
 
 
 class ThingsEEG2Dataset(EEGDataset):

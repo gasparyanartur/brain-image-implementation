@@ -1,0 +1,2 @@
+_target_: brain_image.model.eeg_encoder.atms.AtmsEEGEncoderConfig
+eeg_encoder: atms
