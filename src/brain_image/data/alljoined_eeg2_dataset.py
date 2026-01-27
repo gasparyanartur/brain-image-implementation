@@ -9,13 +9,17 @@ from pathlib import Path
 import torch
 
 from brain_image.data.data import (
+    DSPLIT,
     EEGDataset,
     EEGDatasetConfig,
     EEGDatasetFactory,
     EEGSampleT,
     LatentTypeMapT,
     TensorCache,
+    get_eeg_stats,
     get_image_paths,
+    rescale_eeg,
+    truncate_data,
 )
 
 
@@ -65,23 +69,6 @@ def _load_eeg_from_path(path: Path) -> torch.Tensor:
     return torch.from_numpy(np.load(path, allow_pickle=True)["preprocessed_eeg_data"])
 
 
-def load_egg_values(
-    eeg_path: Path, subs: list[int], split: Literal["train", "test"]
-) -> torch.Tensor:
-    file_name = (
-        "preprocessed_eeg_training_flat.npy"
-        if split == "train"
-        else "preprocessed_eeg_test_flat.npy"
-    )
-
-    eeg_paths = [eeg_path / f"sub-{sub:02}" / file_name for sub in subs]
-    eeg = torch.stack(
-        [_load_eeg_from_path(eeg_path) for eeg_path in eeg_paths]
-    )  # <sub, image, channel, space, time>
-
-    return eeg
-
-
 def query_metadata(
     metadatas,
     sub: int | None = None,
@@ -125,19 +112,21 @@ class AlljoinedEEG2Dataset(EEGDataset):
         if config.subs is None:
             config.subs = ALL_SUBS
 
+        self.split = split
+
+        data_split = "train" if split == "train" else "test"
+
         self.img_dir = config.data_path / config.img_dir
         self.metadata = load_metadatas(
             config.data_path / config.preprocessed_eeg_dir,
             self.img_dir,
             config.subs,
-            split="train" if split == "train" else "test",
+            split=data_split,
         )
-        self.eeg = load_egg_values(
-            config.data_path / config.preprocessed_eeg_dir,
-            subs=config.subs,
-            split="train" if split == "train" else "test",
-        )
+        
         self.meta_subs: dict[int, pd.DataFrame] = {}
+        self.train_eeg_stats = {}
+
 
         super().__init__(
             config,
@@ -146,32 +135,74 @@ class AlljoinedEEG2Dataset(EEGDataset):
         )
         self.config = config
 
+        # Sanity checks
+        assert self.eeg.size(1) * self.eeg.size(0) == len(self.metadata), "Number of trials does not match"
+        assert self.eeg.size(2) == self.config.num_channels, "Number of channels does not match"
+        assert self.eeg.size(3) == self.config.time_length, "Time length does not match"
+
+        for sub in self.config.subs:
+            assert len(self.meta_subs[sub]) == self.eeg.size(1), "Number of trials does not match"
+
+
+
+    def load_eeg_from_path(self, path: Path):
+        return _load_eeg_from_path(path)
+
     def limit_data_size(self, limit_size: float, limit_shuffle=True):
         if limit_size >= 1.0:
             return
 
-        new_size = int(len(self) * self.limit_size)
+        num_trials = self.eeg.shape[1]
+        num_subs = self.eeg.shape[0]
+
+        new_size = int(num_trials * self.limit_size)
         logging.info(
-            f"Limiting dataset size to {self.limit_size * 100:.1f}% - {new_size} samples"
+            f"Limiting dataset size to {self.limit_size * 100:.1f}% - {new_size} samples per subject"
         )
 
-        idxs = (
+        img_idxs = (
             np.random.choice(
-                len(self),
+                num_trials,
                 new_size,
                 replace=False,
             )
             if limit_shuffle
             else np.arange(new_size)
         )
-        self.eeg = self.eeg[:, idxs]  # <sub, image, time, channel>
-        self.metadata = self.metadata.iloc[idxs]  # <sub * image>
+        self.eeg = self.eeg[:, img_idxs]  # <sub, trial, time, channel>
+
+        # Map idxs to each subject
+        sub_offsets = torch.arange(num_subs) * num_trials
+        raw_idxs = img_idxs + sub_offsets[:, None]
+
+        self.metadata = self.metadata.iloc[raw_idxs]  # <sub * trial>
 
     def get_image_paths(self):
         query_result = self.query_metadata()
         image_paths = query_result["image_path"].to_list()
         image_paths = list(sorted(set(image_paths)))
         return image_paths
+
+    def get_eeg_paths(self, split: DSPLIT | None = None, subs: list[int] | None = None) -> list[Path]:
+        if subs is None:
+            subs = self.config.subs
+        if subs is None:
+            subs = ALL_SUBS
+
+        if split is None:
+            split = "train" if self.split == "train" else "test"
+
+        eeg_path = self.config.data_path / self.config.preprocessed_eeg_dir
+        
+        file_name = (
+            "preprocessed_eeg_training_flat.npy"
+            if split == "train"
+            else "preprocessed_eeg_test_flat.npy"
+        )
+
+        eeg_paths = [eeg_path / f"sub-{sub:02}" / file_name for sub in subs]
+        return eeg_paths
+
 
     def query_metadata(self, sub: int | None = None):
         return query_metadata(
@@ -182,8 +213,22 @@ class AlljoinedEEG2Dataset(EEGDataset):
         return self.eeg.shape[0] * self.eeg.shape[1]
 
     def prepare(self) -> None:
-        for sub in self.config.subs:
+        for i_sub, sub in enumerate(self.config.subs):
+            # Prepare metadata for fast querying
             self.meta_subs[sub] = self.query_metadata(sub).reset_index()
+            
+            # Prepare EEG stats for rescaling
+            train_eeg_paths = self.get_eeg_paths("train", subs=[sub])
+            train_eeg = self.load_eeg_from_path(train_eeg_paths[0])
+            self.train_eeg_stats[sub] = eeg_stats = get_eeg_stats(train_eeg)
+            
+            # Preprocess EEG data
+            eeg = self.eeg[i_sub] 
+            eeg = rescale_eeg(eeg, eeg_stats) 
+            eeg = truncate_data(eeg, trunc_max=10)
+
+            self.eeg[i_sub] = eeg
+
 
     def __getitem__(self, idx: int) -> EEGSampleT:
         sub, img_idx = divmod(idx, self.eeg.shape[1])

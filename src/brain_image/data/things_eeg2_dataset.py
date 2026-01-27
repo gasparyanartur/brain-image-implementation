@@ -4,7 +4,9 @@ from typing import Literal, Sequence, cast
 
 import numpy as np
 import torch
+from torch import Tensor
 from brain_image.data.data import (
+    DSPLIT,
     EEGDataset,
     EEGDatasetConfig,
     EEGDatasetFactory,
@@ -21,7 +23,7 @@ ALL_SUBS = list(range(1, 11))
 
 
 def _load_eeg_from_path(path: Path) -> torch.Tensor:
-    return torch.from_numpy(np.load(path, allow_pickle=True)["preprocessed_eeg_data"])
+    return 
 
 def load_eeg_values(eeg_path: Path, subs: list[int], split: Literal["train", "test"]) -> torch.Tensor:
     file_name = "training.npy" if split == "train" else "test.npy"
@@ -61,7 +63,6 @@ class ThingsEEG2Dataset(EEGDataset):
             split="train" if split == "train" else "test",
             extensions=(".jpg",),
         )
-        self.eeg = load_eeg_values(config.data_path / config.preprocessed_eeg_dir, config.subs, split="train" if split == "train" else "test")
          
         super().__init__(
             config,
@@ -71,10 +72,37 @@ class ThingsEEG2Dataset(EEGDataset):
         self.config = config
 
     def prepare(self) -> None:
-        self.eeg: torch.Tensor = self.eeg.mean(dim=2)  # <sub, image, space, time>)
+        ...
 
     def get_image_paths(self):
         return self.img_paths
+    
+    def load_eeg_from_path(self, path: Path) -> Tensor:
+        eeg = np.load(path, allow_pickle=True)["preprocessed_eeg_data"]
+        eeg = torch.from_numpy(eeg)
+        eeg = eeg.mean(dim=1)
+        return eeg
+
+    def get_eeg_paths(self, split: DSPLIT | None = None, subs: list[int] | None = None) -> list[Path]:
+        if subs is None:
+            subs = self.config.subs
+        if subs is None:
+            subs = ALL_SUBS
+
+        if split is None:
+            split = "train" if self.split == "train" else "test"
+
+        eeg_path = self.config.data_path / self.config.preprocessed_eeg_dir
+        
+        file_name = "training.npy" if split == "train" else "test.npy"
+        eeg_paths = [
+                eeg_path
+                / f"sub-{sub:02}"
+                / file_name
+            for sub in subs
+        ] 
+        return eeg_paths
+
 
     def limit_data_size(self, limit_size: float, limit_shuffle: bool = True) -> None:
         if limit_size >= 1.0:

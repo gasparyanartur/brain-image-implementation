@@ -14,7 +14,6 @@ from brain_image.model.model import ResidualAdd, WrapDebugSequential, is_debug_l
 class NiceEEGEncoderConfig(EEGEncoderConfig):
     eeg_encoder: Literal["nice"] = "nice"
     dropout: float = 0.5
-    embed_dim: int = 40
     patch_out_size: int = 36
     hidden_dim: int = 1024
     flatten: bool = True
@@ -33,13 +32,13 @@ class NiceEEGEncoder(EEGEncoder):
         assert config.d_channels is not None, "d_channels must be specified for NiceEEGEncoder"
 
         self.patch_embedding = PatchEmbedding(
-            d_embed=config.embed_dim,
+            d_embed=config.d_eeg,
             num_channels=config.d_channels,
             dropout=config.dropout,
         )
 
         self.proj = EEGProjection(
-            d_input=config.patch_out_size * config.embed_dim,
+            d_input=config.patch_out_size * config.d_eeg,
             d_output=config.d_output,
             dropout=config.dropout,
         )

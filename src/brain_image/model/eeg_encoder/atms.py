@@ -401,7 +401,6 @@ class iTransformer(nn.Module):
 class AtmsEEGEncoderConfig(EEGEncoderConfig):
     eeg_encoder: EEG_ENCODER = "atms"
     dropout: float = 0.5
-    embed_dim: int = 40
     patch_out_size: int = 36
     hidden_dim: int = 1024
     flatten: bool = True
@@ -423,13 +422,13 @@ class AtmsEEGEncoder(EEGEncoder):
         ), "d_channels must be specified for NiceEEGEncoder"
 
         self.patch_embedding = PatchEmbedding(
-            d_embed=config.embed_dim,
+            d_embed=config.d_eeg,
             num_channels=config.d_channels,
             dropout=config.dropout,
         )
 
         self.proj = EEGProjection(
-            d_input=config.patch_out_size * config.embed_dim,
+            d_input=config.patch_out_size * config.d_eeg,
             d_output=config.d_output,
             dropout=config.dropout,
         )

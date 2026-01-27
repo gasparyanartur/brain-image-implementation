@@ -26,7 +26,8 @@ import multiprocessing as mp
 from brain_image.model.eeg_encoder.eeg_encoder import EEG_ENCODER
 from brain_image.model.img_encoder import IMAGE_ENCODER
 
-
+SPLIT = Literal["train", "val", "test"]
+DSPLIT = Literal["train", "test"]
 LatentTypeT = Literal[
     "prior_img_latent", "eeg_latent", "align_img_latent", "low_level_latent"
 ]
@@ -111,13 +112,16 @@ class EEGDatasetConfig(DataConfig):
 
     preload_cache: bool = True
 
+
 @lru_cache(maxsize=1024 * 1024)
 def _load_cached_tensor_from_path(path: Path) -> Tensor:
     tensor = torch.load(path)
     return tensor
 
+
 def _encode_tensor_keys(keys: tuple[str, ...]) -> str:
     return "/".join(keys)
+
 
 @lru_cache(maxsize=1024 * 1024)
 def _get_cached_tensor_path(cache_path: Path, keys: tuple[str, ...]) -> Path:
@@ -125,6 +129,7 @@ def _get_cached_tensor_path(cache_path: Path, keys: tuple[str, ...]) -> Path:
     full_path = cache_path / encoded_path
     full_path = full_path.with_suffix(".pt")
     return full_path
+
 
 class TensorCache:
     def __init__(
@@ -149,7 +154,6 @@ class TensorCache:
             for arg in args:
                 tensor, *keys = arg
                 self.save(tensor, *cast(Sequence[str], keys))
-
 
     def batch_get(
         self, items: Iterable[Iterable[str]], parallel: bool = True
@@ -300,8 +304,6 @@ class EEGDataModule(DataModule):
         self.embeddings_stats = self.get_embeddings_stats()
         logging.info(f"Got embedding stats for: {self.embeddings_stats.keys()}")
 
-
-
     def _create_factory(
         self, config, tensor_cache, embeddings_map
     ) -> EEGDatasetFactory:
@@ -310,13 +312,15 @@ class EEGDataModule(DataModule):
                 from brain_image.data.things_eeg2_dataset import (
                     ThingsEEG2DatasetFactory,
                 )
+
                 return ThingsEEG2DatasetFactory(config, tensor_cache, embeddings_map)  # type: ignore
             case "alljoined-eeg2":
                 from brain_image.data.alljoined_eeg2_dataset import (
-                    AlljoinedEEG2DatasetFactory
-                )   
+                    AlljoinedEEG2DatasetFactory,
+                )
+
                 return AlljoinedEEG2DatasetFactory(config, tensor_cache, embeddings_map)  # type: ignore
-            case _:         
+            case _:
                 raise ValueError(f"Unrecognized dataset type: {config.dataset}")
 
     def get_metadata(self) -> dict:
@@ -396,6 +400,12 @@ class EEGDataset(Dataset):
         self.limit_size = limit_size
         self.compute_stats = compute_stats
         self.embedding_stats: dict[LatentTypeT, LatentStats] = {}
+        self.eeg_stats = {}
+
+        logging.info(f"Loading EEG")
+        self.eeg = torch.stack(
+            [self.load_eeg_from_path(eeg_path) for eeg_path in self.get_eeg_paths()]
+        )  # <sub, image, channel, time>
 
         logging.info(f"Reducing dataset size to {limit_size * 100:.2f}%")
         self.limit_data_size(limit_size, limit_shuffle)
@@ -410,6 +420,16 @@ class EEGDataset(Dataset):
 
         if compute_stats:
             self.embedding_stats = self._compute_embedding_stats()
+
+    @abstractmethod
+    def load_eeg_from_path(self, eeg_path: Path) -> torch.Tensor:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_eeg_paths(
+        self, split: DSPLIT | None = None, subs: list[int] | None = None
+    ) -> list[Path]:
+        raise NotImplementedError
 
     @abstractmethod
     def get_image_paths(self) -> list[Path]:
@@ -694,6 +714,50 @@ def get_embeddings_stats(
 
     logging.info(f"Finished getting embedding stats")
     return embedding_stats
+
+
+@torch.no_grad()
+def get_eeg_stats(eeg: Tensor) -> dict[str, Tensor]:
+    
+    num_channels = eeg.size(-2)
+    num_timesteps = eeg.size(-1)
+
+    eeg = eeg.reshape(-1, num_channels, num_timesteps)
+    mean = eeg.mean(dim=0)
+    std = eeg.std(dim=0)
+
+    return {
+        "mean": mean,
+        "std": std,
+    }
+
+
+@torch.no_grad()
+def rescale_eeg(eeg: Tensor, stats: dict[str, Tensor], reverse: bool = False) -> Tensor:
+    if reverse:
+        eeg = eeg * stats["std"] + stats["mean"]
+    else:
+        eeg = (eeg - stats["mean"]) / stats["std"]
+    return eeg
+
+
+@torch.no_grad()
+def truncate_data(data: torch.Tensor, trunc_percentile: float | None = None, trunc_max: float | None = None):
+    if trunc_percentile is None and trunc_max is None:
+        return data
+    
+    if trunc_percentile is not None and trunc_max is not None:
+        raise ValueError(f"Only one of trunc_percentile or trunc_max can be specified.")
+    
+    if trunc_max is None:
+        assert trunc_percentile is not None
+        sorted_values = data.flatten().abs().sort(descending=False).values
+        trunc_idx = int(trunc_percentile * len(sorted_values))
+        trunc_max = sorted_values[trunc_idx].item()
+    
+    data[data > trunc_max] = trunc_max
+    data[data < -trunc_max] = -trunc_max
+    return data
 
 
 def download_to_file(

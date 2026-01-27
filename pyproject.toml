@@ -43,7 +43,8 @@ dependencies = [
     "gdown",
     "mne",
     "scikit-image",
-    "google-genai"
+    "google-genai",
+    "umap-learn"
 ]
 
 [project.optional-dependencies]
