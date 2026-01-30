@@ -261,7 +261,7 @@ class CommAlignmentModel(TrainingModule):
 
         return comm_out, loss_dict
 
-    def training_step(self, batch, batch_idx: int, dataloader_idx: int, *args, **kwargs):
+    def training_step(self, batch, batch_idx: int, dataloader_idx: int=0, *args, **kwargs):
         # Scaffolding
         self.atleast_one_training_step = True
 
@@ -308,7 +308,7 @@ class CommAlignmentModel(TrainingModule):
         
         return loss_dict
     
-    def validation_step(self, batch, batch_idx: int, dataloader_idx: int, *args, **kwargs):
+    def validation_step(self, batch, batch_idx: int, dataloader_idx: int=0, *args, **kwargs):
         batch = self.prepare_batch(batch)
 
         with torch.no_grad():
@@ -325,7 +325,7 @@ class CommAlignmentModel(TrainingModule):
 
         return loss_dict
     
-    def test_step(self, batch, batch_idx: int=-1, dataloader_idx: int=-1, skip_log: bool = False, *args, **kwargs):
+    def test_step(self, batch, batch_idx: int=-1, dataloader_idx: int=0, skip_log: bool = False, *args, **kwargs):
         batch = self.prepare_batch(batch)
 
         with torch.no_grad():
