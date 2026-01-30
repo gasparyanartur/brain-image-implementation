@@ -87,6 +87,27 @@
                 "trainer.log_every_n_steps=5",
                 "trainer.eeg_encoder_path=checkpoints/nice-align-unaligned_synclr_16/checkpoints/nice-epoch-41-VAL__loss-0.0038.ckpt"
             ]
+        },
+        {
+            "name": "Train CoMM - Debug",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/train_comm.py",
+            "console": "integratedTerminal",
+            "args": [
+                "trainer.debug_mode=true",
+                "dataset=dummy",
+                "model.max_epochs=3",
+                "trainer.wandb.enabled=False",
+                "trainer.log_every_n_steps=1",
+                "model.embed_dim=32",
+                "model.proj_dim=16",
+                "model.img_encoder=dummy_768",
+                "eeg_encoder@model.eeg_encoder=dummy",
+                "trainer.preload_images=false",
+                "trainer.cache_images=false",
+                "trainer.enable_barebones=true"
+            ]
         }
     ]
 }

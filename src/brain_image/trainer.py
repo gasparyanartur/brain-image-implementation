@@ -222,6 +222,7 @@ class Trainer:
 
         ckpt_path_str = str(ckpt_path) if ckpt_path else None
 
+        self.model.train()
         self.pl_trainer.fit(
             model=self.model,
             ckpt_path=ckpt_path_str,
@@ -232,6 +233,7 @@ class Trainer:
     def test(self) -> Dict[str, float]:
         logging.info("Running model testing...")
 
+        self.model.eval()
         results = self.pl_trainer.test(model=self.model)
 
         if results and len(results) > 0:
@@ -245,6 +247,7 @@ class Trainer:
     def validate(self) -> Dict[str, float]:
         logging.info("Running model validation...")
 
+        self.model.eval()
         results = self.pl_trainer.validate(model=self.model)
 
         if results and len(results) > 0:
@@ -261,6 +264,7 @@ class Trainer:
         if dataloader is None:
             dataloader = self.model.test_dataloader()
 
+        self.model.eval()
         predictions = self.pl_trainer.predict(
             model=self.model,
             dataloaders=dataloader,
