@@ -1220,15 +1220,6 @@ class EEGAlignmentModel(TrainingModule):
 
         return metrics, img_outputs
 
-    @property
-    def log_dir(self) -> Path | None:
-        for logger in self.loggers:
-            if isinstance(logger, (CSVLogger, TensorBoardLogger)):
-                if logger.log_dir is not None:
-                    return Path(logger.log_dir)
-
-        return None
-
     def dump_test_output(
         self,
         output_dir: Path,

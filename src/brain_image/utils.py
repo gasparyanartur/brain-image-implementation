@@ -460,3 +460,29 @@ def gather_records(records: list[dict]) -> dict[str, torch.Tensor]:
     return {
         k: gather_row(k, records) for k in records[0].keys()
     }
+
+def prep_batch_for_logs(batch: dict[str, torch.Tensor]) -> dict[str, Any]:
+    output = {}
+
+    for k, v in batch.items():
+        if isinstance(v, np.ndarray):
+            v = torch.from_numpy(v)
+
+        if isinstance(v, list):
+            if isinstance(v[0], torch.Tensor):
+                v = torch.stack(v).detach().cpu()
+            else:
+                try:
+                    v = torch.tensor(v)
+                except BaseException as e:
+                    ...
+
+        if isinstance(v, torch.Tensor):
+            v = v.detach().cpu()
+
+        if v.dim() == 0:
+            v = v.item()
+        
+        output[k] = v
+
+    return output

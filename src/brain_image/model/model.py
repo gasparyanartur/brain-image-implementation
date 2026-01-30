@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -7,6 +8,7 @@ import torch.nn as nn
 from brain_image.configs import BaseConfig
 
 from lightning import pytorch as pl
+from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 
 @torch.compile()
 def normalize_projection(
@@ -141,3 +143,12 @@ class TrainingModule(pl.LightningModule):
     def __init__(self, config: TrainingModuleConfig):
         super().__init__()
         self.config = config
+
+    @property
+    def log_dir(self) -> Path | None:
+        for logger in self.loggers:
+            if isinstance(logger, (CSVLogger, TensorBoardLogger)):
+                if logger.log_dir is not None:
+                    return Path(logger.log_dir)
+
+        return None

@@ -124,13 +124,13 @@ def main(args: Args):
 
     logging.info(f"Running full test...")
     loader = model.data_module.get_dataloader("test")
-    mean_metrics, std_metrics = model.run_full_test(loader)
+    metrics = model.run_full_test(loader)
     logging.info(f"Finished running full test.")
 
     logging.info(f"Metrics:")
-    for key in mean_metrics.keys():
+    for k, v in metrics.items():
         logging.info(
-            f"  {key}: {mean_metrics[key].item()} ± {std_metrics[key].item()} "
+            f"  {k}: {v}"
         )
 
     name = args.run_path.name
@@ -142,8 +142,10 @@ def main(args: Args):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     with open(output_dir / "config.json", "w") as f:
-        json.dumps(args.model_dump_json(indent=4))
+        json.dump(args.model_dump_json(indent=4), f)
 
+    with open(output_dir / "metrics.json", "w") as f:
+        json.dump(metrics, f)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

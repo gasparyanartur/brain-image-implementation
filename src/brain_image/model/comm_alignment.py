@@ -1,4 +1,5 @@
 import datetime
+import json
 import logging
 from pathlib import Path
 from typing import Literal, cast
@@ -24,7 +25,7 @@ from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoderConfig
 from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM, load_image_encoder
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
-from brain_image.utils import gather_records
+from brain_image.utils import gather_dataloader, gather_records, prep_batch_for_logs
 
 
 class CommAlignmentConfig(TrainingModuleConfig):
@@ -260,7 +261,7 @@ class CommAlignmentModel(TrainingModule):
 
         return comm_out, loss_dict
 
-    def training_step(self, batch, *args, **kwargs):
+    def training_step(self, batch, batch_idx: int, dataloader_idx: int, *args, **kwargs):
         # Scaffolding
         self.atleast_one_training_step = True
 
@@ -307,7 +308,7 @@ class CommAlignmentModel(TrainingModule):
         
         return loss_dict
     
-    def validation_step(self, batch, *args, **kwargs):
+    def validation_step(self, batch, batch_idx: int, dataloader_idx: int, *args, **kwargs):
         batch = self.prepare_batch(batch)
 
         with torch.no_grad():
@@ -324,7 +325,7 @@ class CommAlignmentModel(TrainingModule):
 
         return loss_dict
     
-    def test_step(self, batch, skip_log: bool = False, *args, **kwargs):
+    def test_step(self, batch, batch_idx: int=-1, dataloader_idx: int=-1, skip_log: bool = False, *args, **kwargs):
         batch = self.prepare_batch(batch)
 
         with torch.no_grad():
@@ -341,30 +342,29 @@ class CommAlignmentModel(TrainingModule):
             "acc_proto": ssl_acc[self.config.prototype_idx],
         }
 
+        outputs = prep_batch_for_logs(metrics)
+
         if not skip_log:
-            for k, v in metrics.items():
+            for k, v in outputs.items():
                 self.log(f"test/{k}", v)
 
-        return metrics
+        if self.atleast_one_training_step and (
+            batch_idx == self.data_module.get_num_batches("test") - 1
+        ):
+            if self.log_dir is not None:
+                with open(self.log_dir / "metrics.json", "w") as f:
+                    json.dumps(outputs, indent=4)
+
+        return outputs
     
     @torch.no_grad()
     def run_full_test(self, loader: torch.utils.data.DataLoader, **kwargs):
         self.eval()
 
-        metrics = []
-        for batch in iter(loader):
-            step_metrics = self.test_step(batch, skip_log=True, **kwargs)
-            metrics.append(step_metrics)
+        batch = gather_dataloader(loader)
+        metrics = self.test_step(batch, skip_log=True, **kwargs)
 
-        gathered_metrics = gather_records(metrics)
-        mean = {k: torch.mean(v) for k, v in gathered_metrics.items()}
-        std = {k: torch.std(v) for k, v in gathered_metrics.items()}
-
-        return mean, std
-
-
-
-        
+        return metrics
 
     @torch.no_grad()
     def get_ssl_accuracy(self, z1, z2, prototype: int = -1, *args, **kwargs):
