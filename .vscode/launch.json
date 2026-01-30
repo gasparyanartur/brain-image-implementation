@@ -108,6 +108,16 @@
                 "trainer.cache_images=false",
                 "trainer.enable_barebones=true"
             ]
+        },
+        {
+            "name": "Test CoMM - Debug",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/test_comm.py",
+            "console": "integratedTerminal",
+            "args": [
+                "logs/train/260130195833wxxriq",
+            ]
         }
     ]
 }

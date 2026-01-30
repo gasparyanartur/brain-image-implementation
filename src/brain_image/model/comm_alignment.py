@@ -13,7 +13,7 @@ import itertools as it
 import tqdm
 
 from brain_image.augment import EEGAugmentationPipeline, ImageAugmentationPipeline
-from brain_image.data.data import EEGDataModule, EEGDatasetConfig, batch_load_images
+from brain_image.data.data import EEGDataModule, EEGDatasetConfig, batch_load_images, resolve_dataset_config
 from brain_image.model.comm.comm import CoMM
 from brain_image.model.comm.comm_loss import CoMMLoss
 from brain_image.model.comm.input_adapters import FeaturesInputAdapter
@@ -63,7 +63,7 @@ class CommAlignmentModel(TrainingModule):
     def __init__(
         self,
         config: CommAlignmentConfig,
-        dataset_config: EEGDatasetConfig,
+        dataset_config: EEGDatasetConfig | dict,
         preload_images: bool = True,
         cache_images: bool = True,
         eeg_encoder_path: Path | None = None,
@@ -75,6 +75,8 @@ class CommAlignmentModel(TrainingModule):
         if isinstance(config, dict):
             config = CommAlignmentConfig(**config)
 
+        dataset_config = resolve_dataset_config(dataset_config)
+
         super().__init__(config, **kwargs)
         self.automatic_optimization = (
             False  # Disable automatic optimization, we will handle it manually
@@ -84,6 +86,9 @@ class CommAlignmentModel(TrainingModule):
         self.config = config
         self.model_id = model_id
 
+        self.data_module = EEGDataModule(
+            dataset_config, 
+        )
 
         logging.info(f"Seeding everything with seed: {self.config.seed}")
         pl.seed_everything(self.config.seed)
@@ -125,9 +130,6 @@ class CommAlignmentModel(TrainingModule):
             projection=CoMM._build_mlp(self.config.embed_dim, self.config.embed_dim, self.config.proj_dim),
         )
 
-        self.data_module = EEGDataModule(
-            dataset_config, 
-        )
 
         self.image_augmenter = ImageAugmentationPipeline()
         self.eeg_augmenter = EEGAugmentationPipeline()

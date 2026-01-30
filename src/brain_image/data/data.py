@@ -32,7 +32,7 @@ LatentTypeT = Literal[
     "prior_img_latent", "eeg_latent", "align_img_latent", "low_level_latent"
 ]
 EncoderTypeT = Union[EEG_ENCODER, IMAGE_ENCODER]
-
+EEG_DATASET= Literal["alljoined-eeg2", "things-eeg2", "dummy"]
 
 class LatentTypeMapT(TypedDict):
     """Maps the role of the latent to the specific encoder used."""
@@ -186,6 +186,25 @@ class TensorCache:
         return self.get(str(source_path), model_name, split)
 
 
+def resolve_dataset_config(config: dict | EEGDatasetConfig) -> EEGDatasetConfig:
+    if isinstance(config, EEGDatasetConfig):
+        return config
+    
+    key = cast(EEG_DATASET, config["dataset"])
+
+    match key:
+        case "alljoined-eeg2":
+            from brain_image.data.alljoined_eeg2_dataset import AlljoinedEEG2DatasetConfig
+            return AlljoinedEEG2DatasetConfig(**config)
+        case "things-eeg2":
+            from brain_image.data.things_eeg2_dataset import ThingsEEG2DatasetConfig
+            return ThingsEEG2DatasetConfig(**config)
+        case "dummy":
+            from brain_image.data.dummy_eeg_dataset import DummyEEGDatasetConfig
+            return DummyEEGDatasetConfig(**config)
+        case _:
+            raise ValueError(f"Unknown dataset: {key}")
+
 class EEGDatasetFactory(ABC):
     def __init__(
         self,
@@ -305,8 +324,10 @@ class EEGDataModule(DataModule):
         logging.info(f"Got embedding stats for: {self.embeddings_stats.keys()}")
 
     def _create_factory(
-        self, config, tensor_cache, embeddings_map
+        self, config: dict | EEGDatasetConfig, tensor_cache, embeddings_map
     ) -> EEGDatasetFactory:
+        config = resolve_dataset_config(config)
+
         match config.dataset:
             case "things-eeg2":
                 from brain_image.data.things_eeg2_dataset import (

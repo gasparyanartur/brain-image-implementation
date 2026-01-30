@@ -10,6 +10,7 @@ import torch
 
 from brain_image.data.data import (
     DSPLIT,
+    EEG_DATASET,
     EEGDataset,
     EEGDatasetConfig,
     EEGDatasetFactory,
@@ -96,7 +97,7 @@ class AlljoinedEEG2DatasetConfig(EEGDatasetConfig):
     data_path: Path = Path("data/alljoined-1.6m")
     img_dir: str = "stimuli/images"
     preprocessed_eeg_dir: str = "preprocessed-eeg"
-    dataset: Literal["things-eeg2", "alljoined-eeg2"] = "alljoined-eeg2"
+    dataset: EEG_DATASET = "alljoined-eeg2"
     subs: list[int] | None = None
     num_channels: int = 32
     time_length: int = 250
@@ -252,10 +253,13 @@ class AlljoinedEEG2Dataset(EEGDataset):
 class AlljoinedEEG2DatasetFactory(EEGDatasetFactory):
     def __init__(
         self,
-        config: AlljoinedEEG2DatasetConfig,
+        config: AlljoinedEEG2DatasetConfig | dict,
         tensorcache: TensorCache,
         embeddings_map: LatentTypeMapT,
     ):
+        if isinstance(config, dict):
+           config = AlljoinedEEG2DatasetConfig(**config)
+
         self.config = config
         self.tensorcache = tensorcache
         self.embeddings_map = embeddings_map

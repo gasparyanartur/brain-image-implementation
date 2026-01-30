@@ -7,6 +7,7 @@ import torch
 from torch import Tensor
 from brain_image.data.data import (
     DSPLIT,
+    EEG_DATASET,
     EEGDataset,
     EEGDatasetConfig,
     EEGDatasetFactory,
@@ -41,7 +42,7 @@ class ThingsEEG2DatasetConfig(EEGDatasetConfig):
     data_path: Path = Path("data/things-eeg2")
     img_dir: str = "imgs"
     preprocessed_eeg_dir: str = "preprocessed-eeg"
-    dataset: Literal['things-eeg2', 'alljoined'] = "things-eeg2"
+    dataset: EEG_DATASET = "things-eeg2"
     subs: list[int] | None = None
     num_channels: int = 63
     time_length: int = 250
@@ -147,10 +148,13 @@ class ThingsEEG2Dataset(EEGDataset):
 class ThingsEEG2DatasetFactory(EEGDatasetFactory):
     def __init__(
         self,
-        config: ThingsEEG2DatasetConfig,
+        config: ThingsEEG2DatasetConfig | dict,
         tensorcache: TensorCache,
         embeddings_map: LatentTypeMapT,
     ):
+        if isinstance(config, dict):
+            config = ThingsEEG2DatasetConfig(**config)
+
         self.config = config
         self.tensorcache = tensorcache
         self.embeddings_map = embeddings_map

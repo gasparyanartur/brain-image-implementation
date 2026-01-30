@@ -109,10 +109,12 @@ class DummyEEGDataset(EEGDataset):
 class DummyEEGDatasetFactory(EEGDatasetFactory):
     def __init__(
         self,
-        config: DummyEEGDatasetConfig,
+        config: DummyEEGDatasetConfig | dict,
         tensorcache: TensorCache,
         embeddings_map: LatentTypeMapT,
     ):
+        if isinstance(config, dict):
+            config = DummyEEGDatasetConfig(**config)
         self.config = config
         self.tensorcache = tensorcache
         self.embeddings_map = embeddings_map

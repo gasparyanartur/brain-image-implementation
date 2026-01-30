@@ -23,6 +23,7 @@ from brain_image.data.data import (
     LatentTypeMapT,
     TensorCache,
     batch_load_images,
+    resolve_dataset_config,
 )
 from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
 from brain_image.model.eeg_encoder import create_eeg_encoder
@@ -203,8 +204,7 @@ class EEGAlignmentModel(TrainingModule):
             False  # Disable automatic optimization, we will handle it manually
         )
 
-        if isinstance(dataset_config, dict):
-            dataset_config = EEGDatasetConfig.model_validate(dataset_config)
+        dataset_config = resolve_dataset_config(dataset_config)
 
 
         self.model_id = model_id
