@@ -11,3 +11,5 @@ resume_training: false
 model:
   seed: 42
   max_epochs: 30
+  embed_dim: 512
+  proj_dim: 256

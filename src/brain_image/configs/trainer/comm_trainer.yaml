@@ -27,3 +27,6 @@ save_checkpoints: true
 save_top_k: 1
 
 make_subdir: false
+
+cache_images: true
+preload_images: true

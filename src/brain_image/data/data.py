@@ -105,7 +105,7 @@ class DataConfig(BaseConfig, ABC):
 
 class EEGDatasetConfig(DataConfig):
     data_path: Path
-    dataset: Literal["things-eeg2", "alljoined-eeg2"]
+    dataset: Literal["things-eeg2", "alljoined-eeg2", "dummy"]
     subs: list[int] | None
     num_channels: int
     time_length: int
@@ -320,6 +320,11 @@ class EEGDataModule(DataModule):
                 )
 
                 return AlljoinedEEG2DatasetFactory(config, tensor_cache, embeddings_map)  # type: ignore
+            
+            case "dummy":
+                from brain_image.data.dummy_eeg_dataset import DummyEEGDatasetFactory
+
+                return DummyEEGDatasetFactory(config, tensor_cache, embeddings_map)
             case _:
                 raise ValueError(f"Unrecognized dataset type: {config.dataset}")
 
@@ -675,9 +680,6 @@ def load_all_eeg_data(
 class LatentStats(TypedDict):
     mean: Tensor
     std: Tensor
-    min: Tensor
-    max: Tensor
-    norm: Tensor
 
 
 @torch.no_grad()
@@ -705,9 +707,6 @@ def get_embeddings_stats(
         k: {
             "mean": torch.mean(v, dim=0),
             "std": torch.std(v, dim=0),
-            "min": torch.min(v, dim=0).values,
-            "max": torch.max(v, dim=0).values,
-            "norm": v.norm(dim=-1).mean(),
         }
         for k, v in _running_embeddings.items()
     }

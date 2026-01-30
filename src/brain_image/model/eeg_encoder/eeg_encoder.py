@@ -7,7 +7,7 @@ import torch
 
 from brain_image.configs import BaseConfig
 
-EEG_ENCODER = Literal["atms", "nice"]
+EEG_ENCODER = Literal["atms", "nice", "dummy"]
 
 class EEGEncoderConfig(BaseConfig):
     eeg_encoder: EEG_ENCODER

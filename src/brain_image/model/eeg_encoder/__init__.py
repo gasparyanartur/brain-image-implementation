@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from typing import cast
 import torch
+from brain_image.model.eeg_encoder.dummy import DummyEEGEncoder, DummyEEGEncoderConfig
 from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder, EEGEncoderConfig
 from brain_image.model.eeg_encoder.nice import NiceEEGEncoder, NiceEEGEncoderConfig
 from brain_image.model.eeg_encoder.atms import AtmsEEGEncoder, AtmsEEGEncoderConfig
@@ -18,8 +19,11 @@ def create_eeg_encoder(
         case "atms":
             model_name = "atms"
             encoder = AtmsEEGEncoder(cast(AtmsEEGEncoderConfig, config))
+        case "dummy":
+            model_name = "dummy"
+            encoder = DummyEEGEncoder(cast(DummyEEGEncoderConfig, config))
         case _:
-            raise ValueError(f"Unknown encoder name: {name}")
+            raise ValueError(f"Unknown encoder name: {config.eeg_encoder}")
 
     logging.info(f"Using {model_name} EEG encoder")
     if checkpoint_path is None:

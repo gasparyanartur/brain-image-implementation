@@ -25,6 +25,8 @@ from torchvision.transforms.v2 import (
 import dreamsim
 from dreamsim.model import PerceptualModel
 
+from brain_image.configs import get_device_str
+
 
 IMAGE_ENCODER = typing.Literal[
     "clip_vitl14",
@@ -36,12 +38,13 @@ IMAGE_ENCODER = typing.Literal[
     "synclr_vitb16",
     "aligned_synclr_vitb16",
     "unaligned_synclr_vitb16",
+    "dummy_768"
 ]
 VAE_ENCODER = typing.Literal[
     "sd_variations_v2", "ip_sdxl_turbo", "ip_sdxl_turbo_256", "ip_sdxl_turbo_128"
 ]
 DREAMSIM_IMAGE_ENCODER = typing.Literal[
-    "synclr_vitb16", "unaligned_synclr_vitb16", "aligned_synclr_vitb16"
+    "synclr_vitb16", "unaligned_synclr_vitb16", "aligned_synclr_vitb16", "dummy_768"
 ]
 IMAGE_ENCODER_DIM: dict[IMAGE_ENCODER, int] = {
     "clip_vitl14": 768,
@@ -53,6 +56,7 @@ IMAGE_ENCODER_DIM: dict[IMAGE_ENCODER, int] = {
     "synclr_vitb16": 768,
     "aligned_synclr_vitb16": 768,
     "unaligned_synclr_vitb16": 768,
+    "dummy_768": 768
 }
 
 
@@ -121,6 +125,8 @@ def load_image_encoder(
                 download_weights=download_weights,
                 **kwargs,
             )
+        case "dummy_768" | "dummy" | "dummy_1024":
+            model = DummyImageEncoder(model_name, *args, **kwargs)
         case _:
             raise ValueError(f"Unknown model name: {model_name}")
 
@@ -293,6 +299,7 @@ class DreamsimImageEncoder(BaseImageEncoder):
                 stride=str(self.patch_size),  # type: ignore
                 load_dir=models_path_str,
                 baseline=True,
+                device=get_device_str()
             )
 
         else:
@@ -300,6 +307,7 @@ class DreamsimImageEncoder(BaseImageEncoder):
                 dreamsim_type=model_url,
                 cache_dir=models_path_str,
                 normalize_embeds=False,
+                device=get_device_str()
             )
 
         self.processor = processor
@@ -316,3 +324,16 @@ class DreamsimImageEncoder(BaseImageEncoder):
         latent = self.model.embed(img)  # type: ignore
 
         return latent
+
+
+class DummyImageEncoder(BaseImageEncoder):
+    def __init__(self, model_name, *args, **kwargs):
+        super().__init__(model_name, *args, **kwargs)
+        
+        self.dim = int(model_name.split("_")[-1])
+        
+    def preprocess(self, img: torch.Tensor) -> torch.Tensor:
+        return torch.randn_like(img)
+
+    def encode(self, img: torch.Tensor) -> torch.Tensor:
+        return torch.randn(img.shape[0], self.dim, device=img.device, dtype=torch.float)
