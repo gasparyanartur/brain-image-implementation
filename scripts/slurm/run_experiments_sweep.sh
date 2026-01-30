@@ -1,8 +1,16 @@
-experiment_name=$1
-array_arg=$2
-config_name=$3
-cli_args="${@:4}"
+experiment_script=$1
+experiment_name=$2
+array_arg=$3
+config_name=$4
+cli_args="${@:5}"
 
+
+if [ -z "$experiment_script" ]; then
+    echo "Missing experiment_script"
+    echo "Usage: $0 experiment_script experiment_name array_arg args..."
+    exit 1
+fi
+echo "Experiment Script: $experiment_script"
 
 if [ -z "$experiment_name" ]; then
     echo "Missing experiment_name"
@@ -42,13 +50,10 @@ if [ ! -d "$experiment_path" ]; then
     mkdir -p $experiment_path
 fi 
 
-train_script=${TRAIN_SCRIPT:-scripts/train_eeg.py}
-echo "Train Script: $train_script"
-
 echo "Config Name: $config_name"
 echo "Experiment Directory: $experiment_dir"
 echo "Parameter Directory: $param_dir"
 echo "Experiment Path: $experiment_path"
 echo "Parameter Path: $param_path"
 
-sbatch $array_arg scripts/slurm/run_sweep.sh $param_path python $TRAIN_SCRIPT --config-name=$config_name trainer.log_dir=$experiment_path trainer.make_subdir=False $cli_args
+sbatch $array_arg scripts/slurm/run_sweep.sh $param_path python $experiment_script --config-name=$config_name trainer.log_dir=$experiment_path trainer.make_subdir=False $cli_args
