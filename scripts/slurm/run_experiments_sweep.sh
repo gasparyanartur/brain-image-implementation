@@ -42,6 +42,8 @@ if [ ! -d "$experiment_path" ]; then
     mkdir -p $experiment_path
 fi 
 
+train_script=${TRAIN_SCRIPT:-scripts/train_eeg.py}
+echo "Train Script: $train_script"
 
 echo "Config Name: $config_name"
 echo "Experiment Directory: $experiment_dir"
@@ -49,4 +51,4 @@ echo "Parameter Directory: $param_dir"
 echo "Experiment Path: $experiment_path"
 echo "Parameter Path: $param_path"
 
-sbatch $array_arg scripts/slurm/run_sweep.sh $param_path python /workspace/scripts/train_eeg.py --config-name=$config_name trainer.log_dir=$experiment_path trainer.make_subdir=False $cli_args
+sbatch $array_arg scripts/slurm/run_sweep.sh $param_path python $TRAIN_SCRIPT --config-name=$config_name trainer.log_dir=$experiment_path trainer.make_subdir=False $cli_args
