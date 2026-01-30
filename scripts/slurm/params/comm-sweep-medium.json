@@ -1,0 +1,44 @@
+{
+    "entries": [
+        {
+            "keys": [
+                "model.eeg_encoder"
+            ],
+            "values": [
+                [
+                    "nice",
+                    "atms"
+                ]
+            ]
+        },
+        {
+            "keys": [
+                "model.img_encoder"
+            ],
+            "values": [
+                [
+                    "unaligned_synclr_vitb16",
+                    "aligned_synclr_vitb16"
+                ]
+            ]
+        },
+        {
+            "keys": [
+                "dataset.subs"
+            ],
+            "values": [
+                [
+                    "[1]", "[4]", "[6]", "[8]", "[10]"
+                ]
+            ]
+        },
+        {
+            "key": [
+                "model.seed"
+            ],
+            "values": [
+                ["1", "2", "3", "4", "5"]
+            ]
+        }
+    ]
+}

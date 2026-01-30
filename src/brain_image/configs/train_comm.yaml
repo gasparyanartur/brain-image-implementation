@@ -10,5 +10,4 @@ resume_training: false
 
 model:
   seed: 42
-
-max_epochs: 30
+  max_epochs: 30
