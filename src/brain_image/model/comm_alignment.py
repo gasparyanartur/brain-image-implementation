@@ -24,6 +24,7 @@ from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoderConfig
 from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM, load_image_encoder
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
+from brain_image.utils import gather_records
 
 
 class CommAlignmentConfig(TrainingModuleConfig):
@@ -51,6 +52,11 @@ class CommAlignmentConfig(TrainingModuleConfig):
     betas: tuple[float, float] = (0.9, 0.999)
 
     modules_to_train: list[str] = ["eeg_encoder", "comm"]
+
+    eeg_idx: int = 1
+    img_idx: int = 0
+    prototype_idx: int = 2
+
 
 
 class CommAlignmentModel(TrainingModule):
@@ -103,16 +109,17 @@ class CommAlignmentModel(TrainingModule):
             checkpoint_path=eeg_encoder_path,
         )
 
+        encoders = []
+        encoders.insert(config.img_idx, self.img_encoder)
+        encoders.insert(config.eeg_idx, self.eeg_encoder)
+        input_adapters = []
+        input_adapters.insert(config.img_idx, FeaturesInputAdapter(IMAGE_ENCODER_DIM[self.config.img_encoder], self.config.embed_dim))
+        input_adapters.insert(config.eeg_idx, FeaturesInputAdapter(self.config.eeg_encoder.d_output, self.config.embed_dim))
+
         self.comm = CoMM(
             encoder=MMFusion(
-                encoders=[  # Symmetric visual encoders
-                    self.img_encoder,  # 1024
-                    self.eeg_encoder,
-                ],
-                input_adapters=[  # Pach adapters for multimodal fusion
-                    FeaturesInputAdapter(self.config.eeg_encoder.d_output, self.config.embed_dim),
-                    FeaturesInputAdapter(IMAGE_ENCODER_DIM[self.config.img_encoder], self.config.embed_dim),
-                ],
+                encoders=encoders,
+                input_adapters=input_adapters,
                 embed_dim=self.config.embed_dim,
             ),
             projection=CoMM._build_mlp(self.config.embed_dim, self.config.embed_dim, self.config.proj_dim),
@@ -307,13 +314,15 @@ class CommAlignmentModel(TrainingModule):
         z1 = comm_out["aug1_embed"]
         z2 = comm_out["aug2_embed"]
         ssl_acc = self.get_ssl_accuracy(z1, z2)
-
+ 
         self.log("val/loss", loss_dict["loss"], prog_bar=True)
-        for i in range(len(ssl_acc)):
-            self.log(f"val/acc_{i}", ssl_acc[i], prog_bar=True)
+        self.log(f"val/acc_eeg", ssl_acc[self.config.eeg_idx], prog_bar=True)
+        self.log(f"val/acc_img", ssl_acc[self.config.img_idx], prog_bar=True)
+        self.log(f"val/acc_proto", ssl_acc[self.config.prototype_idx], prog_bar=True)
+
         return loss_dict
     
-    def test_step(self, batch, *args, **kwargs):
+    def test_step(self, batch, skip_log: bool = False, *args, **kwargs):
         batch = self.prepare_batch(batch)
 
         with torch.no_grad():
@@ -323,11 +332,37 @@ class CommAlignmentModel(TrainingModule):
         z2 = comm_out["aug2_embed"]
         ssl_acc = self.get_ssl_accuracy(z1, z2)
 
-        self.log("test_loss", loss_dict["loss"], prog_bar=True)
-        for i in range(len(ssl_acc)):
-            self.log(f"test/acc{i}", ssl_acc[i], prog_bar=True)
-        return loss_dict
+        metrics = {
+            "loss": loss_dict["loss"],
+            "acc_eeg": ssl_acc[self.config.eeg_idx],
+            "acc_img": ssl_acc[self.config.img_idx],
+            "acc_proto": ssl_acc[self.config.prototype_idx],
+        }
+
+        if not skip_log:
+            for k, v in metrics.items():
+                self.log(f"test/{k}", v)
+
+        return metrics
     
+    @torch.no_grad()
+    def run_full_test(self, loader: torch.utils.data.DataLoader, **kwargs):
+        self.eval()
+
+        metrics = []
+        for batch in iter(loader):
+            step_metrics = self.test_step(batch, skip_log=True, **kwargs)
+            metrics.append(step_metrics)
+
+        gathered_metrics = gather_records(metrics)
+        mean = {k: torch.mean(v) for k, v in gathered_metrics.items()}
+        std = {k: torch.std(v) for k, v in gathered_metrics.items()}
+
+        return mean, std
+
+
+
+        
 
     @torch.no_grad()
     def get_ssl_accuracy(self, z1, z2, prototype: int = -1, *args, **kwargs):

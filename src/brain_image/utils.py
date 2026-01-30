@@ -441,3 +441,22 @@ def batchify_operation(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tenso
     for i in range(0, n, batch_size):
         res.append(f(x[i:i+batch_size]))
     return torch.cat(res, dim=0)
+
+
+def gather_records(records: list[dict]) -> dict[str, torch.Tensor]:
+    if not records:
+        return {}
+    
+    def gather_row(key: str, row: list[dict[str, Any]]) -> Any:
+        example = row[0][key]
+        
+        if isinstance(example, torch.Tensor):
+            return torch.stack([r[key] for r in row])
+        elif isinstance(example, list):
+            return [r[key] for r in row]
+        else:
+            raise ValueError(f"Unsupported type {type(example)} for key {key}")
+
+    return {
+        k: gather_row(k, records) for k in records[0].keys()
+    }
