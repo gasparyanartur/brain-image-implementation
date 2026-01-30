@@ -405,7 +405,7 @@ class EEGDataset(Dataset):
         logging.info(f"Loading EEG")
         self.eeg = torch.stack(
             [self.load_eeg_from_path(eeg_path) for eeg_path in self.get_eeg_paths()]
-        )  # <sub, image, channel, time>
+        ).float()  # <sub, image, channel, time>
 
         logging.info(f"Reducing dataset size to {limit_size * 100:.2f}%")
         self.limit_data_size(limit_size, limit_shuffle)

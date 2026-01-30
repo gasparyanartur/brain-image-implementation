@@ -15,7 +15,7 @@ class CoMMLoss(nn.Module):
 
     def __init__(self, temperature=0.1, weights=None):
         super().__init__()
-        self.temperature = temperature
+        self.temperature = nn.Parameter(torch.tensor(temperature)) 
         self.weights = weights
         self.INF = 1e8
 
@@ -32,12 +32,8 @@ class CoMMLoss(nn.Module):
             torch.cat([sim_zjj, sim_zij.T], dim=1)], dim=0)
         log_sim_Z = func.log_softmax(sim_Z, dim=1)
         loss = - torch.diag(log_sim_Z).mean()
-        # compute SSL accuracy
-        with torch.no_grad():
-            pred = torch.argmax(sim_zij, dim=1)
-            correct = pred.eq(torch.arange(N, device=z1.device)).sum()
-            acc = 100 * correct / N
-        return loss, acc
+        
+        return loss
 
     def forward(self, outputs):
         """
@@ -60,20 +56,18 @@ class CoMMLoss(nn.Module):
 
         # Apply InfoNCE between a "prototype embedding" and all the others
         loss = []
-        acc = []
         for i in range(n_emb):
-            loss1, acc1 = self.infonce(z1[i], z2[prototype])
-            loss2, acc2 = self.infonce(z2[i], z1[prototype])
+            loss1 = self.infonce(z1[i], z2[prototype])
+            loss2 = self.infonce(z2[i], z1[prototype])
             loss.append((loss1 + loss2) / 2.)
-            acc.append((acc1 + acc2) / 2.)
-        ssl_acc = {"ssl_acc_%i"%i: acc_ for i, acc_ in enumerate(acc)}
+        
         losses = {"ssl_loss_%i"%i: l for i, l in enumerate(loss)}
         if self.weights is not None:
             loss = torch.mean(torch.stack(loss) * torch.tensor(self.weights, device=z1[0].device))
         else:
             loss = torch.mean(torch.stack(loss))
-        acc = torch.mean(torch.stack(acc))
-        return {"loss": loss, "ssl_acc": acc, **ssl_acc, **losses}
+
+        return {"loss": loss, **losses}
 
     def __str__(self):
         return "{}(temp={})".format(type(self).__name__, self.temperature)

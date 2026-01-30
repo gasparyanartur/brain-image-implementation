@@ -194,19 +194,22 @@ class EEGAlignmentModel(TrainingModule):
         model_id: str | None = None,
         **kwargs,
     ):
+ 
         if isinstance(config, dict):
             config = EEGAlignmentConfig.model_validate(config)
 
         super().__init__(config, **kwargs)
-
-        if isinstance(dataset_config, dict):
-            dataset_config = EEGDatasetConfig.model_validate(dataset_config)
-
         self.automatic_optimization = (
             False  # Disable automatic optimization, we will handle it manually
         )
 
+        if isinstance(dataset_config, dict):
+            dataset_config = EEGDatasetConfig.model_validate(dataset_config)
+
+
         self.model_id = model_id
+        logging.info(f"Seeding everything with seed: {self.config.seed}")
+        pl.seed_everything(self.config.seed)
 
         self.config: EEGAlignmentConfig = (
             config
@@ -235,8 +238,7 @@ class EEGAlignmentModel(TrainingModule):
         if init_weights:
             self._init_normal_weights()
 
-        logging.info(f"Seeding everything with seed: {self.config.seed}")
-        pl.seed_everything(self.config.seed)
+
 
         self.prior: SimpleDiffusionPrior | None = None
         self.prior_input_encoder: nn.ParameterDict | None = None
@@ -328,7 +330,7 @@ class EEGAlignmentModel(TrainingModule):
                 datetime.datetime.now().strftime("%y%m%d_%H%M%S"),
             )
 
-        name_components.append(f"eeg_{self.config.eeg_encoder}")
+        name_components.append(f"eeg_{self.config.eeg_encoder.eeg_encoder}")
 
         if self.config.do_align:
             name_components.append(f"alig_{self.config.align_img_encoder}")

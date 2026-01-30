@@ -66,7 +66,7 @@ def load_metadatas(
 
 
 def _load_eeg_from_path(path: Path) -> torch.Tensor:
-    return torch.from_numpy(np.load(path, allow_pickle=True)["preprocessed_eeg_data"])
+    return torch.from_numpy(np.load(path, allow_pickle=True)["preprocessed_eeg_data"]).float()
 
 
 def query_metadata(

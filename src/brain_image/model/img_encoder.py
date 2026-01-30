@@ -148,18 +148,25 @@ def load_vae_encoder(model_name: VAE_ENCODER, *args, **kwargs) -> VAEImageEncode
 
 
 class CLIPImageEncoder(BaseImageEncoder):
-    def __init__(self, model_name: IMAGE_ENCODER = "clip_vitl14", *args, **kwargs):
+    def __init__(self, model_name: IMAGE_ENCODER = "clip_vitl14", preprocessor_kwargs={}, *args, **kwargs):
         super().__init__(model_name=model_name)
 
         hf_name = model_name_to_hf_name(model_name)
 
         self.processor = CLIPImageProcessor.from_pretrained(hf_name)
         self.model = CLIPVisionModelWithProjection.from_pretrained(hf_name)
+        self.preprocessor_kwargs = preprocessor_kwargs
 
         self.model.requires_grad_(False)
 
     def preprocess(self, images: torch.Tensor) -> torch.Tensor:
-        return self.processor(images, return_tensors="pt").pixel_values.to(
+        extra_kwargs = {}
+        if images.max() <= 1:
+            extra_kwargs["do_rescale"] = False
+
+        extra_kwargs.update(self.preprocessor_kwargs)
+
+        return self.processor(images, return_tensors="pt", **extra_kwargs).pixel_values.to(
             self.model.device
         )
 

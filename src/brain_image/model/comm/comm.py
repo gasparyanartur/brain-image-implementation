@@ -23,26 +23,19 @@ class CoMM(BaseModel):
     def __init__(self,
                  encoder: MMFusion,
                  projection: nn.Module,
-                 optim_kwargs: Dict,
-                 loss_kwargs: Dict):
+        ):
         """
         Args:
             encoder: Multi-modal fusion encoder
             projection: MLP projector to the latent space
-            optim_kwargs: Optimization hyper-parameters
-            loss_kwargs: Hyper-parameters for the CoMM loss.
         """
-        super(CoMM, self).__init__(optim_kwargs)
+        super(CoMM, self).__init__()
 
         # create the encoder
         self.encoder = encoder
 
         # build a 3-layers projector
         self.head = projection
-
-        # Build the loss
-        self.loss = CoMMLoss(**loss_kwargs)
-
 
     @staticmethod
     def _build_mlp(in_dim, mlp_dim, out_dim):

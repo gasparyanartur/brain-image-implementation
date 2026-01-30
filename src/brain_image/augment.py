@@ -15,9 +15,6 @@ class BaseAugment(nn.Module, ABC):
         self.prob = prob
 
     def forward(self, x: Tensor) -> Tensor:
-        if not self.training:
-            return x
-
         if self.prob == 0:
             return x
 
@@ -224,8 +221,12 @@ class AugmentationPipeline(nn.Module):
 
         self.augment_modules = nn.ModuleList(augment_modules)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, disabled: bool = False) -> Tensor:
         x = self.preprocess(x)
+
+        if disabled:
+            return x
+        
         for augment in self.augment_modules:
             x = augment(x)
         x = self.postprocess(x)
@@ -358,6 +359,5 @@ class ImageAugmentationPipeline(AugmentationPipeline):
         return x
 
     def postprocess(self, x: Tensor) -> Tensor:
-        print(x.min(), x.max())
         x = x.clamp(0, 1)
         return x

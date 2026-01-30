@@ -8,6 +8,8 @@ from typing import List, Optional, Union
 from einops import repeat
 from collections import OrderedDict
 
+from brain_image.model.img_encoder import BaseImageEncoder
+
 class MLP(torch.nn.Module):
     """Two layered perceptron."""
 

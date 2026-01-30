@@ -23,7 +23,7 @@ ALL_SUBS = list(range(1, 11))
 
 
 def _load_eeg_from_path(path: Path) -> torch.Tensor:
-    return torch.from_numpy(np.load(path, allow_pickle=True)["preprocessed_eeg_data"])
+    return torch.from_numpy(np.load(path, allow_pickle=True)["preprocessed_eeg_data"]).float()
 
 def load_eeg_values(eeg_path: Path, subs: list[int], split: Literal["train", "test"]) -> torch.Tensor:
     file_name = "training.npy" if split == "train" else "test.npy"

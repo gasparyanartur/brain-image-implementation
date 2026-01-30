@@ -1,0 +1,14 @@
+defaults:
+  - base
+  - dataset: things-eeg2
+  - model: comm_model
+  - trainer: comm_trainer
+  - _self_
+
+checkpoint_path: null
+resume_training: false
+
+model:
+  seed: 42
+
+max_epochs: 30

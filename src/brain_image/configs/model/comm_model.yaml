@@ -1,0 +1,5 @@
+defaults:
+  - /eeg_encoder: atms
+  - _self_
+
+img_encoder: unaligned_synclr_vitb16

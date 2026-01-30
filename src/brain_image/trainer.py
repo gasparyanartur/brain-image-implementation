@@ -9,6 +9,7 @@ import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, ModelSummary
 from lightning.pytorch.loggers import TensorBoardLogger, Logger, WandbLogger, CSVLogger
 from brain_image.configs import BaseConfig, get_device_str
+from brain_image.model.comm_alignment import CommAlignmentModel
 from brain_image.model.eeg_alignment import EEGAlignmentModel
 from brain_image.model.low_level import LowLevelModule
 from brain_image.model.model import TrainingModule
@@ -61,6 +62,9 @@ class EEGAlignTrainerConfig(TrainConfig):
 
 class LowLevelTrainerConfig(TrainConfig):
     run_name: str = "low_level"
+
+class CommAlignTrainerConfig(TrainConfig):
+    run_name: str = "comm_alignment"
 
 class Trainer:
     def __init__(self, config: TrainConfig, model: TrainingModule):
@@ -289,6 +293,14 @@ class LowLevelTrainer(Trainer):
     def __init__(self, trainer_config: LowLevelTrainerConfig, model: LowLevelModule):
         if isinstance(trainer_config, dict):
             trainer_config = LowLevelTrainerConfig.model_validate(trainer_config)
+
+        super().__init__(trainer_config, model)
+        self.model = model
+
+class CommAlignTrainer(Trainer):
+    def __init__(self, trainer_config: CommAlignTrainerConfig, model: CommAlignmentModel):
+        if isinstance(trainer_config, dict):
+            trainer_config = CommAlignTrainerConfig.model_validate(trainer_config)
 
         super().__init__(trainer_config, model)
         self.model = model

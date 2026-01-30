@@ -13,7 +13,7 @@ class EEGEncoderConfig(BaseConfig):
     eeg_encoder: EEG_ENCODER
     d_channels: int | None = None
     d_time: int = 250
-    d_output: int = 1024
+    d_output: int = 768
     d_eeg: int = 40
 
 class EEGEncoder(ABC, nn.Module):
