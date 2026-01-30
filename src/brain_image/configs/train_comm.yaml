@@ -13,3 +13,6 @@ model:
   max_epochs: 30
   embed_dim: 512
   proj_dim: 256
+
+dataset:
+  batch_size: 64
