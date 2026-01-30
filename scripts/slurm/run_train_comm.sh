@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=train_low_level
+#SBATCH --job-name=train_comm
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=128G
 #SBATCH --gpus=1
 #SBATCH --time=1-00:00:00
-#SBATCH --output=logs/slurm/train_low_level/%j.out
+#SBATCH --output=logs/slurm/train_comm/%j.out
 #SBATCH --account=Berzelius-2025-278
 
 
