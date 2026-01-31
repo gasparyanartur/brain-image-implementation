@@ -8,7 +8,7 @@ from torch import nn, Tensor
 import torch
 
 from brain_image.configs import BaseConfig
-from brain_image.utils import find_module_content_in_state_dict
+from brain_image.utils import find_module_content_in_state_dict, flatten_configs
 
 EEG_ENCODER = Literal["atms", "nice", "dummy"]
 
@@ -49,6 +49,11 @@ def create_eeg_encoder(
     config: EEGEncoderConfig | dict, checkpoint_path: Path | None = None
 ) -> EEGEncoder:
     config = resolve_eeg_encoder_config(config)
+
+    logging.info(f"Creating EEG encoder with configs:")
+    for k, v in flatten_configs(config).items():
+        logging.info(f"  {k}: {v}")
+
     match config.eeg_encoder:
         case "nice":
             from brain_image.model.eeg_encoder.nice import NiceEEGEncoder, NiceEEGEncoderConfig
