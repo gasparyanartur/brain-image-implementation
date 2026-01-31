@@ -358,7 +358,7 @@ class CommAlignmentModel(TrainingModule):
         ):
             if self.log_dir is not None:
                 with open(self.log_dir / "metrics.json", "w") as f:
-                    json.dumps(outputs, indent=4)
+                    json.dump(outputs, f)
 
         return outputs
     
