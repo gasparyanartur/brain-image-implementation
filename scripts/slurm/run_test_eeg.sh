@@ -22,12 +22,16 @@ if [ -z "$image_path" ]; then
     image_path=$(ls -t images/brain_*.sif | head -n 1)
 fi
 
-CLI_ARGS="$@"
+test_script=$1
+echo "Test script: $test_script"
+echo "Image path: $image_path"
 
+# Other args
+CLI_ARGS="${@:2}"
 echo "CLI_ARGS: $CLI_ARGS"
 
 ./scripts/container/run_singularity.sh \
-    python /workspace/scripts/test_eeg.py $CLI_ARGS 
+    python $test_script $CLI_ARGS 
 
 if [ $? -eq 0 ]; then
     echo "Testing completed successfully"
