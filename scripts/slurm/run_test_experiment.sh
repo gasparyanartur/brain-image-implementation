@@ -27,7 +27,7 @@ CLI_ARGS="$@"
 echo "CLI_ARGS: $CLI_ARGS"
 
 ./scripts/container/run_singularity.sh \
-    python /workspace/scripts/test_all_experiments.sh $CLI_ARGS 
+    /workspace/scripts/test_all_experiments.sh $CLI_ARGS 
 
 if [ $? -eq 0 ]; then
     echo "Testing completed successfully"
