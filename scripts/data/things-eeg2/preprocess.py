@@ -3,7 +3,7 @@
 
 import argparse
 from pathlib import Path
-from brain_image.data.things_eeg2_preprocessing import ThingsEEG2DatasetPreprocessingConfig, mvnn, epoching, save_prepr
+from brain_image.data.dataset.things_eeg2_preprocessing import ThingsEEG2DatasetPreprocessingConfig, mvnn, epoching, save_prepr
 
 
 def _make_configs_from_args(args: argparse.Namespace) -> ThingsEEG2DatasetPreprocessingConfig:

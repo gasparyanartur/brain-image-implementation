@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Literal, cast
 from pathlib import Path
 
@@ -5,19 +7,18 @@ import torch
 
 from brain_image.data.data import (
     DSPLIT,
-    EEGDataset,
-    EEGDatasetConfig,
-    EEGDatasetFactory,
+    SPLIT,
     EEGSampleT,
     LatentTypeMapT,
-    TensorCache,
 )
-from brain_image.model.img_encoder import IMAGE_ENCODER_DIM
+from brain_image.data.dataset.eeg_dataset import EEGDataset, EEGDatasetConfig
+from brain_image.data.tensorcache import TensorCache
+from brain_image.model.encoder.img_encoder import ImageEncoderName, IMAGE_ENCODER_DIM
 
 
 class DummyEEGDatasetConfig(EEGDatasetConfig):
-    data_path: Path = Path("data/dummy")
     dataset: Literal["dummy"] = "dummy"
+    data_path: Path = Path("data/dummy")
     subs: list[int] | None = [1]
     num_channels: int = 32
     time_length: int = 250
@@ -25,6 +26,10 @@ class DummyEEGDatasetConfig(EEGDatasetConfig):
     dummy_eeg_path: Path = Path("dummy/eeg.npy")
     num_dummy_samples: int = 64
 
+    def create_dataset(self, split: SPLIT, *args, **kwargs) -> DummyEEGDataset:
+        return DummyEEGDataset(
+            self, split, *args, **kwargs
+        )
 
 class DummyEEGDataset(EEGDataset):
     def __init__(
@@ -57,6 +62,7 @@ class DummyEEGDataset(EEGDataset):
     def _compute_embedding_stats(self):
         stats = {}
         for emb_type, emb_name in self.embeddings_map.items():
+            emb_name = cast(ImageEncoderName, emb_name) 
             if emb_name not in self.embeddings_to_compute_stats:
                 continue
 
@@ -72,6 +78,7 @@ class DummyEEGDataset(EEGDataset):
     def get_embeddings(self, img_path):
         embedding_stack = {}
         for emb_type, emb_name in self.embeddings_map.items():
+            emb_name = cast(ImageEncoderName, emb_name)
             if emb_name is None:
                 continue
 
@@ -80,6 +87,7 @@ class DummyEEGDataset(EEGDataset):
         return embedding_stack
 
     def __len__(self) -> int:
+        assert self.config.subs is not None
         return self.config.num_dummy_samples * len(self.config.subs)
 
     def prepare(self) -> None:
@@ -106,29 +114,3 @@ class DummyEEGDataset(EEGDataset):
         return torch.randn(self.config.num_channels, self.config.time_length)
 
 
-class DummyEEGDatasetFactory(EEGDatasetFactory):
-    def __init__(
-        self,
-        config: DummyEEGDatasetConfig | dict,
-        tensorcache: TensorCache,
-        embeddings_map: LatentTypeMapT,
-    ):
-        if isinstance(config, dict):
-            config = DummyEEGDatasetConfig(**config)
-        self.config = config
-        self.tensorcache = tensorcache
-        self.embeddings_map = embeddings_map
-
-    def create_dataset(
-        self, split: Literal["train", "val", "test"], **dataset_kwargs
-    ) -> EEGDataset:
-        kwargs = {
-            "split": split,
-            "tensor_cache": self.tensorcache,
-            "embeddings_map": self.embeddings_map,
-            "limit_size": self.config.get_limit_size(split),
-            "limit_shuffle": split == "train",
-            "preload_cache": self.config.preload_cache,
-        }
-        kwargs.update(dataset_kwargs)
-        return DummyEEGDataset(self.config, **kwargs)

@@ -1,14 +1,9 @@
 import torch
-import torch.nn as nn
-from torchvision.models import resnet34
-from brain_image.configs import BaseConfig
-import einops
 
 from typing import Literal
 
-from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoder, EEGEncoderConfig
-from brain_image.model.eeg_encoder.utils import EEGProjection, PatchEmbedding
-from brain_image.model.model import ResidualAdd, WrapDebugSequential, is_debug_layer_active
+from brain_image.model.encoder.eeg_encoder.eeg_encoder import EEGEncoder, EEGEncoderConfig
+from brain_image.model.encoder.eeg_encoder.utils import EEGProjection, PatchEmbedding
 
 
 class NiceEEGEncoderConfig(EEGEncoderConfig):

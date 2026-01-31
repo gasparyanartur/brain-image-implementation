@@ -13,7 +13,8 @@ import torch
 import tqdm
 import pandas as pd
 
-from brain_image.data.data import get_image_paths, load_all_eeg_data
+from brain_image.data.io import get_image_paths
+from brain_image.data.io import load_all_eeg_data
 
 
 

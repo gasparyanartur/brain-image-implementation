@@ -1,3 +1,4 @@
+from typing import Literal
 import numpy as np
 from pydantic import BaseModel
 import torch
@@ -6,12 +7,11 @@ import torch.nn.functional as F
 import math
 
 
-from brain_image.model.eeg_encoder.eeg_encoder import (
-    EEG_ENCODER,
+from brain_image.model.encoder.eeg_encoder.eeg_encoder import (
     EEGEncoder,
     EEGEncoderConfig,
 )
-from brain_image.model.eeg_encoder.utils import EEGProjection, PatchEmbedding
+from brain_image.model.encoder.eeg_encoder.utils import EEGProjection, PatchEmbedding
 
 # From https://github.com/ncclab-sustech/EEG_Image_decode/
 
@@ -399,7 +399,7 @@ class iTransformer(nn.Module):
 
 
 class AtmsEEGEncoderConfig(EEGEncoderConfig):
-    eeg_encoder: EEG_ENCODER = "atms"
+    eeg_encoder: Literal["atms"] = "atms"
     dropout: float = 0.5
     patch_out_size: int = 36
     hidden_dim: int = 1024

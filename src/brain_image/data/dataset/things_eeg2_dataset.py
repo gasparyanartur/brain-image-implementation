@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 from typing import Literal, Sequence, cast
@@ -7,17 +9,10 @@ import torch
 from torch import Tensor
 from brain_image.data.data import (
     DSPLIT,
-    EEG_DATASET,
-    EEGDataset,
-    EEGDatasetConfig,
-    EEGDatasetFactory,
     EEGSampleT,
-    LatentStats,
-    LatentTypeMapT,
-    LatentTypeT,
-    TensorCache,
-    get_image_paths,
 )
+from brain_image.data.dataset.eeg_dataset import EEGDataset, EEGDatasetConfig
+from brain_image.data.io import get_image_paths
 
 
 ALL_SUBS = list(range(1, 11))
@@ -39,13 +34,16 @@ def load_eeg_values(eeg_path: Path, subs: list[int], split: Literal["train", "te
 
 
 class ThingsEEG2DatasetConfig(EEGDatasetConfig):
+    dataset: Literal["things-eeg2"] = "things-eeg2"
     data_path: Path = Path("data/things-eeg2")
     img_dir: str = "imgs"
     preprocessed_eeg_dir: str = "preprocessed-eeg"
-    dataset: EEG_DATASET = "things-eeg2"
     subs: list[int] | None = None
     num_channels: int = 63
     time_length: int = 250
+
+    def create_dataset(self, split, *args, **kwargs) -> ThingsEEG2Dataset:
+        return ThingsEEG2Dataset(self, split, *args, **kwargs)
 
 
 class ThingsEEG2Dataset(EEGDataset):
@@ -145,33 +143,3 @@ class ThingsEEG2Dataset(EEGDataset):
         return cast(EEGSampleT, sample)
 
 
-class ThingsEEG2DatasetFactory(EEGDatasetFactory):
-    def __init__(
-        self,
-        config: ThingsEEG2DatasetConfig | dict,
-        tensorcache: TensorCache,
-        embeddings_map: LatentTypeMapT,
-    ):
-        if isinstance(config, dict):
-            config = ThingsEEG2DatasetConfig(**config)
-
-        self.config = config
-        self.tensorcache = tensorcache
-        self.embeddings_map = embeddings_map
-
-    def create_dataset(
-        self, split: Literal["train", "val", "test"], **dataset_kwargs
-    ) -> EEGDataset:
-        kwargs = {
-            "split": split,
-            "tensor_cache": self.tensorcache,
-            "embeddings_map": self.embeddings_map,
-            "limit_size": self.config.get_limit_size(split),
-            "limit_shuffle": split == "train",
-            "preload_cache": self.config.preload_cache,
-        }
-        kwargs.update(dataset_kwargs)
-        return ThingsEEG2Dataset(
-            self.config,
-            **kwargs
-        )

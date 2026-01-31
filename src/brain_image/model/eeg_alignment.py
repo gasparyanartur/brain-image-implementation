@@ -1,8 +1,8 @@
 import datetime
 import json
 import lightning as pl
-from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 import matplotlib.pyplot as plt
+from pydantic import Field
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -13,25 +13,21 @@ from sklearn.manifold import TSNE
 from torchvision.transforms import v2 as tv2
 import itertools as it
 from contextlib import nullcontext
-from dataclasses import dataclass
 from pathlib import Path
-from brain_image.configs import BaseConfig, get_device
-from brain_image.model.eeg_encoder.eeg_encoder import EEG_ENCODER, EEGEncoderConfig
+from brain_image.configs import get_device
+from brain_image.data.datamodule import EEGDataModule
+from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
+from brain_image.data.io import batch_load_images
+from brain_image.data.tensorcache import TensorCache
 from brain_image.data.data import (
-    EEGDataModule,
-    EEGDatasetConfig,
     LatentTypeMapT,
-    TensorCache,
-    batch_load_images,
-    resolve_dataset_config,
 )
 from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
-from brain_image.model.eeg_encoder.eeg_encoder import create_eeg_encoder
-from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM, VAE_ENCODER
+from brain_image.model.encoder.eeg_encoder.union import EEGEncoderConfigType, create_eeg_encoder
+from brain_image.model.encoder.img_encoder import ImageEncoderName, IMAGE_ENCODER_DIM, VAE_ENCODER
 from brain_image.model.loss import CLIPLoss, InfoNCELoss, SigLipLoss
 
 from brain_image.model.model import (
-    LinearLayerNorm,
     TrainingModule,
     TrainingModuleConfig,
 )
@@ -43,7 +39,7 @@ from brain_image.model.prior import (
 
 from typing import Any, Literal, Mapping, TypedDict, cast
 import logging
-from brain_image.optimizer import OptimizerConfig, get_optimizer_options, iter_params
+from brain_image.optimizer import OptimizerConfig, get_optimizer_options
 from brain_image.reconstruction import (
     IPAdapterReconstructionPipeline,
 )
@@ -57,7 +53,6 @@ from brain_image.utils import (
     get_mean_gradients,
     reverse_l2_scale,
     reverse_z_scale,
-    tensor_split,
 )
 
 import tqdm
@@ -67,11 +62,11 @@ import time
 
 
 class EEGAlignmentConfig(TrainingModuleConfig):
-    align_img_encoder: IMAGE_ENCODER = "unaligned_synclr_vitb16"
+    align_img_encoder: ImageEncoderName = "unaligned_synclr_vitb16"
     low_level_encoder: VAE_ENCODER = "ip_sdxl_turbo"
-    prior_img_encoder: IMAGE_ENCODER = "clip_vitl14"
+    prior_img_encoder: ImageEncoderName = "clip_vitl14"
 
-    eeg_encoder: EEGEncoderConfig
+    eeg_encoder: EEGEncoderConfigType = Field(discriminator="eeg_encoder")
 
     do_align: bool = True
     do_recon_low: bool = False
@@ -186,7 +181,7 @@ class EEGAlignmentModel(TrainingModule):
     def __init__(
         self,
         config: EEGAlignmentConfig | dict,
-        dataset_config: EEGDatasetConfig | dict,
+        dataset_config: EEGDatasetConfig,
         dtype: torch.dtype = DTYPE,
         init_weights: bool = False,
         compile: bool = True,
@@ -203,9 +198,6 @@ class EEGAlignmentModel(TrainingModule):
         self.automatic_optimization = (
             False  # Disable automatic optimization, we will handle it manually
         )
-
-        dataset_config = resolve_dataset_config(dataset_config)
-
 
         self.model_id = model_id
         logging.info(f"Seeding everything with seed: {self.config.seed}")
@@ -252,11 +244,11 @@ class EEGAlignmentModel(TrainingModule):
 
             self.config.prior.d_input = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
 
-            emb_stats = {
+            emb_stats = cast(dict[ImageEncoderName, dict[str, torch.Tensor]] | None, {
                 self.config.prior_img_encoder: self.data_module.embedding_stats[
                     "prior_img_latent"
                 ],
-            }
+            })
 
             self.prior = SimpleDiffusionPrior(
                 self.config.prior, embedding_stats=emb_stats
@@ -278,7 +270,7 @@ class EEGAlignmentModel(TrainingModule):
             checkpoint_path=eeg_encoder_path,
         )
 
-        self.config.eeg_encoder = self.eeg_encoder.config   # Update config with the actual config used, otherwise model dump is wrong
+        self.config.eeg_encoder = cast(EEGEncoderConfigType, self.eeg_encoder.config)   # Update config with the actual config used, otherwise model dump is wrong
 
         match self.config.align_loss_type:
             case "clip":

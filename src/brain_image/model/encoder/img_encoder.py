@@ -28,7 +28,7 @@ from dreamsim.model import PerceptualModel
 from brain_image.configs import get_device_str
 
 
-IMAGE_ENCODER = typing.Literal[
+ImageEncoderName = typing.Literal[
     "clip_vitl14",
     "clip_vith14",
     "sd_variations_v2",
@@ -46,7 +46,7 @@ VAE_ENCODER = typing.Literal[
 DREAMSIM_IMAGE_ENCODER = typing.Literal[
     "synclr_vitb16", "unaligned_synclr_vitb16", "aligned_synclr_vitb16", "dummy_768"
 ]
-IMAGE_ENCODER_DIM: dict[IMAGE_ENCODER, int] = {
+IMAGE_ENCODER_DIM: dict[ImageEncoderName, int] = {
     "clip_vitl14": 768,
     "clip_vith14": 1024,
     "sd_variations_v2": 768,
@@ -60,7 +60,7 @@ IMAGE_ENCODER_DIM: dict[IMAGE_ENCODER, int] = {
 }
 
 
-def model_name_to_hf_name(model_name: IMAGE_ENCODER) -> str:
+def model_name_to_hf_name(model_name: ImageEncoderName) -> str:
     match model_name:
         case "clip_vitl14":
             return "openai/clip-vit-large-patch14"
@@ -92,7 +92,7 @@ class BaseImageEncoder(nn.Module):
 
 
 def load_image_encoder(
-    model_name: IMAGE_ENCODER,
+    model_name: ImageEncoderName,
     models_path: Path = Path("models"),
     download_weights: bool = True,
     compile: bool = True,
@@ -154,7 +154,7 @@ def load_vae_encoder(model_name: VAE_ENCODER, *args, **kwargs) -> VAEImageEncode
 
 
 class CLIPImageEncoder(BaseImageEncoder):
-    def __init__(self, model_name: IMAGE_ENCODER = "clip_vitl14", preprocessor_kwargs={}, *args, **kwargs):
+    def __init__(self, model_name: ImageEncoderName = "clip_vitl14", preprocessor_kwargs={}, *args, **kwargs):
         super().__init__(model_name=model_name)
 
         hf_name = model_name_to_hf_name(model_name)
@@ -184,7 +184,7 @@ class CLIPImageEncoder(BaseImageEncoder):
 class VAEImageEncoder(BaseImageEncoder):
     def __init__(
         self,
-        model_name: IMAGE_ENCODER = "ip_sdxl_turbo",
+        model_name: ImageEncoderName = "ip_sdxl_turbo",
         img_width: int = 512,
         img_height: int | None = None,
         *args,

@@ -15,23 +15,26 @@ import itertools as it
 import tqdm
 
 from brain_image.augment import EEGAugmentationPipeline, ImageAugmentationPipeline
-from brain_image.data.data import EEGDataModule, EEGDatasetConfig, batch_load_images, resolve_dataset_config
+from brain_image.data.io import batch_load_images
+from brain_image.data.datamodule import EEGDataModule
+from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
+from brain_image.data.dataset.union import resolve_dataset_config
 from brain_image.metrics import get_retrieval_accuracy
 from brain_image.model.comm.comm import CoMM
 from brain_image.model.comm.comm_loss import CoMMLoss
 from brain_image.model.comm.input_adapters import FeaturesInputAdapter
 from brain_image.model.comm.mmfusion import MMFusion
 from brain_image.model.comm.utils import LinearWarmupCosineAnnealingLR, all_gather_batch_with_grad, set_weight_decay_per_param
-from brain_image.model.eeg_encoder.eeg_encoder import create_eeg_encoder
-from brain_image.model.eeg_encoder.eeg_encoder import EEGEncoderConfig
-from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM, load_image_encoder
+from brain_image.model.encoder.eeg_encoder.union import create_eeg_encoder
+from brain_image.model.encoder.eeg_encoder.eeg_encoder import EEGEncoderConfig
+from brain_image.model.encoder.img_encoder import ImageEncoderName, IMAGE_ENCODER_DIM, load_image_encoder
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
 from brain_image.utils import gather_dataloader, gather_records, prep_batch_for_logs
 
 
 class CommAlignmentConfig(TrainingModuleConfig):
-    img_encoder: IMAGE_ENCODER = "unaligned_synclr_vitb16"
+    img_encoder: ImageEncoderName = "unaligned_synclr_vitb16"
     eeg_encoder: EEGEncoderConfig
     
     embed_dim: int = 512

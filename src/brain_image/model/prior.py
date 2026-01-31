@@ -7,7 +7,6 @@ from typing import Literal, cast
 from PIL.Image import Image
 
 from regex import P
-import requests
 import tqdm
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
@@ -23,11 +22,10 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from dalle2_pytorch import DiffusionPrior
-from dalle2_pytorch.train_configs import DiffusionPriorNetworkConfig
 from dalle2_pytorch.dalle2_pytorch import CausalTransformer, SinusoidalPosEmb, MLP
 
 from brain_image.configs import BaseConfig
-from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM
+from brain_image.model.encoder.img_encoder import ImageEncoderName
 from brain_image.model.model import LinearLayerNorm
 from brain_image.utils import l2_scale, reverse_l2_scale, reverse_z_scale, z_scale
 
@@ -582,8 +580,8 @@ class SimpleDiffusionPrior(nn.Module):
     def __init__(
         self,
         config: DiffusionPriorConfig = DiffusionPriorConfig(),
-        embedding_stats: dict[IMAGE_ENCODER, dict[str, Tensor]] | None = None,
-        encoder_embed_map: dict[str, IMAGE_ENCODER] | None = None,
+        embedding_stats: dict[ImageEncoderName, dict[str, Tensor]] | None = None,
+        encoder_embed_map: dict[str, ImageEncoderName] | None = None,
     ):
         super().__init__()
         if config.norm_scheme == "z_scale" and embedding_stats is None:
@@ -665,7 +663,7 @@ class SimpleDiffusionPrior(nn.Module):
 
     @torch.no_grad()
     def scale_target(
-        self, target: Tensor, latent_name: IMAGE_ENCODER | None = None
+        self, target: Tensor, latent_name: ImageEncoderName | None = None
     ) -> Tensor:
         match self.config.norm_scheme:
             case "none":
@@ -681,7 +679,7 @@ class SimpleDiffusionPrior(nn.Module):
 
     @torch.no_grad()
     def reverse_scale_target(
-        self, target: Tensor, latent_name: IMAGE_ENCODER | None = None
+        self, target: Tensor, latent_name: ImageEncoderName | None = None
     ) -> Tensor:
         match self.config.norm_scheme:
             case "none":

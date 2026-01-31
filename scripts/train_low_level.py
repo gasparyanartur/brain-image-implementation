@@ -5,7 +5,7 @@ from omegaconf import DictConfig
 from brain_image.configs import BaseConfig
 from brain_image.model.low_level import LowLevelConfig, LowLevelModule
 from brain_image.trainer import LowLevelTrainer, LowLevelTrainerConfig
-from brain_image.data.data import EEGDatasetConfig
+from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
 
 from pathlib import Path
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from functools import lru_cache
 import logging
 import re
@@ -10,18 +12,12 @@ import torch
 
 from brain_image.data.data import (
     DSPLIT,
-    EEG_DATASET,
-    EEGDataset,
-    EEGDatasetConfig,
-    EEGDatasetFactory,
     EEGSampleT,
-    LatentTypeMapT,
-    TensorCache,
     get_eeg_stats,
-    get_image_paths,
     rescale_eeg,
     truncate_data,
 )
+from brain_image.data.dataset.eeg_dataset import EEGDataset, EEGDatasetConfig
 
 
 SORT_ORDER = ["subject", "session", "block_id", "sequence_id", "sequence_image_id"]
@@ -97,10 +93,18 @@ class AlljoinedEEG2DatasetConfig(EEGDatasetConfig):
     data_path: Path = Path("data/alljoined-1.6m")
     img_dir: str = "stimuli/images"
     preprocessed_eeg_dir: str = "preprocessed-eeg"
-    dataset: EEG_DATASET = "alljoined-eeg2"
+    dataset: Literal["alljoined-eeg2"] = "alljoined-eeg2"
     subs: list[int] | None = None
     num_channels: int = 32
     time_length: int = 250
+
+    def create_dataset(self, split, *args, **kwargs) -> AlljoinedEEG2Dataset:
+        return AlljoinedEEG2Dataset(
+            self,
+            split,
+            *args,
+            **kwargs
+        )
 
 
 class AlljoinedEEG2Dataset(EEGDataset):
@@ -141,6 +145,7 @@ class AlljoinedEEG2Dataset(EEGDataset):
         assert self.eeg.size(2) == self.config.num_channels, "Number of channels does not match"
         assert self.eeg.size(3) == self.config.time_length, "Time length does not match"
 
+        assert self.config.subs is not None 
         for sub in self.config.subs:
             assert len(self.meta_subs[sub]) == self.eeg.size(1), "Number of trials does not match"
 
@@ -214,6 +219,7 @@ class AlljoinedEEG2Dataset(EEGDataset):
         return self.eeg.shape[0] * self.eeg.shape[1]
 
     def prepare(self) -> None:
+        assert self.config.subs is not None 
         for i_sub, sub in enumerate(self.config.subs):
             # Prepare metadata for fast querying
             self.meta_subs[sub] = self.query_metadata(sub).reset_index()
@@ -233,6 +239,7 @@ class AlljoinedEEG2Dataset(EEGDataset):
 
     def __getitem__(self, idx: int) -> EEGSampleT:
         sub, img_idx = divmod(idx, self.eeg.shape[1])
+        assert self.config.subs is not None 
 
         sub_idx = self.config.subs[sub]
         eeg = self.eeg[sub, img_idx]
@@ -250,33 +257,3 @@ class AlljoinedEEG2Dataset(EEGDataset):
 
 
 
-class AlljoinedEEG2DatasetFactory(EEGDatasetFactory):
-    def __init__(
-        self,
-        config: AlljoinedEEG2DatasetConfig | dict,
-        tensorcache: TensorCache,
-        embeddings_map: LatentTypeMapT,
-    ):
-        if isinstance(config, dict):
-           config = AlljoinedEEG2DatasetConfig(**config)
-
-        self.config = config
-        self.tensorcache = tensorcache
-        self.embeddings_map = embeddings_map
-
-    def create_dataset(
-        self, split: Literal["train", "val", "test"], **dataset_kwargs
-    ) -> EEGDataset:
-        kwargs = {
-            "split": split,
-            "tensor_cache": self.tensorcache,
-            "embeddings_map": self.embeddings_map,
-            "limit_size": self.config.get_limit_size(split),
-            "limit_shuffle": split == "train",
-            "preload_cache": self.config.preload_cache,
-        }
-        kwargs.update(dataset_kwargs)
-        return AlljoinedEEG2Dataset(
-            self.config,
-            **kwargs
-        )

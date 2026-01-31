@@ -7,13 +7,13 @@ from pydantic import BaseModel
 import torch
 import tqdm
 
-from brain_image.data.data import TensorCache
-from brain_image.model.img_encoder import IMAGE_ENCODER
+from brain_image.data.tensorcache import TensorCache
+from brain_image.model.encoder.img_encoder import ImageEncoderName
 from brain_image.utils import casttensor, flatten_configs, setup_logging
 
 
 class Arguments(BaseModel):
-    embedding_types: list[IMAGE_ENCODER]
+    embedding_types: list[ImageEncoderName]
     data_path: Path
     cache_dir: Path
     img_dir: Path
@@ -25,7 +25,7 @@ class Arguments(BaseModel):
 def get_embeddings_stats(
     tensorcache: TensorCache,
     img_paths: list[Path],
-    embedding_names: list[IMAGE_ENCODER],
+    embedding_names: list[ImageEncoderName],
     split: Literal["train", "test"],
 ) -> dict[str, dict[str, torch.Tensor]]:
     logging.info(f"Getting embedding stats for {embedding_names} - {len(img_paths)} images")

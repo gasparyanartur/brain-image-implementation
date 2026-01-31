@@ -1,51 +1,33 @@
+from pydantic import Field
+from brain_image.model.encoder.eeg_encoder.eeg_encoder import EEGEncoder, EEGEncoderConfig
+from brain_image.utils import find_module_content_in_state_dict, flatten_configs
+
+from brain_image.model.encoder.eeg_encoder.nice import NiceEEGEncoder, NiceEEGEncoderConfig
+from brain_image.model.encoder.eeg_encoder.atms import AtmsEEGEncoder, AtmsEEGEncoderConfig
+from brain_image.model.encoder.eeg_encoder.dummy import DummyEEGEncoder, DummyEEGEncoderConfig
+
+import torch
 
 
-from abc import ABC
 import logging
 from pathlib import Path
 from typing import Literal, cast
-from torch import nn, Tensor
-import torch
-
-from brain_image.configs import BaseConfig
-from brain_image.utils import find_module_content_in_state_dict, flatten_configs
-
-EEG_ENCODER = Literal["atms", "nice", "dummy"]
-
-class EEGEncoderConfig(BaseConfig):
-    eeg_encoder: EEG_ENCODER
-    d_channels: int | None = None
-    d_time: int = 250
-    d_output: int = 768
-    d_eeg: int = 40
-
-class EEGEncoder(ABC, nn.Module):
-    def __init__(self, config: EEGEncoderConfig, *args, **kwargs) -> None:
-        super().__init__()
-
-        self.config = config
-
-    def forward(self, eeg_data: Tensor, sub: Tensor | None = None, *args, **kwargs) -> Tensor:
-        raise NotImplementedError()
 
 
 def resolve_eeg_encoder_config(config: EEGEncoderConfig | dict) -> EEGEncoderConfig:
     if isinstance(config, EEGEncoderConfig):
-        return config 
-    
+        return config
+
     match config["eeg_encoder"]:
         case "nice":
-            from brain_image.model.eeg_encoder.nice import NiceEEGEncoderConfig
             return NiceEEGEncoderConfig(**config)
-        
+
         case "atms":
-            from brain_image.model.eeg_encoder.atms import AtmsEEGEncoderConfig
             return AtmsEEGEncoderConfig(**config)
-        
+
         case "dummy":
-            from brain_image.model.eeg_encoder.dummy import DummyEEGEncoderConfig
             return DummyEEGEncoderConfig(**config)
-        
+
         case _:
             raise ValueError(f"Unknown EEG encoder: {config['eeg_encoder']}")
 
@@ -61,15 +43,12 @@ def create_eeg_encoder(
 
     match config.eeg_encoder:
         case "nice":
-            from brain_image.model.eeg_encoder.nice import NiceEEGEncoder, NiceEEGEncoderConfig
             model_name = "nice"
             encoder = NiceEEGEncoder(cast(NiceEEGEncoderConfig, config))
         case "atms":
-            from brain_image.model.eeg_encoder.atms import AtmsEEGEncoder, AtmsEEGEncoderConfig
             model_name = "atms"
             encoder = AtmsEEGEncoder(cast(AtmsEEGEncoderConfig, config))
         case "dummy":
-            from brain_image.model.eeg_encoder.dummy import DummyEEGEncoder, DummyEEGEncoderConfig
             model_name = "dummy"
             encoder = DummyEEGEncoder(cast(DummyEEGEncoderConfig, config))
         case _:
@@ -91,3 +70,7 @@ def create_eeg_encoder(
     encoder.load_state_dict(eeg_encoder_state_dict)
     return encoder
 
+
+EEGEncoderName = Literal["atms", "nice", "dummy"]
+EEGEncoderConfigType = NiceEEGEncoderConfig | AtmsEEGEncoderConfig | DummyEEGEncoderConfig
+EEGEncoderField = Field(discriminator="eeg_encoder")

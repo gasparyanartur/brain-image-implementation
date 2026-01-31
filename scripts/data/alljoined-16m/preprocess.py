@@ -11,7 +11,7 @@ from typing import Tuple, Dict, cast
 import mne
 import pandas as pd
 
-from brain_image.data.alljoined_eeg2_preprocessing import (
+from brain_image.data.dataset.alljoined_eeg2_preprocessing import (
     compute_dropped_trials,
     compute_whitening_matrix,
     epoching,

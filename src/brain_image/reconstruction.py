@@ -21,7 +21,7 @@ from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import
 
 
 from brain_image.configs import get_device
-from brain_image.model.img_encoder import (
+from brain_image.model.encoder.img_encoder import (
     CLIPImageEncoder,
     VAEImageEncoder,
     model_name_to_hf_name,

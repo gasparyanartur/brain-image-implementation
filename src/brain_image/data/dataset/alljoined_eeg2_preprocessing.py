@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 import scipy
 from joblib import Parallel, delayed
-from sklearn.discriminant_analysis import _cov
+from sklearn.discriminant_analysis import _cov  # type: ignore
 from tqdm.auto import tqdm
 
 from brain_image.configs import BaseConfig
@@ -51,9 +51,9 @@ def _warn(msg: str) -> None:
     Args:
         msg (str): Human-readable message to display.
     """
-    frame = inspect.currentframe().f_back
-    file = os.path.basename(frame.f_code.co_filename)
-    line = frame.f_lineno
+    frame = inspect.currentframe().f_back   # type: ignore
+    file = os.path.basename(frame.f_code.co_filename)   # type: ignore
+    line = frame.f_lineno # type: ignore
     print(f"\033[31mWarning: {msg} [{file}:{line}]\033[0m", file=sys.stderr)
 
 
