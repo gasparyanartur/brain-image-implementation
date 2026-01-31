@@ -26,7 +26,7 @@ from brain_image.data.data import (
     resolve_dataset_config,
 )
 from brain_image.metrics import MetricName, evaluate_metrics, get_top1_acc
-from brain_image.model.eeg_encoder import create_eeg_encoder
+from brain_image.model.eeg_encoder.eeg_encoder import create_eeg_encoder
 from brain_image.model.img_encoder import IMAGE_ENCODER, IMAGE_ENCODER_DIM, VAE_ENCODER
 from brain_image.model.loss import CLIPLoss, InfoNCELoss, SigLipLoss
 

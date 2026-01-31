@@ -10,7 +10,7 @@ from brain_image.utils import batchify_operation
 import logging
 import pytorch_lightning as pl
 from brain_image.configs import BaseConfig
-from brain_image.model.eeg_encoder import create_eeg_encoder
+from brain_image.model.eeg_encoder.eeg_encoder import create_eeg_encoder
 from brain_image.data.data import (
     EEGDataModule,
     EEGDatasetConfig,
