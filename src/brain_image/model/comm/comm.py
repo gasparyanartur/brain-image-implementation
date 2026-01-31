@@ -1,5 +1,6 @@
 # From https://github.com/Duplums/CoMM/blob/main/pl_modules/comm.py
 
+from functools import lru_cache
 from torch import nn
 import torch
 from collections import OrderedDict
@@ -9,6 +10,25 @@ from brain_image.model.comm.base import BaseModel
 from brain_image.model.comm.mmfusion import MMFusion
 from brain_image.model.comm.comm_loss import CoMMLoss
 
+@lru_cache(maxsize=1)
+@torch.no_grad()
+def gen_all_possible_masks(n_mod: int):
+    """
+    :param n_mod: int
+    :return: a list of `n_mod` + 1 boolean masks [Mi] such that all but one bool are False.
+        A last bool mask is added where all bool are True
+    Examples:
+    *   For n_mod==2:
+        masks == [[True, False], [False, True], [True, True]]
+    *   For n_mod == 3:
+        masks == [[True, False, False], [False, True, False], [False, False, True], [True, True, True]]
+    """
+    masks = []
+    for L in range(n_mod):
+        mask = [s == L for s in range(n_mod)]
+        masks.append(mask)
+    masks.append([True for _ in range(n_mod)])
+    return masks
 
 class CoMM(BaseModel):
     """ Contrastive MultiModal learning allowing the communication between modalities 
@@ -55,7 +75,7 @@ class CoMM(BaseModel):
         # x2: (aug1(mod1_x2), aug2(mod2_x2))
 
         # compute features for all modalities
-        all_masks = self.gen_all_possible_masks(len(x1))
+        all_masks = gen_all_possible_masks(len(x1))
         z1 = self.encoder(x1, mask_modalities=all_masks)
         z2 = self.encoder(x2, mask_modalities=all_masks)
         z1 = [self.head(z) for z in z1]
@@ -63,26 +83,6 @@ class CoMM(BaseModel):
         return {'aug1_embed': z1,
                 'aug2_embed': z2,
                 "prototype": -1}
-    
-
-    def gen_all_possible_masks(self, n_mod: int):
-        """
-        :param n_mod: int
-        :return: a list of `n_mod` + 1 boolean masks [Mi] such that all but one bool are False.
-            A last bool mask is added where all bool are True
-        Examples:
-        *   For n_mod==2:
-            masks == [[True, False], [False, True], [True, True]]
-        *   For n_mod == 3:
-            masks == [[True, False, False], [False, True, False], [False, False, True], [True, True, True]]
-        """
-        masks = []
-        for L in range(n_mod):
-            mask = [s == L for s in range(n_mod)]
-            masks.append(mask)
-        masks.append([True for _ in range(n_mod)])
-        return masks
-    
     
     def extract_features(self, loader: torch.utils.data.DataLoader, **kwargs):
         """

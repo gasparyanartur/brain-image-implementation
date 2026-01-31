@@ -469,9 +469,10 @@ class MMFusion(nn.Module):
         z, attn_mask = (
             (z["token_embeddings"], z["attention_mask"])
             if isinstance(z, dict)
-            else (z, torch.zeros_like(z[:, :, 0]).bool())
+            else (z, None)
         )
         z = adapter(z) if adapter is not None else z
+        attn_mask = torch.zeros_like(z[:, :, 0], dtype=torch.bool) if attn_mask is None else attn_mask
         
         emb = self.fusion_transformer([z], [attn_mask]).squeeze(1)  # (bs, d) 
         return emb
