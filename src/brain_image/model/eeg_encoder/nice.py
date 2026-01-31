@@ -25,7 +25,7 @@ class NiceEEGEncoder(EEGEncoder):
         config: NiceEEGEncoderConfig = NiceEEGEncoderConfig(),
     ):
         # Adapted from https://github.com/eeyhsong/NICE-EEG
-        super(NiceEEGEncoder, self).__init__()
+        super(NiceEEGEncoder, self).__init__(config)
 
         self.config = config
 

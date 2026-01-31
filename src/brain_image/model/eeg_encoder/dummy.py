@@ -20,8 +20,7 @@ class DummyEEGEncoder(EEGEncoder):
         self,
         config: DummyEEGEncoderConfig = DummyEEGEncoderConfig(),
     ):
-        # Adapted from https://github.com/eeyhsong/NICE-EEG
-        super(DummyEEGEncoder, self).__init__()
+        super(DummyEEGEncoder, self).__init__(config)
 
         self.config = config
         self.param = nn.Parameter(torch.randn(1))   # Dummy parameter to make the model trainable

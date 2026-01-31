@@ -20,6 +20,11 @@ class EEGEncoderConfig(BaseConfig):
     d_eeg: int = 40
 
 class EEGEncoder(ABC, nn.Module):
+    def __init__(self, config: EEGEncoderConfig, *args, **kwargs) -> None:
+        super().__init__()
+
+        self.config = config
+
     def forward(self, eeg_data: Tensor, sub: Tensor | None = None, *args, **kwargs) -> Tensor:
         raise NotImplementedError()
 

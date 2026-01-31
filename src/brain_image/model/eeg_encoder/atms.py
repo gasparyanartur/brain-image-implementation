@@ -411,7 +411,7 @@ class AtmsEEGEncoder(EEGEncoder):
         self,
         config: AtmsEEGEncoderConfig = AtmsEEGEncoderConfig(),
     ):
-        super(AtmsEEGEncoder, self).__init__()
+        super(AtmsEEGEncoder, self).__init__(config)
         self.config = config
         self.encoder = iTransformer(
             iTransformerConfig(seq_len=config.d_time, pred_len=config.d_time)
