@@ -278,6 +278,8 @@ class EEGAlignmentModel(TrainingModule):
             checkpoint_path=eeg_encoder_path,
         )
 
+        self.config.eeg_encoder = self.eeg_encoder.config   # Update config with the actual config used, otherwise model dump is wrong
+
         match self.config.align_loss_type:
             case "clip":
                 self.align_loss = CLIPLoss(self.config.clip_temperature)
