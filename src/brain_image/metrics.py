@@ -365,3 +365,14 @@ def get_top1_acc(logits: torch.Tensor, axis=1) -> torch.Tensor:
     top1 = logits.topk(1, dim=axis).indices.flatten()
     top1_acc = (top1 == indexes).float().mean()
     return top1_acc
+
+
+@torch.compile()
+@torch.no_grad()
+def get_retrieval_accuracy(z1, z2, norm: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+    if norm:
+        z1 = nn.functional.normalize(z1, p=2, dim=-1)
+        z2 = nn.functional.normalize(z2, p=2, dim=-1)
+    logits = z1 @ z2.T
+    
+    return (get_top1_acc(logits, axis=0), get_top1_acc(logits, axis=1))

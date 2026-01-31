@@ -7,6 +7,7 @@ from pytorch_lightning import LightningModule
 import pytorch_lightning as pl
 
 
+from torch.nn import functional as F
 import torch
 from torchvision.transforms import v2 as tv2
 import itertools as it
@@ -15,6 +16,7 @@ import tqdm
 
 from brain_image.augment import EEGAugmentationPipeline, ImageAugmentationPipeline
 from brain_image.data.data import EEGDataModule, EEGDatasetConfig, batch_load_images, resolve_dataset_config
+from brain_image.metrics import get_retrieval_accuracy
 from brain_image.model.comm.comm import CoMM
 from brain_image.model.comm.comm_loss import CoMMLoss
 from brain_image.model.comm.input_adapters import FeaturesInputAdapter
@@ -335,11 +337,14 @@ class CommAlignmentModel(TrainingModule):
         z2 = comm_out["aug2_embed"]
         ssl_acc = self.get_ssl_accuracy(z1, z2)
 
+        ret_acc = self.get_retrieval_accuracies(batch)
+
         metrics = {
             "loss": loss_dict["loss"],
             "acc_eeg": ssl_acc[self.config.eeg_idx],
             "acc_img": ssl_acc[self.config.img_idx],
             "acc_proto": ssl_acc[self.config.prototype_idx],
+            **ret_acc
         }
 
         outputs = prep_batch_for_logs(metrics)
@@ -368,8 +373,6 @@ class CommAlignmentModel(TrainingModule):
 
     @torch.no_grad()
     def get_ssl_accuracy(self, z1, z2, prototype: int = -1, *args, **kwargs):
-        from torch.nn import functional as F
-
         n = len(z1)
         device = z1[0].device
 
@@ -378,12 +381,26 @@ class CommAlignmentModel(TrainingModule):
 
         accuracies = []
         for i in range(n):
-            sim = (z1[i] @ z2[prototype].T)  # dim [N, N] => the diag contains the correct pairs (i,j)
+            sim = (z1[i] @ z2[prototype].T)  
             pred = torch.argmax(sim, dim=1)
             accuracy = (pred == torch.arange(z1[i].size(0), device=device)).float().mean()
             accuracies.append(accuracy)
 
         return accuracies
+
+    @torch.no_grad()
+    def get_retrieval_accuracies(self, batch):
+        eeg = batch["eeg"]
+        img = batch["img"]
+
+        eeg_emb = self.comm.encoder.deep_encode_single_mod(eeg, self.config.eeg_idx)
+        img_emb = self.comm.encoder.deep_encode_single_mod(img, self.config.img_idx)
+
+        eeg_accuracy, img_accuracy = get_retrieval_accuracy(eeg_emb, img_emb)
+        return {
+            "acc_ret_eeg": eeg_accuracy,
+            "acc_ret_img": img_accuracy,
+        }
 
     def configure_optimizers(self):
         logging.info("Configuring optimizers")
