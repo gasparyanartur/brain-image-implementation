@@ -167,7 +167,7 @@ class CLIPImageEncoder(BaseImageEncoder):
 
     def preprocess(self, images: torch.Tensor) -> torch.Tensor:
         extra_kwargs = {}
-        if images.max() <= 1:
+        if images.max() <= 3:
             extra_kwargs["do_rescale"] = False
 
         extra_kwargs.update(self.preprocessor_kwargs)
@@ -257,6 +257,7 @@ class DreamsimImageEncoder(BaseImageEncoder):
 
         models_path_str = str(models_path)
         model_name_parts = model_name.split("_")
+        self.preprocessor_kwargs = {}
 
         if len(model_name_parts) == 2:
             model_name_parts = ["unaligned"] + model_name_parts
@@ -314,7 +315,12 @@ class DreamsimImageEncoder(BaseImageEncoder):
         self.model.requires_grad_(not disable_grad)
 
     def preprocess(self, img: torch.Tensor) -> torch.Tensor:
-        img = self.processor(img, return_tensors="pt").pixel_values.to(
+        extra_kwargs = {}
+        if img.max() <= 3:
+            extra_kwargs["do_rescale"] = False
+
+        extra_kwargs.update(self.preprocessor_kwargs)
+        img = self.processor(img, return_tensors="pt", **extra_kwargs).pixel_values.to(
             self.model.device
         )
         return img
