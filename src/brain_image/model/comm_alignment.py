@@ -25,7 +25,7 @@ from brain_image.model.comm.comm_loss import CoMMLoss
 from brain_image.model.comm.input_adapters import FeaturesInputAdapter
 from brain_image.model.comm.mmfusion import MMFusion
 from brain_image.model.comm.utils import LinearWarmupCosineAnnealingLR, all_gather_batch_with_grad, set_weight_decay_per_param
-from brain_image.model.encoder.eeg_encoder.union import create_eeg_encoder
+from brain_image.model.encoder.eeg_encoder.union import EEGEncoderConfigType, create_eeg_encoder
 from brain_image.model.encoder.eeg_encoder.eeg_encoder import EEGEncoderConfig
 from brain_image.model.encoder.img_encoder import ImageEncoderName, IMAGE_ENCODER_DIM, load_image_encoder
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
@@ -35,7 +35,7 @@ from brain_image.utils import gather_dataloader, gather_records, prep_batch_for_
 
 class CommAlignmentConfig(TrainingModuleConfig):
     img_encoder: ImageEncoderName = "unaligned_synclr_vitb16"
-    eeg_encoder: EEGEncoderConfig
+    eeg_encoder: EEGEncoderConfigType
     
     embed_dim: int = 512
     proj_dim: int = 256

@@ -11,7 +11,7 @@ import torch
 
 import logging
 from pathlib import Path
-from typing import Literal, cast
+from typing import Annotated, Literal, cast
 
 
 def resolve_eeg_encoder_config(config: EEGEncoderConfig | dict) -> EEGEncoderConfig:
@@ -72,5 +72,4 @@ def create_eeg_encoder(
 
 
 EEGEncoderName = Literal["atms", "nice", "dummy"]
-EEGEncoderConfigType = NiceEEGEncoderConfig | AtmsEEGEncoderConfig | DummyEEGEncoderConfig
-EEGEncoderField = Field(discriminator="eeg_encoder")
+EEGEncoderConfigType = Annotated[NiceEEGEncoderConfig | AtmsEEGEncoderConfig | DummyEEGEncoderConfig, Field(discriminator="eeg_encoder")]

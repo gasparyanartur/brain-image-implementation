@@ -6,11 +6,13 @@ import logging
 import os
 from pathlib import Path
 import tomllib
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, Generic, Mapping, TypeVar, cast
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, ValidationError
 from hydra.utils import instantiate
 import torch
+
+from brain_image.utils import flatten_configs
 
 
 C = TypeVar("C", bound=BaseModel)
@@ -39,30 +41,31 @@ def _instantiate_targets(obj: Any) -> Any:
 
 class BaseConfig(BaseModel, ABC, Generic[C]):
     @classmethod
-    def from_hydra_config(cls, cfg: DictConfig) -> C:
+    def from_hydra_config(cls, cfg: DictConfig, instantiate: bool = True) -> C:
+        logging.info(f"Constructing from Hydra config " + str(cfg))
         raw_dict = OmegaConf.to_container(cfg, resolve=True)
 
         if not isinstance(raw_dict, dict):
             raise ValueError("Config must be a dictionary")
-        
+
         if not all(isinstance(k, str) for k in raw_dict):
             raise ValueError("Config keys must be strings")
-        raw_dict = cast(dict[str, Any], raw_dict)
-        raw_dict = cast(dict[str, Any], _instantiate_targets(raw_dict))
+
+        raw_dict = cast(Mapping[str, Any], raw_dict)
+        
+        if instantiate:
+            raw_dict = _instantiate_targets(raw_dict)
 
         try:
-            return cls.construct(**raw_dict)
+            obj = cls(**raw_dict)
+
         except ValidationError as e:
             logging.error(f"Attempted to construct {cls.__name__} from dictionary with keys:")
-            for k, v in raw_dict.items():
+            for k, v in flatten_configs(raw_dict).items():
                 logging.error(f"{k}: type: {type(v)}, value: {v}")
             raise e
 
-
-    @classmethod
-    def construct(cls, **kwargs: Any) -> C:
-        return cast(C, cls(**kwargs))
-
+        return cast(C, obj)
 
 def _resolve_workspace_dir() -> Path:
     curr_path = Path(__file__)

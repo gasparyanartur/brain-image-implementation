@@ -2,5 +2,5 @@ defaults:
   - eeg_dataset
   - _self_
 
-_target_: brain_image.data.dummy_eeg_dataset.DummyEEGDatasetConfig
 subs: [1]
+dataset: dummy

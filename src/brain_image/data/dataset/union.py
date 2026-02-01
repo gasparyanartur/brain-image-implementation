@@ -1,4 +1,6 @@
-from typing import Literal, cast
+from typing import Annotated, Literal, cast
+
+from pydantic import Field
 
 from brain_image.data.dataset.eeg_dataset import EEGDataset
 
@@ -16,9 +18,9 @@ from brain_image.data.dataset.things_eeg2_dataset import (
 from brain_image.data.dataset.dummy_eeg_dataset import DummyEEGDatasetConfig, DummyEEGDataset
 
 
-EEGDatasetKey = Literal["alljoined-eeg2", "things-eeg2", "dummy"]
+EEGDatasetName = Literal["alljoined-eeg2", "things-eeg2", "dummy"]
 EEGDatasetConfigType = (
-    AlljoinedEEG2DatasetConfig | ThingsEEG2DatasetConfig | DummyEEGDatasetConfig
+    Annotated[AlljoinedEEG2DatasetConfig | ThingsEEG2DatasetConfig | DummyEEGDatasetConfig, Field(discriminator="dataset")]
 )
 
 

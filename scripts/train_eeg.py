@@ -3,6 +3,7 @@ import logging
 import hydra
 from omegaconf import DictConfig
 from brain_image.configs import BaseConfig
+from brain_image.data.dataset.union import EEGDatasetConfigType
 from brain_image.trainer import EEGAlignTrainer, EEGAlignTrainerConfig
 from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
@@ -14,7 +15,7 @@ from brain_image.utils import flatten_configs, get_dtype, setup
 
 
 class TrainEEGConfig(BaseConfig):
-    dataset: EEGDatasetConfig 
+    dataset: EEGDatasetConfigType
     model: EEGAlignmentConfig 
     trainer: EEGAlignTrainerConfig 
 
