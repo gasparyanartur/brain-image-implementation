@@ -4,11 +4,12 @@ from functools import lru_cache
 from torch import nn
 import torch
 from collections import OrderedDict
-from typing import Dict, List
+from typing import Dict, List, Union
 
 from brain_image.model.comm.base import BaseModel
 from brain_image.model.comm.mmfusion import MMFusion
 from brain_image.model.comm.comm_loss import CoMMLoss
+
 
 @lru_cache(maxsize=1)
 @torch.no_grad()
@@ -30,20 +31,22 @@ def gen_all_possible_masks(n_mod: int):
     masks.append([True for _ in range(n_mod)])
     return masks
 
+
 class CoMM(BaseModel):
-    """ Contrastive MultiModal learning allowing the communication between modalities 
+    """Contrastive MultiModal learning allowing the communication between modalities
     in a single multimodal space [1].
-    
+
     It encodes a pair of mulitmodal data and outputs a pair of representations through
     a single multimodal encoder.
 
     [1] What to align in multimodal contrastive learning, Dufumier & Castillo-Navarro et al., ICLR 2025
     """
 
-    def __init__(self,
-                 encoder: MMFusion,
-                 projection: nn.Module,
-        ):
+    def __init__(
+        self,
+        encoder: MMFusion,
+        projection: nn.Module,
+    ):
         """
         Args:
             encoder: Multi-modal fusion encoder
@@ -59,16 +62,19 @@ class CoMM(BaseModel):
 
     @staticmethod
     def _build_mlp(in_dim, mlp_dim, out_dim):
-        return nn.Sequential(OrderedDict([
-            ("layer1", nn.Linear(in_dim, mlp_dim)),
-            ("bn1", nn.SyncBatchNorm(mlp_dim)),
-            ("relu1", nn.ReLU(inplace=True)),
-            ("layer2", nn.Linear(mlp_dim, mlp_dim)),
-            ("bn2", nn.SyncBatchNorm(mlp_dim)),
-            ("relu2", nn.ReLU(inplace=True)),
-            ("layer3", nn.Linear(mlp_dim, out_dim)),
-        ]))
-
+        return nn.Sequential(
+            OrderedDict(
+                [
+                    ("layer1", nn.Linear(in_dim, mlp_dim)),
+                    ("bn1", nn.SyncBatchNorm(mlp_dim)),
+                    ("relu1", nn.ReLU(inplace=True)),
+                    ("layer2", nn.Linear(mlp_dim, mlp_dim)),
+                    ("bn2", nn.SyncBatchNorm(mlp_dim)),
+                    ("relu2", nn.ReLU(inplace=True)),
+                    ("layer3", nn.Linear(mlp_dim, out_dim)),
+                ]
+            )
+        )
 
     def forward(self, x1: List[torch.Tensor], x2: List[torch.Tensor]):
         # x1: (aug1(mod1_x1), aug2(mod2_x1))
@@ -80,22 +86,20 @@ class CoMM(BaseModel):
         z2 = self.encoder(x2, mask_modalities=all_masks)
         z1 = [self.head(z) for z in z1]
         z2 = [self.head(z) for z in z2]
-        return {'aug1_embed': z1,
-                'aug2_embed': z2,
-                "prototype": -1}
-    
+        return {"aug1_embed": z1, "aug2_embed": z2, "prototype": -1}
+
     def extract_features(self, loader: torch.utils.data.DataLoader, **kwargs):
         """
-           Extract multimodal features from the encoder.
-           Args:
-                loader: Dataset loader to serve `(X, y)` tuples.
-                kwargs: given to `encoder.forward()`
-           Returns: 
-                Pair (Z,y) corresponding to extracted features and corresponding labels
+        Extract multimodal features from the encoder.
+        Args:
+             loader: Dataset loader to serve `(X, y)` tuples.
+             kwargs: given to `encoder.forward()`
+        Returns:
+             Pair (Z,y) corresponding to extracted features and corresponding labels
         """
         X, y = [], []
         for X_, y_ in loader:
-            if isinstance(X_, torch.Tensor): # needs to cast it as list of one modality
+            if isinstance(X_, torch.Tensor):  # needs to cast it as list of one modality
                 X_ = [X_]
             X_ = [x.to(self.device) if isinstance(x, torch.Tensor) else x for x in X_]
             y_ = y_.to(self.device)
@@ -105,4 +109,21 @@ class CoMM(BaseModel):
                 X.extend(output.view(len(output), -1).detach().cpu())
                 y.extend(y_.detach().cpu())
         torch.cuda.empty_cache()
-        return torch.stack(X, dim=0).to(self.device), torch.stack(y, dim=0).to(self.device)
+        return torch.stack(X, dim=0).to(self.device), torch.stack(y, dim=0).to(
+            self.device
+        )
+
+    def encode_feature(self, x: torch.Tensor | List[torch.Tensor], mod_idx: int | List[int], head: bool = True) -> torch.Tensor:
+        # X is a list of each modality
+        if isinstance(x, torch.Tensor):
+            x = [x]
+
+        if isinstance(mod_idx, int):
+            mod_idx = [mod_idx]
+
+        assert len(x) == len(mod_idx)
+
+        z = self.encoder(x, mod_idx=mod_idx)
+        if head:
+            z = self.head(z)
+        return z

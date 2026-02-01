@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import List, Optional, Union
+from typing import List, Optional, Union, cast
 from einops import repeat
 from collections import OrderedDict
 
@@ -379,6 +379,7 @@ class MMFusion(nn.Module):
         self,
         x: List[torch.Tensor],
         mask_modalities: Optional[Union[List[bool], List[List[bool]]]] = None,
+        mod_idx: Optional[List[int]] = None,
     ):
         """
         :param x: List of tensors
@@ -389,6 +390,8 @@ class MMFusion(nn.Module):
         :return: a latent vector z or list of vector if `mask_modalities` is a list of list.
         """
         list_mask_mod = None
+
+
         if mask_modalities is None:
             mask_modalities = self.num_modalities * [True]
         elif isinstance(mask_modalities, list) and len(mask_modalities) > 0:
@@ -404,20 +407,49 @@ class MMFusion(nn.Module):
                         "Read the code carefully before doing so, under `mmfusion.py`."
                     )
 
+        mask_modalities= cast(List[bool], mask_modalities)
+
         assert (
             len(mask_modalities) == self.num_modalities
         ), f"Mask size does not match `num_modalities`: {len(mask_modalities)} != {self.num_modalities}"
 
+        assert mask_modalities is not None
+
+        if len(x) != self.num_modalities:
+            if mod_idx is None or len(mod_idx) != len(x):
+                raise ValueError(
+                    "If `x` does not have all modalities, `mod_idx` should be given and matching the length of `x`."
+                )
+        elif mod_idx is None:
+            mod_idx = list(range(self.num_modalities))
+        elif len(mod_idx) != self.num_modalities:
+            raise ValueError(
+                f"`mod_idx` should be same length as `x` if given."
+            )
+
+        # If mod_idx is given, we only use the modalities in mod_idx
+        encoders = [self.encoders[i] for i in mod_idx]
+        input_adapters = [self.input_adapters[i] for i in mod_idx]
+        mask_modalities = [mask_modalities[i] for i in mod_idx]  
+
+        if list_mask_mod is not None:
+            list_mask_mod = cast(List[List[bool]], list_mask_mod)
+            list_mask_mod = [[m[i] for i in mod_idx] for m in list_mask_mod]
+
         num_modalities = sum(mask_modalities)
+
         assert (
             len(x) == num_modalities
         ), f"Incorrect number of inputs: {len(x)} != {num_modalities}"
 
+
+        # Filter out modalities that are not used
         encoders = [enc for (enc, m) in zip(self.encoders, mask_modalities) if m]
         input_adapters = [
             adapter for (adapter, m) in zip(self.input_adapters, mask_modalities) if m
         ]
         attn_mask = []
+        x = [xi for (xi, m) in zip(x, mask_modalities) if m]
 
         # 1. Encode input modalities
         z = []
