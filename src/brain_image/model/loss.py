@@ -1,6 +1,7 @@
 from typing import Literal
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 
 import torchvision.transforms.v2 as tv2
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
@@ -43,10 +44,14 @@ class CLIPLoss(nn.Module):
 
 
     def forward(
-        self, z_e: torch.Tensor, z_i: torch.Tensor, ignore_mask: torch.Tensor | None = None
+        self, z_e: torch.Tensor, z_i: torch.Tensor, ignore_mask: torch.Tensor | None = None, norm: bool = False
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if z_i.size(0) != z_e.size(0):
             raise ValueError(f"z_e and z_i should have the same batch size, but got {z_e.size(0)} and {z_i.size(0)}")
+
+        if norm:
+            z_e = F.normalize(z_e, dim=-1)
+            z_i = F.normalize(z_i, dim=-1)
 
         device = z_e.device
         logits = z_e @ z_i.T 

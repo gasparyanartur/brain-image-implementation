@@ -39,6 +39,7 @@ from brain_image.model.encoder.img_encoder import (
     IMAGE_ENCODER_DIM,
     load_image_encoder,
 )
+from brain_image.model.loss import CLIPLoss
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
 from brain_image.utils import gather_dataloader, gather_records, prep_batch_for_logs
@@ -132,7 +133,7 @@ class CommAlignmentModel(TrainingModule):
             checkpoint_path=eeg_encoder_path,
         )
 
-        self.config.eeg_encoder = self.eeg_encoder.config
+        self.config.eeg_encoder = self.eeg_encoder.config    # type: ignore
 
         self.metrics_on_pbar = "loss", "acc_eeg", "acc_img", "acc_proto"
 
@@ -177,6 +178,7 @@ class CommAlignmentModel(TrainingModule):
         )
 
         self.comm_loss = CoMMLoss()
+        self.align_loss = CLIPLoss()
         self.images = {}
 
         self.cache_images = cache_images
@@ -271,19 +273,11 @@ class CommAlignmentModel(TrainingModule):
     def comm_forward(self, eeg_aug1, eeg_aug2, img_aug1, img_aug2):
         """
         Outputs:
-        - aug1_embed:
-              <batch_size, n_modalities, embed_dim>
-              Multimodal embedding of the first augmentation
-        - aug2_embed:
-              <batch_size, n_modalities, embed_dim>
-              Multimodal embedding of the second augmentation
-        - prototype:
-              <int>
-              Index of the multimodal representation within the batch.
-              The modality at index `prototype` will be contrasted against all others.
+        - z1: <batch_size, n_modalities, embed_dim> Multimodal embedding of the first augmentation
+        - z2: <batch_size, n_modalities, embed_dim> Multimodal embedding of the second augmentation
         """
         output_dict = self.comm.forward([img_aug1, eeg_aug1], [img_aug2, eeg_aug2])
-        return output_dict
+        return output_dict["aug1_embed"], output_dict["aug2_embed"]
 
     def forward(self, batch):
         eeg_aug1 = batch["eeg_aug1"]
@@ -291,10 +285,15 @@ class CommAlignmentModel(TrainingModule):
         img_aug1 = batch["img_aug1"]
         img_aug2 = batch["img_aug2"]
 
-        comm_out = self.comm_forward(eeg_aug1, eeg_aug2, img_aug1, img_aug2)
-        loss_dict = self.comm_loss(comm_out)
+        z1, z2 = self.comm_forward(eeg_aug1, eeg_aug2, img_aug1, img_aug2)
+        comm_loss_dict = self.comm_loss(z1, z2, self.config.prototype_idx)
+        align_loss, _ = self.align_loss(z1[self.config.eeg_idx], z2[self.config.img_idx], norm=True)
 
-        return comm_out, loss_dict
+        loss_dict = {**comm_loss_dict}
+        loss_dict["loss"] = comm_loss_dict["loss"] + align_loss
+        loss_dict["align_loss"] = align_loss
+
+        return z1, z2, loss_dict
 
     def training_step(
         self, batch, batch_idx: int, dataloader_idx: int = 0, *args, **kwargs
@@ -316,7 +315,7 @@ class CommAlignmentModel(TrainingModule):
         # Training Step
         batch = self.prepare_batch(batch)
 
-        _, loss_dict = self.forward(batch)
+        *_, loss_dict = self.forward(batch)
 
         self.log("train/loss", loss_dict["loss"], prog_bar=True)
 
@@ -353,18 +352,14 @@ class CommAlignmentModel(TrainingModule):
         batch = self.prepare_batch(batch)
 
         with torch.no_grad():
-            comm_out, loss_dict = self.forward(batch)
+            z1, z2, loss_dict = self.forward(batch)
 
-        z1 = comm_out["aug1_embed"]
-        z2 = comm_out["aug2_embed"]
         ssl_acc = self.get_ssl_accuracy(z1, z2)
         ret_acc = self.get_retrieval_accuracies(batch)
 
         metrics = {
-            "loss": loss_dict["loss"],
-            "acc_eeg": ssl_acc[self.config.eeg_idx],
-            "acc_img": ssl_acc[self.config.img_idx],
-            "acc_proto": ssl_acc[self.config.prototype_idx],
+            **loss_dict,
+            **ssl_acc,
             **ret_acc,
         }
 
@@ -387,19 +382,14 @@ class CommAlignmentModel(TrainingModule):
         batch = self.prepare_batch(batch)
 
         with torch.no_grad():
-            comm_out, loss_dict = self.forward(batch)
+            z1, z2, loss_dict = self.forward(batch)
 
-        z1 = comm_out["aug1_embed"]
-        z2 = comm_out["aug2_embed"]
         ssl_acc = self.get_ssl_accuracy(z1, z2)
-
         ret_acc = self.get_retrieval_accuracies(batch)
 
         metrics = {
-            "loss": loss_dict["loss"],
-            "acc_eeg": ssl_acc[self.config.eeg_idx],
-            "acc_img": ssl_acc[self.config.img_idx],
-            "acc_proto": ssl_acc[self.config.prototype_idx],
+            **loss_dict,
+            **ssl_acc,
             **ret_acc,
         }
 
@@ -435,7 +425,12 @@ class CommAlignmentModel(TrainingModule):
         z2 = [F.normalize(z, p=2, dim=-1) for z in z2]
 
         accuracies = [get_top1_acc(z1[i] @ z2[prototype].T, axis=-1) for i in range(n)]
-        return accuracies
+
+        return {
+            "acc_eeg_to_proto": accuracies[self.config.eeg_idx],
+            "acc_img_to_proto": accuracies[self.config.img_idx],
+            "acc_proto_to_proto": accuracies[self.config.prototype_idx],
+        }
 
     @torch.no_grad()
     def get_retrieval_accuracies(self, batch):
@@ -447,8 +442,8 @@ class CommAlignmentModel(TrainingModule):
 
         eeg_accuracy, img_accuracy = get_retrieval_accuracy(eeg_emb, img_emb, norm=True)
         return {
-            "acc_ret_eeg": eeg_accuracy,
-            "acc_ret_img": img_accuracy,
+            "acc_eeg_to_img": eeg_accuracy,
+            "acc_img_to_eeg": img_accuracy,
         }
 
     def configure_optimizers(self):

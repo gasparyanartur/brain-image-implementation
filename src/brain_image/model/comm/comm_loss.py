@@ -35,7 +35,7 @@ class CoMMLoss(nn.Module):
         
         return loss
 
-    def forward(self, outputs):
+    def forward(self, z1: list[torch.Tensor], z2: list[torch.Tensor], prototype_idx: int, norm: bool = True):
         """
         :param outputs: Dict
             Dictionary with keys:
@@ -46,19 +46,19 @@ class CoMMLoss(nn.Module):
         :return: {"loss": torch.Tensor(float), "ssl_acc": torch.Tensor(float)}
         """
         # Prepare embeddings (normalize + gather across all GPU)
-        z1, z2, prototype = outputs["aug1_embed"], outputs["aug2_embed"], outputs["prototype"]
         assert len(z1) == len(z2)
         n_emb = len(z1)
-        z1 = [func.normalize(z, p=2, dim=-1) for z in z1]
-        z2 = [func.normalize(z, p=2, dim=-1) for z in z2]
+        if norm:
+            z1 = [func.normalize(z, p=2, dim=-1) for z in z1]
+            z2 = [func.normalize(z, p=2, dim=-1) for z in z2]
         Z = all_gather_batch_with_grad(z1 + z2)
         z1, z2 = Z[:n_emb], Z[n_emb:]
 
         # Apply InfoNCE between a "prototype embedding" and all the others
         loss = []
         for i in range(n_emb):
-            loss1 = self.infonce(z1[i], z2[prototype])
-            loss2 = self.infonce(z2[i], z1[prototype])
+            loss1 = self.infonce(z1[i], z2[prototype_idx])
+            loss2 = self.infonce(z2[i], z1[prototype_idx])
             loss.append((loss1 + loss2) / 2.)
         
         losses = {"ssl_loss_%i"%i: l for i, l in enumerate(loss)}

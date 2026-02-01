@@ -64,6 +64,7 @@ def main(args: Args):
         hparams_file=args.hyperparameters_path,
         cache_images=not args.disable_cache,
         preload_images=not args.disable_cache,
+        strict=False
     )
     model.eval()
     logging.info(f"Finished loading model.")
