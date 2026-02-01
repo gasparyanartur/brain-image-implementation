@@ -51,7 +51,7 @@ mkdir -p logs/slurm/sweep
 
 ### Step 2. Setup Environment
 
-Next, setup the environment. There are two options for this: 
+Next, setup the environment. There are two options for this:
 
 * Option A (Local): UV
 
@@ -68,7 +68,7 @@ Try importing torch in a Python shell to confirm installation.
 
 * Option B (SLURM): Singularity
 
-I've setup utility scripts to make installation and configuration of images easier. They can be found under `scripts/container/`. 
+I've setup utility scripts to make installation and configuration of images easier. They can be found under `scripts/container/`.
 The build script `scripts/build_singularity.sh` is a utility script that automatically chooses reasonable defaults. Your images will be build under `images/` unless specified otherwise.
 
 First, you'll need to setup the base image (takes a while):
@@ -82,7 +82,7 @@ Once that is done, you should see a new image under `images/singularity_base.sif
 ```
 ./scripts/container/build_singularity.sh
 ```
- 
+
 The output should be an image named something like `images/brain_{datetime}.sif`. This is the image you will use for the slurm jobs. (Note, you might want to build locally and rsync to the cluster since you need sudo access.)
 
 
@@ -123,6 +123,35 @@ python scripts/generate_embeddings.py model_names=[clip_vith14]
 Before you start training, you need to configure the hydra configs, found under `src/brain_image/configs/`.
 In particular, make sure the paths are pointing to desired location, as mention in `Step 1`.
 
+All configs are found under `src/brain_image/configs/`. They use the hydra framework, which allows for easy configuration of the training process through a hierarchical layout. See [Hydra Docs](https://hydra.cc/docs/intro/) for more details.
+
+For training, the main config is `train_eeg.yaml`, which is automatically loaded when launching the training script.
+Each training script has a default config file, which can be found in the "@hydra.main" decorator of the training script. This can be overwritten by specifying the config name in the command line with the command: --config-name=[CONFIG_NAME].
+
+Every parameter of the config can also be overwritten by specifying it in the command line, or by modifying the config file. For top level parameters, this is done by specifying the parameter name and value in the command line.
+
+Each config file belongs to a group, which is specified in the config file. To overwrite a parameter in a config file, you need to specify the group and parameter name in the command line:
+
+```bash
+[group]@[target_variable]=[option]
+```
+
+For example:
+
+```bash
+eeg_encoder@model.eeg_encoder=atms
+```
+
+This loads the contents of the `atms` file under the group `eeg_encoder` and overwrites the variable `model.eeg_encoder` with it.
+
+You can also overwrite specific parameters in a config file by specifying the parameter name and value in the command line:
+
+```bash
+model.eeg_encoder.num_layers=6
+```
+
+The values of the specific configs can be found by tracing the config files and the corresponding classes. For example, the `eeg_encoder` config is defined in the `eeg_encoder` group, and the corresponding class is `EEGEncoderConfig`. The values of the config can be found in the class definition.
+
 ### Step 5: Environment
 
 The training script loads your API keys from .env by default.
@@ -130,7 +159,7 @@ This is done mainly for two things: `Hugging Face Hub` and `Weights and Biases`
 
 Create a .env file in the root of the project,.
 
-TODO: Talk about wandb, under configs/... Mention setting up WANDB_API_KEY in your environment 
+TODO: Talk about wandb, under configs/... Mention setting up WANDB_API_KEY in your environment
 
 
 ### Step 6: Train
