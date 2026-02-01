@@ -439,14 +439,14 @@ class MMFusion(nn.Module):
         num_modalities = sum(mask_modalities)
 
         assert (
-            len(x) == num_modalities
+            len(x) == len(encoders) == len(input_adapters) == len(mask_modalities) == len(mod_idx)
         ), f"Incorrect number of inputs: {len(x)} != {num_modalities}"
-
+        assert num_modalities > 0, "At least one modality should be used."
 
         # Filter out modalities that are not used
-        encoders = [enc for (enc, m) in zip(self.encoders, mask_modalities) if m]
+        encoders = [enc for (enc, m) in zip(encoders, mask_modalities) if m]
         input_adapters = [
-            adapter for (adapter, m) in zip(self.input_adapters, mask_modalities) if m
+            adapter for (adapter, m) in zip(input_adapters, mask_modalities) if m
         ]
         attn_mask = []
         x = [xi for (xi, m) in zip(x, mask_modalities) if m]
