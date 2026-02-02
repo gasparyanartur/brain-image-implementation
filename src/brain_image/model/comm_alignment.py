@@ -9,6 +9,7 @@ import pytorch_lightning as pl
 
 from torch.nn import functional as F
 import torch
+from torch import Tensor, nn
 from torchvision.transforms import v2 as tv2
 import itertools as it
 
@@ -39,7 +40,7 @@ from brain_image.model.encoder.img_encoder import (
     IMAGE_ENCODER_DIM,
     load_image_encoder,
 )
-from brain_image.model.loss import CLIPLoss
+from brain_image.model.loss import CLIPLoss, CLIPSimLoss
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
 from brain_image.utils import gather_dataloader, gather_records, prep_batch_for_logs
@@ -69,10 +70,16 @@ class CommAlignmentConfig(TrainingModuleConfig):
     weight_decay: float = 0.01
     betas: tuple[float, float] = (0.9, 0.999)
 
-    modules_to_train: list[str] = ["eeg_encoder", "comm"]
+    train_img_encoder: bool = False
+    eeg_scale: float = 1.0
+    img_scale: float = 0.5
+    proto_scale: float 
 
-    eeg_idx: int = 1
+    modules_to_train: list[str] = ["eeg_encoder", "comm"]
+    add_alignment: bool = False
+
     img_idx: int = 0
+    eeg_idx: int = 1
     prototype_idx: int = 2
 
 
@@ -117,7 +124,8 @@ class CommAlignmentModel(TrainingModule):
             device=device,
             compile=False,
         )
-        self.img_encoder.requires_grad_(False)
+        if not self.config.train_img_encoder:
+            self.img_encoder.requires_grad_(False)
 
         eeg_encoder_path = eeg_encoder_path or self.config.eeg_encoder_path
 
@@ -133,7 +141,7 @@ class CommAlignmentModel(TrainingModule):
             checkpoint_path=eeg_encoder_path,
         )
 
-        self.config.eeg_encoder = self.eeg_encoder.config    # type: ignore
+        self.config.eeg_encoder = self.eeg_encoder.config  # type: ignore
 
         self.metrics_on_pbar = "loss", "acc_eeg", "acc_img", "acc_proto"
 
@@ -177,8 +185,16 @@ class CommAlignmentModel(TrainingModule):
             ]
         )
 
-        self.comm_loss = CoMMLoss()
-        self.align_loss = CLIPLoss()
+        losses: dict[str, nn.Module] = {
+            "comm_loss": CoMMLoss(),
+        }
+        if self.config.add_alignment:
+            losses["align_loss"] = CLIPSimLoss()
+
+        self.losses = nn.ModuleDict(
+            losses
+        )
+
         self.images = {}
 
         self.cache_images = cache_images
@@ -285,15 +301,36 @@ class CommAlignmentModel(TrainingModule):
         img_aug1 = batch["img_aug1"]
         img_aug2 = batch["img_aug2"]
 
+        loss_dict: dict[str, Tensor] = {
+        }
+
         z1, z2 = self.comm_forward(eeg_aug1, eeg_aug2, img_aug1, img_aug2)
-        comm_loss_dict = self.comm_loss(z1, z2, self.config.prototype_idx)
-        align_loss, _ = self.align_loss(z1[self.config.eeg_idx], z2[self.config.img_idx], norm=True)
 
-        loss_dict = {**comm_loss_dict}
-        loss_dict["loss"] = comm_loss_dict["loss"] + align_loss
-        loss_dict["align_loss"] = align_loss
+        if "comm_loss" in self.losses:
+            comm_loss = self.losses["comm_loss"]
+            comm_loss_dict = comm_loss(z1, z2, self.config.prototype_idx)
 
-        return z1, z2, loss_dict
+            loss_dict.update({
+                "loss_eeg_to_proto": comm_loss_dict[self.config.eeg_idx],
+                "loss_img_to_proto": comm_loss_dict[self.config.img_idx],
+                "loss_proto_to_proto": comm_loss_dict[self.config.prototype_idx],
+            })
+
+
+        if "align_loss" in self.losses:
+            align_loss = self.losses["align_loss"]
+            align_loss_dict = align_loss(
+                z1[self.config.eeg_idx], z2[self.config.img_idx], norm=True
+            )
+            loss_dict.update({
+                "loss_eeg_to_img": align_loss_dict["loss_e"],
+                "loss_img_to_eeg": align_loss_dict["loss_i"],
+            })
+
+        
+        loss_dict["loss"] = torch.stack(list(loss_dict.values())).sum()
+
+        return loss_dict
 
     def training_step(
         self, batch, batch_idx: int, dataloader_idx: int = 0, *args, **kwargs
@@ -315,7 +352,7 @@ class CommAlignmentModel(TrainingModule):
         # Training Step
         batch = self.prepare_batch(batch)
 
-        *_, loss_dict = self.forward(batch)
+        loss_dict = self.forward(batch)
 
         self.log("train/loss", loss_dict["loss"], prog_bar=True)
 
@@ -352,15 +389,13 @@ class CommAlignmentModel(TrainingModule):
         batch = self.prepare_batch(batch)
 
         with torch.no_grad():
-            z1, z2, loss_dict = self.forward(batch)
+            loss_dict = self.forward(batch)
 
-        ssl_acc = self.get_ssl_accuracy(z1, z2)
-        ret_acc = self.get_retrieval_accuracies(batch)
+        acc_dict = self.get_retrieval_accuracies(batch)
 
         metrics = {
             **loss_dict,
-            **ssl_acc,
-            **ret_acc,
+            **acc_dict
         }
 
         outputs = prep_batch_for_logs(metrics)
@@ -382,15 +417,13 @@ class CommAlignmentModel(TrainingModule):
         batch = self.prepare_batch(batch)
 
         with torch.no_grad():
-            z1, z2, loss_dict = self.forward(batch)
+            loss_dict = self.forward(batch)
 
-        ssl_acc = self.get_ssl_accuracy(z1, z2)
-        ret_acc = self.get_retrieval_accuracies(batch)
+        acc_dict = self.get_retrieval_accuracies(batch)
 
         metrics = {
             **loss_dict,
-            **ssl_acc,
-            **ret_acc,
+            **acc_dict,
         }
 
         outputs = prep_batch_for_logs(metrics)
@@ -418,32 +451,22 @@ class CommAlignmentModel(TrainingModule):
         return metrics
 
     @torch.no_grad()
-    def get_ssl_accuracy(self, z1, z2, prototype: int = -1, *args, **kwargs):
-        n = len(z1)
-
-        z1 = [F.normalize(z, p=2, dim=-1) for z in z1]
-        z2 = [F.normalize(z, p=2, dim=-1) for z in z2]
-
-        accuracies = [get_top1_acc(z1[i] @ z2[prototype].T, axis=-1) for i in range(n)]
-
-        return {
-            "acc_eeg_to_proto": accuracies[self.config.eeg_idx],
-            "acc_img_to_proto": accuracies[self.config.img_idx],
-            "acc_proto_to_proto": accuracies[self.config.prototype_idx],
-        }
-
-    @torch.no_grad()
     def get_retrieval_accuracies(self, batch):
         eeg = batch["eeg"]
         img = batch["img"]
 
-        eeg_emb = self.comm.encode_feature(eeg, self.config.eeg_idx)
-        img_emb = self.comm.encode_feature(img, self.config.img_idx)
+        z_eeg = self.comm.encode_feature([eeg], [self.config.eeg_idx])
+        z_img = self.comm.encode_feature([img], [self.config.img_idx])
+        z_proto = self.comm.encode_feature([eeg, img], [self.config.eeg_idx, self.config.img_idx])
 
-        eeg_accuracy, img_accuracy = get_retrieval_accuracy(eeg_emb, img_emb, norm=True)
+        z_eeg = F.normalize(z_eeg, p=2, dim=-1)
+        z_img = F.normalize(z_img, p=2, dim=-1)
+        z_proto = F.normalize(z_proto, p=2, dim=-1)
+
         return {
-            "acc_eeg_to_img": eeg_accuracy,
-            "acc_img_to_eeg": img_accuracy,
+            "acc_eeg_to_proto": get_retrieval_accuracy(z_eeg, z_proto, norm=False),
+            "acc_img_to_proto": get_retrieval_accuracy(z_eeg, z_proto, norm=False),
+            "acc_eeg_to_img": get_retrieval_accuracy(z_eeg, z_img, norm=False),
         }
 
     def configure_optimizers(self):
@@ -465,8 +488,8 @@ class CommAlignmentModel(TrainingModule):
                 modules=[
                     self.comm.encoder.input_adapters,
                     self.comm.encoder.fusion_transformer,
-                    self.comm_loss,
                     self.comm.head,
+                    *self.losses.values(),
                 ],
                 lr=self.config.comm_lr,
                 min_lr=self.config.comm_min_lr,
@@ -476,6 +499,9 @@ class CommAlignmentModel(TrainingModule):
                 lr_scheduler="cosine_anneal",
             ),
         ]
+        if self.config.train_img_encoder:
+            raise NotImplementedError("Training the image encoder is not implemented yet")
+            # If implemented, add this
 
         num_train_batches = self.data_module.get_num_batches("train")
         optimizer_options = get_optimizer_options(

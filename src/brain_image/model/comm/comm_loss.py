@@ -13,10 +13,11 @@ class CoMMLoss(nn.Module):
         [1] What to align in multimodal contrastive learning, Dufumier & Castillo-Navarro et al., ICLR 2025
     """
 
-    def __init__(self, temperature=0.1, weights=None):
+    def __init__(self, temperature=0.1, weights=None, skip_idxs: list[int] = []):
         super().__init__()
         self.temperature = nn.Parameter(torch.tensor(temperature)) 
         self.weights = weights
+        self.skip_idxs = skip_idxs
         self.INF = 1e8
 
     def infonce(self, z1, z2):
@@ -45,29 +46,37 @@ class CoMMLoss(nn.Module):
                     is stored in "aug1_embed" and "aug2_embed".
         :return: {"loss": torch.Tensor(float), "ssl_acc": torch.Tensor(float)}
         """
-        # Prepare embeddings (normalize + gather across all GPU)
         assert len(z1) == len(z2)
         n_emb = len(z1)
-        if norm:
-            z1 = [func.normalize(z, p=2, dim=-1) for z in z1]
-            z2 = [func.normalize(z, p=2, dim=-1) for z in z2]
-        Z = all_gather_batch_with_grad(z1 + z2)
-        z1, z2 = Z[:n_emb], Z[n_emb:]
 
         # Apply InfoNCE between a "prototype embedding" and all the others
-        loss = []
-        for i in range(n_emb):
-            loss1 = self.infonce(z1[i], z2[prototype_idx])
-            loss2 = self.infonce(z2[i], z1[prototype_idx])
-            loss.append((loss1 + loss2) / 2.)
-        
-        losses = {"ssl_loss_%i"%i: l for i, l in enumerate(loss)}
-        if self.weights is not None:
-            loss = torch.mean(torch.stack(loss) * torch.tensor(self.weights, device=z1[0].device))
-        else:
-            loss = torch.mean(torch.stack(loss))
+        losses = {}
 
-        return {"loss": loss, **losses}
+        zp1 = z1[prototype_idx]
+        zp2 = z2[prototype_idx]
+
+        if norm:
+            zp1 = func.normalize(zp1, p=2, dim=-1)
+            zp2 = func.normalize(zp2, p=2, dim=-1)
+
+        for m in range(n_emb):
+            if m in self.skip_idxs:
+                continue
+
+            zm1 = z1[m]
+            zm2 = z2[m]
+
+            if norm and m != prototype_idx:
+                zm1 = func.normalize(zm1, p=2, dim=-1)
+                zm2 = func.normalize(zm2, p=2, dim=-1)
+
+            loss1 = self.infonce(zm1, zp2)
+            loss2 = self.infonce(zm2, zp1)
+            
+            loss = ((loss1 + loss2) / 2.)
+            losses[m] = loss
+        
+        return losses
 
     def __str__(self):
         return "{}(temp={})".format(type(self).__name__, self.temperature)

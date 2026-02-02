@@ -72,6 +72,44 @@ class CLIPLoss(nn.Module):
         return loss, logits
 
 
+class CLIPSimLoss(nn.Module):
+    def __init__(self, init_temperature: float = 0.07, max_scale: float = 100):
+        super().__init__()
+        self.logit_scale = nn.Parameter(torch.log(torch.tensor(1 / init_temperature)))
+        self.max_scale = max_scale
+        self.loss_func = nn.CrossEntropyLoss()
+
+
+    def forward(
+        self, z_i: torch.Tensor, z_e: torch.Tensor, labels: torch.Tensor | None = None, norm: bool = True
+    ) -> dict[str, torch.Tensor]:
+        if z_i.size(0) != z_e.size(0):
+            raise ValueError(f"z_e and z_i should have the same batch size, but got {z_e.size(0)} and {z_i.size(0)}")
+
+        if norm:
+            z_e = F.normalize(z_e, dim=-1)
+            z_i = F.normalize(z_i, dim=-1)
+
+        if labels is None:
+            labels = torch.arange(z_i.size(0), device=z_i.device)
+
+        z = z_e @ z_i.T
+        z_scaled = z * self.logit_scale.exp().clamp(max=self.max_scale)
+
+        loss_e = self.loss_func(
+            z_scaled, target=labels
+        )
+        loss_i = self.loss_func(
+            z_scaled.T, target=labels
+        )
+
+        return {
+            "loss_e": loss_e,
+            "loss_i": loss_i,
+        }
+
+
+
 class SigLipLoss(nn.Module):
     def __init__(self, init_temperature: float = 0.07, init_bias: float = 0.0, max_scale: float = 100, ignore_idx = -100, scale_factor: float = 100):
         super().__init__()
