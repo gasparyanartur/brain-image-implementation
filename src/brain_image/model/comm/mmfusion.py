@@ -488,9 +488,17 @@ class MMFusion(nn.Module):
                 z.append(self.fusion_transformer(latent_tokens_))
         return z
 
-    def encode_single_mod(self, x: torch.Tensor, mod: int):
+    def encode_single_mod(self, x: torch.Tensor, mod: int, project: bool = False) -> torch.Tensor:
         assert 0 <= mod < self.num_modalities, "Wrong input modality"
-        return self.encoders[mod](x)
+        z = self.encoders[mod](x)
+        if isinstance(z, dict):
+            raise NotImplementedError
+        
+        assert isinstance(z, torch.Tensor)
+        if project:
+            z = self.input_adapters[mod](z)
+
+        return z
     
     def deep_encode_single_mod(self, x: torch.Tensor, mod: int):
         assert 0 <= mod < self.num_modalities, "Wrong input modality"
