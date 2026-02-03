@@ -1,4 +1,5 @@
 from __future__ import annotations
+import datetime
 import os
 from pathlib import Path
 import logging
@@ -114,14 +115,23 @@ class Trainer:
         log_path.mkdir(parents=True, exist_ok=True)
         logging.info(f"Logging to path {log_path}...")
 
-        model_id = create_model_id()
+        model_id_components = []
+
         if (slurm_array_job_id := os.getenv("SLURM_ARRAY_JOB_ID")) is not None:
-            model_id += f"-slurmarr{slurm_array_job_id}"
+            model_id_components.append(f"{slurm_array_job_id}")
+            
             if (slurm_task_id := os.getenv("SLURM_ARRAY_TASK_ID")) is not None:
-                model_id += f"_{slurm_task_id}"
+                model_id_components.append(f"_{slurm_task_id}")
+
+            model_id_components.append("-")
 
         elif (slurm_job_id := os.getenv("SLURM_JOB_ID")) is not None:
-            model_id += f"-slurm{slurm_job_id}"
+            model_id_components.append(slurm_job_id)
+            model_id_components.append("-")
+
+        model_id_components.append(f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+        model_id = "".join(model_id_components)
 
 
         loggers.append(
