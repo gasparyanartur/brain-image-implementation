@@ -50,8 +50,8 @@ class CommAlignmentConfig(TrainingModuleConfig):
     img_encoder: ImageEncoderName = "unaligned_synclr_vitb16"
     eeg_encoder: EEGEncoderConfigType
 
-    embed_dim: int = 512
-    proj_dim: int = 256
+    embed_dim: int = 128
+    proj_dim: int = 128
 
     img_size: int = 224
     models_path: Path = Path("models")
@@ -172,21 +172,27 @@ class CommAlignmentModel(TrainingModule):
             ),
         )
 
-        self.image_augmenter = ImageAugmentationPipeline()
+        self.image_augmenter = ImageAugmentationPipeline(
+            flip_prob=0.5,
+            color_jitter_prob=0.5,
+            blur_prob=0.25
+            color_jitter_contrast=0.2,
+            color_jitter_brightness=0.3,
+        )
         self.eeg_augmenter = EEGAugmentationPipeline(
-            ampscale_prob=1,
-            timeshift_prob=0.75,
-            ampshift_prob=0.75,
-            bandstop_prob=0,
-            zeromask_prob=0,
-            blur_prob=1,
+            ampscale_prob=0.5,
+            timeshift_prob=0.5,
+            ampshift_prob=0.5,
+            bandstop_prob=0.5,
+            zeromask_prob=0.5,
+            blur_prob=0.5,
         )
         self.image_augmenter.requires_grad_(False)
         self.eeg_augmenter.requires_grad_(False)
 
         self.image_pipe = tv2.Compose(
             [
-                tv2.Resize((224), interpolation=tv2.InterpolationMode.BICUBIC),
+                tv2.Resize((self.config.img_size), interpolation=tv2.InterpolationMode.BICUBIC),
                 tv2.ToDtype(torch.float32, scale=True),
             ]
         )
