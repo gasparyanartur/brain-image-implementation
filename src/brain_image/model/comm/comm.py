@@ -76,7 +76,9 @@ class CoMM(BaseModel):
             )
         )
 
-    def forward(self, x1: List[torch.Tensor], x2: List[torch.Tensor]):
+    def forward(self, x1: List[torch.Tensor], x2: List[torch.Tensor]) -> Dict[str, torch.Tensor]:
+        # x1, x2: list of tensors of shape (B, C, H, W) for each modality
+        # x1, x2: (mod1_x, mod2_x)
         # x1: (aug1(mod1_x1), aug2(mod2_x1))
         # x2: (aug1(mod1_x2), aug2(mod2_x2))
 
@@ -84,9 +86,20 @@ class CoMM(BaseModel):
         all_masks = gen_all_possible_masks(len(x1))
         z1 = self.encoder(x1, mask_modalities=all_masks)
         z2 = self.encoder(x2, mask_modalities=all_masks)
-        z1 = [self.head(z) for z in z1]
-        z2 = [self.head(z) for z in z2]
-        return {"aug1_embed": z1, "aug2_embed": z2, "prototype": -1}
+        z1 = [self.head.forward(z) for z in z1]
+        z2 = [self.head.forward(z) for z in z2]
+        return {"aug1_embed": z1, "aug2_embed": z2, "prototype": -1} # type: ignore
+    
+    def encode_token(self, z: List[torch.Tensor] | torch.Tensor) -> torch.Tensor:
+        # x: (mod1_x, mod2_x)
+        if isinstance(z, torch.Tensor):
+            z = [z]
+         
+        z = self.encoder.fusion_transformer.forward(z)  # type: ignore
+        z = self.head.forward(z)
+
+
+        return z # type: ignore
 
     def extract_features(self, loader: torch.utils.data.DataLoader, **kwargs):
         """

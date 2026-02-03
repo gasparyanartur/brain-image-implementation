@@ -192,7 +192,9 @@ class CommAlignmentModel(TrainingModule):
 
         self.image_pipe = tv2.Compose(
             [
-                tv2.Resize((self.config.img_size), interpolation=tv2.InterpolationMode.BICUBIC),
+                tv2.Resize(
+                    (self.config.img_size), interpolation=tv2.InterpolationMode.BICUBIC
+                ),
                 tv2.ToDtype(torch.float32, scale=True),
             ]
         )
@@ -203,9 +205,7 @@ class CommAlignmentModel(TrainingModule):
         if self.config.add_alignment:
             losses["align_loss"] = CLIPSimLoss()
 
-        self.losses = nn.ModuleDict(
-            losses
-        )
+        self.losses = nn.ModuleDict(losses)
 
         self.images = {}
 
@@ -313,8 +313,7 @@ class CommAlignmentModel(TrainingModule):
         img_aug1 = batch["img_aug1"]
         img_aug2 = batch["img_aug2"]
 
-        loss_dict: dict[str, Tensor] = {
-        }
+        loss_dict: dict[str, Tensor] = {}
 
         z1, z2 = self.comm_forward(eeg_aug1, eeg_aug2, img_aug1, img_aug2)
 
@@ -322,24 +321,26 @@ class CommAlignmentModel(TrainingModule):
             comm_loss = self.losses["comm_loss"]
             comm_loss_dict = comm_loss(z1, z2, self.config.prototype_idx)
 
-            loss_dict.update({
-                "loss_eeg_to_proto": comm_loss_dict[self.config.eeg_idx],
-                "loss_img_to_proto": comm_loss_dict[self.config.img_idx],
-                "loss_proto_to_proto": comm_loss_dict[self.config.prototype_idx],
-            })
-
+            loss_dict.update(
+                {
+                    "loss_eeg_to_proto": comm_loss_dict[self.config.eeg_idx],
+                    "loss_img_to_proto": comm_loss_dict[self.config.img_idx],
+                    "loss_proto_to_proto": comm_loss_dict[self.config.prototype_idx],
+                }
+            )
 
         if "align_loss" in self.losses:
             align_loss = self.losses["align_loss"]
             align_loss_dict = align_loss(
                 z1[self.config.eeg_idx], z2[self.config.img_idx], norm=True
             )
-            loss_dict.update({
-                "loss_eeg_to_img": align_loss_dict["loss_e"],
-                "loss_img_to_eeg": align_loss_dict["loss_i"],
-            })
+            loss_dict.update(
+                {
+                    "loss_eeg_to_img": align_loss_dict["loss_e"],
+                    "loss_img_to_eeg": align_loss_dict["loss_i"],
+                }
+            )
 
-        
         loss_dict["loss"] = torch.stack(list(loss_dict.values())).sum()
 
         return loss_dict
@@ -475,16 +476,24 @@ class CommAlignmentModel(TrainingModule):
 
         z_eeg = self.comm.encode_feature([eeg], [self.config.eeg_idx])
         z_img = self.comm.encode_feature([img], [self.config.img_idx])
-        z_proto = self.comm.encode_feature([eeg, img], [self.config.eeg_idx, self.config.img_idx])
+        z_proto = self.comm.encode_feature(
+            [eeg, img], [self.config.eeg_idx, self.config.img_idx]
+        )
 
         z_eeg = F.normalize(z_eeg, p=2, dim=-1)
         z_img = F.normalize(z_img, p=2, dim=-1)
         z_proto = F.normalize(z_proto, p=2, dim=-1)
 
-        acc_eeg_to_proto, acc_proto_to_eeg = get_retrieval_accuracy(z_eeg, z_proto, norm=False)
-        acc_img_to_proto, acc_proto_to_img = get_retrieval_accuracy(z_img, z_proto, norm=False)
-        acc_eeg_to_img, acc_img_to_eeg = get_retrieval_accuracy(z_eeg, z_img, norm=False)
-        
+        acc_eeg_to_proto, acc_proto_to_eeg = get_retrieval_accuracy(
+            z_eeg, z_proto, norm=False
+        )
+        acc_img_to_proto, acc_proto_to_img = get_retrieval_accuracy(
+            z_img, z_proto, norm=False
+        )
+        acc_eeg_to_img, acc_img_to_eeg = get_retrieval_accuracy(
+            z_eeg, z_img, norm=False
+        )
+
         return {
             "acc_eeg_to_proto": acc_eeg_to_proto,
             "acc_img_to_proto": acc_img_to_proto,
@@ -493,7 +502,7 @@ class CommAlignmentModel(TrainingModule):
             "acc_proto_to_img": acc_proto_to_img,
             "acc_img_to_eeg": acc_img_to_eeg,
         }
-    
+
     @torch.no_grad()
     def get_set_retrieval(self, batch: dict) -> dict[str, Tensor]:
         eeg = batch["eeg"]
@@ -501,35 +510,39 @@ class CommAlignmentModel(TrainingModule):
 
         n = eeg.size(0)
 
-        z_eeg = self.comm.encoder.encode_single_mod(eeg, self.config.eeg_idx, project=True)
-        z_img = self.comm.encoder.encode_single_mod(img, self.config.img_idx, project=True)
-        
-        z_eeg_fusion = self.comm.encoder.fusion_transformer([z_eeg])
+        z_eeg = self.comm.encoder.encode_single_mod(
+            eeg, self.config.eeg_idx, project=True
+        )
+        z_img = self.comm.encoder.encode_single_mod(
+            img, self.config.img_idx, project=True
+        )
+
+        z_eeg_fusion = self.comm.encode_token(z_eeg)
 
         # For each eeg signal, we create a prototype with each image
-        z_protos = torch.stack([
-            self.comm.encoder.fusion_transformer(
-                (z_eeg[i].unsqueeze(0).expand(n, -1, -1), z_img)
-            ) 
-            for i in range(n)
-        ])  # <n_eeg, n_img, d>
+        z_protos = torch.stack(
+            [
+                self.comm.encode_token(
+                    [z_eeg[i].unsqueeze(0).expand(n, -1, -1), z_img]
+                )
+                for i in range(n)
+            ]
+        )  # <n_eeg, n_img, d>
 
-        # z_proto <n_eeg, n_img, d>: 
+        # z_proto <n_eeg, n_img, d>:
         # eeg1 X img1, eeg1 X img2, ..., eeg1 X imgn
         # ...
         # eegn X img1, eegn X img2, ..., eegn X imgn
-        # 
+        #
         # Of all the prototypes with eeg_i, the one with the highest dot product should be the one with correct image
 
-        z_eeg_fusion = F.normalize(z_eeg_fusion, dim=-1) # <n, d>
-        z_protos = F.normalize(z_protos, dim=-1) # <n, n, d>
+        z_eeg_fusion = F.normalize(z_eeg_fusion, dim=-1)  # <n, d>
+        z_protos = F.normalize(z_protos, dim=-1)  # <n, n, d>
 
-        logits = torch.einsum("ed,eid->ei", z_eeg_fusion, z_protos) # <n_eeg, n_img>
+        logits = torch.einsum("ed,eid->ei", z_eeg_fusion, z_protos)  # <n_eeg, n_img>
         accuracy = get_top1_acc(logits, axis=1)
-        
-        return {
-            "acc_set": accuracy
-        }
+
+        return {"acc_set": accuracy}
 
     def configure_optimizers(self):
         logging.info("Configuring optimizers")
@@ -562,7 +575,9 @@ class CommAlignmentModel(TrainingModule):
             ),
         ]
         if self.config.train_img_encoder:
-            raise NotImplementedError("Training the image encoder is not implemented yet")
+            raise NotImplementedError(
+                "Training the image encoder is not implemented yet"
+            )
             # If implemented, add this
 
         num_train_batches = self.data_module.get_num_batches("train")

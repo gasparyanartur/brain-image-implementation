@@ -31,6 +31,7 @@ from brain_image.configs import get_device_str
 ImageEncoderName = typing.Literal[
     "clip_vitl14",
     "clip_vith14",
+    "clip_vitb32",
     "sd_variations_v2",
     "ip_sdxl_turbo",
     "ip_sdxl_turbo_256",
@@ -49,6 +50,7 @@ DREAMSIM_IMAGE_ENCODER = typing.Literal[
 IMAGE_ENCODER_DIM: dict[ImageEncoderName, int] = {
     "clip_vitl14": 768,
     "clip_vith14": 1024,
+    "clip_vitb32": 512,
     "sd_variations_v2": 768,
     "ip_sdxl_turbo": 1024,
     "ip_sdxl_turbo_256": 1024,
@@ -66,6 +68,8 @@ def model_name_to_hf_name(model_name: ImageEncoderName) -> str:
             return "openai/clip-vit-large-patch14"
         case "clip_vith14":
             return "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
+        case "clip_vitb32":
+            return "openai/clip-vit-base-patch32"
         case "sd_variations_v2":
             return "lambdalabs/sd-image-variations-diffusers"
         case "ip_sdxl_turbo" | "ip_sdxl_turbo_256" | "ip_sdxl_turbo_128":
@@ -104,7 +108,7 @@ def load_image_encoder(
     logging.info(f"Loading image encoder for model {model_name} on device {device}")
 
     match model_name:
-        case "clip_vitl14" | "clip_vith14":
+        case "clip_vitl14" | "clip_vith14" | "clip_vitb32":
             model = CLIPImageEncoder(model_name, *args, **kwargs)
         case (
             "sd_variations_v2"
