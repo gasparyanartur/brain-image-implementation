@@ -175,7 +175,7 @@ class CommAlignmentModel(TrainingModule):
         self.image_augmenter = ImageAugmentationPipeline(
             flip_prob=0.5,
             color_jitter_prob=0.5,
-            blur_prob=0.25
+            blur_prob=0.25,
             color_jitter_contrast=0.2,
             color_jitter_brightness=0.3,
         )
