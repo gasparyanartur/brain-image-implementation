@@ -13,7 +13,8 @@ from brain_image.data.data import (
 )
 from brain_image.data.dataset.eeg_dataset import EEGDataset, EEGDatasetConfig
 from brain_image.data.tensorcache import TensorCache
-from brain_image.model.encoder.img_encoder import ImageEncoderName, IMAGE_ENCODER_DIM
+from brain_image.model.encoder.img_encoder.union import ImageEncoderName
+from brain_image.model.encoder.img_encoder.union import IMAGE_ENCODER_DIM
 
 
 class DummyEEGDatasetConfig(EEGDatasetConfig):

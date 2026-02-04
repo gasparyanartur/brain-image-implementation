@@ -19,6 +19,8 @@ import PIL.Image
 import yaml
 
 from torch.nn import functional as F
+from torch import nn
+
 
 import matplotlib.pyplot as plt
 
@@ -486,3 +488,10 @@ def prep_batch_for_logs(batch: dict[str, torch.Tensor]) -> dict[str, Any]:
         output[k] = v
 
     return output
+
+
+def get_device_from_module(mod: nn.Module):
+    return next(mod.parameters()).device
+
+def get_dtype_from_module(mod: nn.Module):
+    return next(mod.parameters()).dtype

@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union, cast
 
 import torch
+from torch.nn import functional as F
 
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
@@ -21,12 +22,12 @@ from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import
 
 
 from brain_image.configs import get_device
-from brain_image.model.encoder.img_encoder import (
+from brain_image.model.encoder.img_encoder.img_encoder import (
     CLIPImageEncoder,
     VAEImageEncoder,
     model_name_to_hf_name,
 )
-from brain_image.utils import DTYPE
+from brain_image.model.encoder.img_encoder.union import ImageEncoderName
 
 
 class ReconstructionPipeline(ABC):
@@ -101,8 +102,15 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
         height = height or pipe.default_sample_size * pipe.vae_scale_factor
         width = width or pipe.default_sample_size * pipe.vae_scale_factor
 
-        original_size = original_size or (height, width)    # type: ignore
-        target_size = target_size or (height, width)    # type: ignore
+        if original_size is None:
+            assert height is not None and width is not None, "Must provide either original_size or height and width"
+            original_size = (height, width)
+
+        if target_size is None:
+            assert height is not None and width is not None, "Must provide either target_size or height and width"
+            target_size = (height, width)   
+
+        num_images_per_prompt = num_images_per_prompt or 1
 
         # 1. Check inputs. Raise error if not correct
         pipe.check_inputs(
@@ -132,7 +140,8 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
         elif prompt is not None and isinstance(prompt, list):
             batch_size = len(prompt)
         else:
-            batch_size = prompt_embeds.shape[0] # type: ignore
+            assert prompt_embeds is not None
+            batch_size = prompt_embeds.shape[0] 
 
         device = pipe._execution_device
 
@@ -161,26 +170,28 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
             lora_scale=lora_scale,
             clip_skip=pipe.clip_skip,
         )
+        assert num_images_per_prompt is not None
 
         # 4. Prepare timesteps
         timesteps, num_inference_steps = retrieve_timesteps(pipe.scheduler, num_inference_steps, device, timesteps) # type: ignore
 
         # 5. Prepare latent variables
         num_channels_latents = pipe.unet.config.in_channels
+        assert prompt_embeds is not None
         latents = pipe.prepare_latents(
-            batch_size * num_images_per_prompt, # type: ignore
+            batch_size * num_images_per_prompt, 
             num_channels_latents,
             height,
             width,
-            prompt_embeds.dtype,     # type: ignore
+            prompt_embeds.dtype,     
             device,
             generator,
             latents,
         )
+        assert latents is not None
 
         extra_step_kwargs = pipe.prepare_extra_step_kwargs(generator, eta)
 
-        add_text_embeds = pooled_prompt_embeds
         if pipe.text_encoder_2 is None:
             text_encoder_projection_dim = int(pooled_prompt_embeds.shape[-1]) #type: ignore
         else:
@@ -205,13 +216,22 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
             negative_add_time_ids = add_time_ids
 
         if pipe.do_classifier_free_guidance:
-            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0) # type: ignore
-            add_text_embeds = torch.cat([negative_pooled_prompt_embeds, add_text_embeds], dim=0) # type: ignore
+            assert negative_prompt_embeds is not None
+            assert prompt_embeds is not None
+            assert negative_pooled_prompt_embeds is not None
+            assert pooled_prompt_embeds is not None
+
+            prompt_embeds = cast(torch.FloatTensor, torch.cat([negative_prompt_embeds, prompt_embeds], dim=0))
+            pooled_prompt_embeds = cast(torch.FloatTensor, torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0))
             add_time_ids = torch.cat([negative_add_time_ids, add_time_ids], dim=0)
 
-        prompt_embeds = prompt_embeds.to(device) # type: ignore
-        add_text_embeds = add_text_embeds.to(device) # type: ignore
-        add_time_ids = add_time_ids.to(device).repeat(batch_size * num_images_per_prompt, 1) # type: ignore
+        assert prompt_embeds is not None
+        assert pooled_prompt_embeds is not None
+
+        prompt_embeds = cast(torch.FloatTensor, prompt_embeds.to(device) )
+        pooled_prompt_embeds = cast(torch.FloatTensor, pooled_prompt_embeds.to(device))
+
+        add_time_ids = add_time_ids.to(device).repeat(batch_size * num_images_per_prompt, 1) 
 
         if ip_adapter_image is not None:
             image_embeds, negative_image_embeds = pipe.encode_image(ip_adapter_image, device, num_images_per_prompt)
@@ -220,18 +240,20 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
                 image_embeds = image_embeds.to(device)
         
         if ip_adapter_embeds is not None:
-            if isinstance(ip_adapter_embeds, list):  # type: ignore
+            if isinstance(ip_adapter_embeds, list):  
                 image_embeds = [emb.to(device=device, dtype=prompt_embeds.dtype).unsqueeze(0) for emb in ip_adapter_embeds]
 
             else:
-                image_embeds = ip_adapter_embeds.to(device=device, dtype=prompt_embeds.dtype) # type: ignore
+                image_embeds = ip_adapter_embeds.to(device=device, dtype=prompt_embeds.dtype) 
             if pipe.do_classifier_free_guidance:
+                image_embeds = cast(torch.FloatTensor, image_embeds)
                 negative_image_embeds = torch.zeros_like(image_embeds)
                 image_embeds = torch.cat([negative_image_embeds, image_embeds])
                 image_embeds = image_embeds.to(device)
 
         # 8. Denoising loop
-        num_warmup_steps = max(len(timesteps) - num_inference_steps * pipe.scheduler.order, 0) # type: ignore
+        timesteps = cast(list, timesteps)
+        num_warmup_steps = max(len(timesteps) - num_inference_steps * pipe.scheduler.order, 0) 
 
         # 8.1 Apply denoising_end
         if (
@@ -246,19 +268,21 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
                     - (pipe.denoising_end * pipe.scheduler.config.num_train_timesteps)
                 )
             )
-            num_inference_steps = len(list(filter(lambda ts: ts >= discrete_timestep_cutoff, timesteps)))    # type: ignore
-            timesteps = timesteps[:num_inference_steps] # type: ignore
+            num_inference_steps = len(list(filter(lambda ts: ts >= discrete_timestep_cutoff, timesteps)))   
+            timesteps = timesteps[:num_inference_steps]
+
+        assert num_inference_steps is not None
 
         # 9. Optionally get Guidance Scale Embedding
         timestep_cond = None
         if pipe.unet.config.time_cond_proj_dim is not None:
-            guidance_scale_tensor = torch.tensor(pipe.guidance_scale - 1).repeat(batch_size * num_images_per_prompt) # type: ignore
+            guidance_scale_tensor = torch.tensor(pipe.guidance_scale - 1).repeat(batch_size * num_images_per_prompt) 
             timestep_cond = pipe.get_guidance_scale_embedding(
                 guidance_scale_tensor, embedding_dim=pipe.unet.config.time_cond_proj_dim
-            ).to(device=device, dtype=latents.dtype)     # type: ignore
+            ).to(device=device, dtype=latents.dtype)     
 
         pipe._num_timesteps = len(timesteps)     # type: ignore
-        with pipe.progress_bar(total=num_inference_steps) as progress_bar:
+        with pipe.progress_bar(total=num_inference_steps) as progress_bar:  # type: ignore
             for i, t in enumerate(timesteps): # type: ignore
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if pipe.do_classifier_free_guidance else latents # type: ignore
@@ -266,7 +290,7 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
                 latent_model_input = pipe.scheduler.scale_model_input(latent_model_input, t)
 
                 # predict the noise residual
-                added_cond_kwargs = {"text_embeds": add_text_embeds, "time_ids": add_time_ids}
+                added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
                 if ip_adapter_image is not None or ip_adapter_embeds is not None:
                     added_cond_kwargs["image_embeds"] = image_embeds
                 noise_pred = pipe.unet(
@@ -300,7 +324,7 @@ class IPAdapterReconstructionPipeline(ReconstructionPipeline):
                     latents = callback_outputs.pop("latents", latents)
                     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
                     negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
-                    add_text_embeds = callback_outputs.pop("add_text_embeds", add_text_embeds)
+                    pooled_prompt_embeds = callback_outputs.pop("add_text_embeds", pooled_prompt_embeds)
                     negative_pooled_prompt_embeds = callback_outputs.pop(
                         "negative_pooled_prompt_embeds", negative_pooled_prompt_embeds
                     )
@@ -438,10 +462,10 @@ class ImageVariationReconstructionPipeline(ReconstructionPipeline):
     @classmethod
     def load_pretrained(
         cls,
-        model_name: str = "sd_variations_v2",
+        model_name: ImageEncoderName = "sd_variations_v2",
         device: torch.device = get_device(),
         dtype: torch.dtype = torch.float16,
-        cond_encoder_name: str = "clip_vitl14",
+        cond_encoder_name: ImageEncoderName = "clip_vitl14",
         **kwargs: dict,
     ):
         base_pipe = StableDiffusionImageVariationPipeline.from_pretrained(
@@ -627,3 +651,18 @@ class ImageVariationReconstructionPipeline(ReconstructionPipeline):
         self.vae = torch.compile(self.vae)
         self.clip_encoder = torch.compile(self.clip_encoder)
         self.vae_encoder = torch.compile(self.vae_encoder)
+
+
+
+
+@torch.no_grad()
+def get_reconstructions(
+    conditioning: torch.Tensor,
+    pipe_kwargs: dict = {},
+) -> torch.Tensor:
+    pipe = IPAdapterReconstructionPipeline.load_pretrained(device=conditioning.device)
+    conditioning = F.normalize(conditioning, dim=-1)
+    reconstruction = pipe.reconstruct_latents(conditioning, **pipe_kwargs)
+    del pipe
+
+    return reconstruction

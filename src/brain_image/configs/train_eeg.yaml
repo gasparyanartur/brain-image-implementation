@@ -12,4 +12,3 @@ model:
   plot_lowdim_proj: false
   low_dim_proj_pca: 50
   seed: 42
-  align_skip_duplicates: true

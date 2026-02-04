@@ -1,7 +1,7 @@
 from typing import Literal
 
 from brain_image.model.encoder.eeg_encoder.union import EEGEncoderName
-from brain_image.model.encoder.img_encoder import ImageEncoderName
+from brain_image.model.encoder.img_encoder.union import ImageEncoderName
 
 
 EncoderName = EEGEncoderName | ImageEncoderName

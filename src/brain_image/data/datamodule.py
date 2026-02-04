@@ -14,7 +14,7 @@ from typing import Literal, cast
 
 from brain_image.data.dataset.eeg_dataset import DataConfig, EEGDataset, EEGDatasetConfig
 from brain_image.data.tensorcache import TensorCache
-from brain_image.model.encoder.img_encoder import ImageEncoderName
+from brain_image.model.encoder.img_encoder.union import ImageEncoderName
 
 
 class DataModule(LightningDataModule, ABC):

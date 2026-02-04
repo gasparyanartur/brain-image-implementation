@@ -11,7 +11,7 @@ from torch import Tensor
 
 from brain_image.data.tensorcache import TensorCache
 from brain_image.model.encoder.eeg_encoder.union import EEGEncoderName
-from brain_image.model.encoder.img_encoder import ImageEncoderName
+from brain_image.model.encoder.img_encoder.union import ImageEncoderName
 
 SPLIT = Literal["train", "val", "test"]
 DSPLIT = Literal["train", "test"]

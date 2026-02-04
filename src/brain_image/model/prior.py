@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import json
 import logging
 from pathlib import Path
@@ -25,9 +26,15 @@ from dalle2_pytorch import DiffusionPrior
 from dalle2_pytorch.dalle2_pytorch import CausalTransformer, SinusoidalPosEmb, MLP
 
 from brain_image.configs import BaseConfig
-from brain_image.model.encoder.img_encoder import ImageEncoderName
+from brain_image.model.encoder.img_encoder.union import ImageEncoderName
 from brain_image.model.model import LinearLayerNorm
-from brain_image.utils import l2_scale, reverse_l2_scale, reverse_z_scale, z_scale
+from brain_image.utils import (
+    get_device_from_module,
+    l2_scale,
+    reverse_l2_scale,
+    reverse_z_scale,
+    z_scale,
+)
 
 
 class BrainDiffusionPriorConfig(BaseConfig):
@@ -544,7 +551,113 @@ class DiffusionPriorConfig:
     num_training_timesteps: int = 1000
 
 
-class SimpleDiffusionPrior(nn.Module):
+class BaseDiffusionPrior(ABC, nn.Module):
+    def __init__(
+        self,
+        config: DiffusionPriorConfig,
+        latent_name: ImageEncoderName,
+        embedding_stats: dict[ImageEncoderName, dict[str, Tensor]] | None = None,
+    ):
+        super().__init__()
+
+        self.config = config
+        self.latent_name = latent_name
+        self.embedding_stats = embedding_stats
+
+        if config.norm_scheme == "z_scale" and embedding_stats is None:
+            raise ValueError("z_scale requires embedding stats")
+
+    @abstractmethod
+    def forward(
+        self, x: Tensor, time: Tensor, cond: Tensor | None = None, **kwargs
+    ) -> Tensor:
+        raise NotImplementedError
+
+    @abstractmethod
+    def sample(
+        self,
+        target: torch.Tensor,
+        condition: torch.Tensor | None = None,
+        noise: torch.Tensor | None = None,
+        timesteps: torch.Tensor | None = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+    @abstractmethod
+    def generate(self, x: Tensor | None, conditioning: Tensor | None = None, **kwargs) -> Tensor:
+        raise NotImplementedError
+
+    @torch.no_grad()
+    def scale_target(self, target: Tensor) -> Tensor:
+        latent_name = cast(ImageEncoderName, self.latent_name)
+
+        match self.config.norm_scheme:
+            case "none":
+                return target
+            case "l2_scale":
+                return l2_scale(target)
+            case "z_scale":
+                assert self.embedding_stats is not None
+
+                stats = self.embedding_stats[latent_name]
+                return z_scale(target, stats["mean"], stats["std"])
+
+    @torch.no_grad()
+    def reverse_scale_target(self, target: Tensor) -> Tensor:
+        latent_name = cast(ImageEncoderName, self.latent_name)
+
+        match self.config.norm_scheme:
+            case "none":
+                return target
+            case "l2_scale":
+                return reverse_l2_scale(target)
+            case "z_scale":
+                assert self.embedding_stats is not None
+
+                stats = self.embedding_stats[latent_name]
+                return reverse_z_scale(target, stats["mean"], stats["std"])
+            
+    @torch.no_grad()
+    def batch_generate(
+        self,
+        eeg_latent_normed: torch.Tensor,
+        batch_size: int = 512,
+        progress_bar: bool = True,
+        generator: torch.Generator | None = None,
+        prior_kwargs: dict = {},
+        seed: int | None = None,
+    ) -> torch.Tensor:
+
+        device = get_device_from_module(self)
+
+        if generator is None:
+            generator = (
+                torch.Generator(device).manual_seed(seed) if seed is not None else None
+            )
+
+        n = eeg_latent_normed.size(0)
+
+        prior_preds = torch.cat(
+            [
+                self.reverse_scale_target(
+                    self.generate(
+                        conditioning=eeg_latent_normed[i : i + batch_size].to(device),
+                        generator=generator,
+                        **prior_kwargs,
+                    )
+                )
+                for i in tqdm.tqdm(
+                    range(0, n, batch_size), desc="Prior sampling", disable=not progress_bar
+                )
+            ]
+        )
+
+        return prior_preds
+
+
+
+class SimpleDiffusionPrior(BaseDiffusionPrior):
     class EncoderLayer(nn.Module):
         def __init__(
             self,
@@ -579,15 +692,14 @@ class SimpleDiffusionPrior(nn.Module):
 
     def __init__(
         self,
-        config: DiffusionPriorConfig = DiffusionPriorConfig(),
+        config: DiffusionPriorConfig,
+        latent_name: ImageEncoderName,
         embedding_stats: dict[ImageEncoderName, dict[str, Tensor]] | None = None,
-        encoder_embed_map: dict[str, ImageEncoderName] | None = None,
     ):
-        super().__init__()
-        if config.norm_scheme == "z_scale" and embedding_stats is None:
-            raise ValueError("z_scale requires embedding stats")
+        super().__init__(config, latent_name, embedding_stats)
+        self.config = config
 
-        self._dummy_param = nn.Parameter(torch.empty(0))
+
         self.config = config
         act_func = get_activation(config.act_func)
 
@@ -602,8 +714,6 @@ class SimpleDiffusionPrior(nn.Module):
         logging.info(
             f"Received embedding stats with keys: {self.embedding_stats.keys()}"
         )
-
-        self.encoder_dim_map = encoder_embed_map or {}
 
         encoder_layers = []
         decoder_layers = []
@@ -660,36 +770,6 @@ class SimpleDiffusionPrior(nn.Module):
             do_layer_norm=self.config.layer_norm_out,
         )
         self.scheduler = DDPMScheduler(self.config.num_training_timesteps)
-
-    @torch.no_grad()
-    def scale_target(
-        self, target: Tensor, latent_name: ImageEncoderName | None = None
-    ) -> Tensor:
-        match self.config.norm_scheme:
-            case "none":
-                return target
-            case "l2_scale":
-                return l2_scale(target)
-            case "z_scale":
-                assert (
-                    latent_name is not None and latent_name in self.embedding_stats
-                ), f"Unknown latent name {latent_name} in embedding stats {self.embedding_stats.keys()}"
-                stats = self.embedding_stats[latent_name]
-                return z_scale(target, stats["mean"], stats["std"])
-
-    @torch.no_grad()
-    def reverse_scale_target(
-        self, target: Tensor, latent_name: ImageEncoderName | None = None
-    ) -> Tensor:
-        match self.config.norm_scheme:
-            case "none":
-                return target
-            case "l2_scale":
-                return reverse_l2_scale(target)
-            case "z_scale":
-                assert latent_name is not None and latent_name in self.embedding_stats
-                stats = self.embedding_stats[latent_name]
-                return reverse_z_scale(target, stats["mean"], stats["std"])
 
     def forward(
         self,
@@ -790,10 +870,11 @@ class SimpleDiffusionPrior(nn.Module):
         scheduler_kwargs: dict[str, Any] = {},
         generator: torch.Generator | None = None,
         use_progress_bar: bool = False,
+        unscale: bool = True,
     ) -> Tensor:
         self.eval()
 
-        device = self._dummy_param.device
+        device = get_device_from_module(self)
 
         # Validate inputs
         if conditioning is None:
@@ -847,6 +928,9 @@ class SimpleDiffusionPrior(nn.Module):
             latent = self.scheduler.step(
                 noise_pred, int(t), latent, generator=generator
             ).prev_sample
+
+        if unscale:
+            latent = self.reverse_scale_target(latent)
 
         return latent
 
@@ -903,3 +987,5 @@ class SimpleDiffusionPrior(nn.Module):
                 )
 
         return clean_pred
+
+

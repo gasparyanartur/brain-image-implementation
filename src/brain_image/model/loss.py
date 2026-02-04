@@ -6,7 +6,8 @@ from torch.nn import functional as F
 import torchvision.transforms.v2 as tv2
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
-from brain_image.model.encoder.img_encoder import DREAMSIM_IMAGE_ENCODER, DreamsimImageEncoder
+from brain_image.model.encoder.img_encoder.img_encoder import DreamsimImageEncoder
+from brain_image.model.encoder.img_encoder.union import DREAMSIM_IMAGE_ENCODER
 
 class InfoNCELoss(nn.Module):
     def __init__(self, init_temperature: float = 0.07, max_scale: float = 100):

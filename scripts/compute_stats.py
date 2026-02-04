@@ -8,7 +8,7 @@ import torch
 import tqdm
 
 from brain_image.data.tensorcache import TensorCache
-from brain_image.model.encoder.img_encoder import ImageEncoderName
+from brain_image.model.encoder.img_encoder.union import ImageEncoderName
 from brain_image.utils import casttensor, flatten_configs, setup_logging
 
 

@@ -5,7 +5,8 @@ from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
 from brain_image.data.io import batch_load_images
 from brain_image.data.tensorcache import TensorCache
 from brain_image.metrics import get_metric_clip, get_metric_ssim
-from brain_image.model.encoder.img_encoder import DREAMSIM_IMAGE_ENCODER, VAE_ENCODER, load_vae_encoder
+from brain_image.model.encoder.img_encoder.union import DREAMSIM_IMAGE_ENCODER
+from brain_image.model.encoder.img_encoder.union import VAE_ENCODER, load_vae_encoder
 from brain_image.model.loss import DreamsimLoss, LPIPSLoss
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options

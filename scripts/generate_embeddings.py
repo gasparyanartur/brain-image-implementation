@@ -11,7 +11,8 @@ from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
 from brain_image.data.datamodule import EEGDataModule
 from brain_image.data.dataset.eeg_dataset import EEGDataset, EEGDatasetConfig
 from brain_image.data.tensorcache import TensorCache
-from brain_image.model.encoder.img_encoder import ImageEncoderName, BaseImageEncoder, load_image_encoder
+from brain_image.model.encoder.img_encoder.img_encoder import BaseImageEncoder
+from brain_image.model.encoder.img_encoder.union import ImageEncoderName, load_image_encoder
 from brain_image.utils import DTYPE, get_dtype, setup
 from brain_image.data.io import batch_load_images
 

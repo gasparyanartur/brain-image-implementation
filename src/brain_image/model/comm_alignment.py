@@ -35,11 +35,10 @@ from brain_image.model.encoder.eeg_encoder.union import (
     create_eeg_encoder,
 )
 from brain_image.model.encoder.eeg_encoder.eeg_encoder import EEGEncoderConfig
-from brain_image.model.encoder.img_encoder import (
+from brain_image.model.encoder.img_encoder.union import (
     ImageEncoderName,
-    IMAGE_ENCODER_DIM,
-    load_image_encoder,
 )
+from brain_image.model.encoder.img_encoder.union import IMAGE_ENCODER_DIM, load_image_encoder
 from brain_image.model.loss import CLIPLoss, CLIPSimLoss
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
