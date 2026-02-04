@@ -74,4 +74,4 @@ def batch_encode_eeg_latent(
         )
     ]
 
-    return gather_records(eeg_batches)
+    return gather_records(eeg_batches, tensor_gather="cat")

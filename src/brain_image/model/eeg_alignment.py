@@ -70,6 +70,7 @@ import tqdm
 import re
 import tempfile
 import time
+import torch
 
 
 class EEGAlignmentConfig(TrainingModuleConfig):
@@ -599,7 +600,7 @@ class EEGAlignmentModel(TrainingModule):
         ) is not None, "EEG data is not in batch"
         assert (sub := batch.get("sub")) is not None, "Subject is not in batch"
 
-        eeg_latent = batch_encode_eeg_latent(self.eeg_encoder, eeg, sub)
+        eeg_latent = encode_eeg_latent(self.eeg_encoder, eeg, sub)
 
         losses: dict[str, torch.Tensor] = {}
         metrics = {}

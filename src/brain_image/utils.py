@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 import sys
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any, Literal, cast
 import uuid
 import dotenv
 from huggingface_hub import login
@@ -390,12 +390,12 @@ def l2_scale(x: torch.Tensor) -> torch.Tensor:
     return F.normalize(x) / (x.size(-1) ** 0.5)
 
 
-@torch.compile
+@torch.compile()
 def reverse_l2_scale(x: torch.Tensor) -> torch.Tensor:
     return F.normalize(x)
 
 
-@torch.compile
+@torch.compile()
 def tensor_split(
     x: torch.Tensor, dim: int, idxs: tuple[int, ...]
 ) -> list[torch.Tensor]:
@@ -445,7 +445,7 @@ def batchify_operation(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tenso
     return torch.cat(res, dim=0)
 
 
-def gather_records(records: list[dict]) -> dict[str, torch.Tensor]:
+def gather_records(records: list[dict], tensor_gather: Literal["stack", "cat"] = "stack") -> dict[str, torch.Tensor]:
     if not records:
         return {}
     
@@ -453,7 +453,10 @@ def gather_records(records: list[dict]) -> dict[str, torch.Tensor]:
         example = row[0][key]
         
         if isinstance(example, torch.Tensor):
-            return torch.stack([r[key] for r in row])
+            if tensor_gather == "stack":
+                return torch.stack([r[key] for r in row])
+            elif tensor_gather == "cat":
+                return torch.cat([r[key] for r in row])
         elif isinstance(example, list):
             return [r[key] for r in row]
         else:

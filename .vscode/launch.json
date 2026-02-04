@@ -5,87 +5,86 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Train NICE - Full",
+            "name": "Python Debugger: Train EEG - Full",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/train_nice.py",
+            "program": "scripts/train_eeg.py",
             "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "",
+            },
             "args": [
+                "--config-name=train_eeg_alignprior",
                 "trainer.debug_mode=true",
-                "model.do_high_recon=true",
-                "dataset.batch_size=128",
-                "dataset.limit_train_size=0.1",
-                "dataset.limit_val_size=0.1",
+                "trainer.wandb.enabled=false",
                 "trainer.compile_model=false",
-                "dataset.num_workers=12",
                 "trainer.log_every_n_steps=5",
-                "model.full_eval_every_epochs=10",
+
+                "dataset.batch_size=32",
+                "dataset.limit_train_size=0.01",
+                "dataset.limit_val_size=0.1",
+                "dataset.num_workers=0",
+
+                "model.full_eval_every_epochs=5",
                 "model.skip_eval_first_epoch=true",
-                "model.log_gradients=true"
+                "model.log_gradients=true",
+                "model.max_epochs=5",
+
             ]
         },
         {
             "name": "Python Debugger: Train Align",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/train_nice.py",
+            "program": "scripts/train_eeg.py",
             "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "",
+            },
             "args": [
+                "--config-name=train_eeg_align",
                 "trainer.debug_mode=true",
-                "model.do_high_recon=false",
-                "model.do_align=true",
-                "dataset.batch_size=32",
-                "dataset.limit_train_size=0.01",
-                "dataset.limit_val_size=0.2",
+                "trainer.wandb.enabled=false",
                 "trainer.compile_model=false",
-                "dataset.num_workers=12",
                 "trainer.log_every_n_steps=5",
-                "model.log_gradients=true"
+
+                "dataset.limit_train_size=0.01",
+                "dataset.limit_val_size=0.1",
+                "dataset.batch_size=32",
+                "dataset.num_workers=0",
+                
+                "model.full_eval_every_epochs=5",
+                "model.skip_eval_first_epoch=true",
+                "model.log_gradients=true",
+                "model.max_epochs=5",
+
             ]
         },
         {
-            "name": "Python Debugger: Train NICE - Prior Debug",
+            "name": "Python Debugger: Train EEG - Prior Debug",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/train_nice.py",
+            "program": "scripts/train_eeg.py",
             "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "",
+            },
             "args": [
+                "--config-name=train_eeg_prior",
                 "trainer.debug_mode=true",
-                "model.prior_debug_mode=true",
-                "model.do_align=false",
-                "model.do_low_recon=false",
-                "model.do_high_recon=true",
-                "model.full_eval_every_epochs=10",
-                "model.log_gradients=true",
+                "trainer.wandb.enabled=False",
+                "trainer.compile_model=false",
+                "trainer.log_every_n_steps=5",
+
                 "dataset.batch_size=32",
                 "dataset.limit_train_size=0.01",
-                "dataset.limit_val_size=0.2",
-                "trainer.compile_model=false",
+                "dataset.limit_val_size=0.1",
                 "dataset.num_workers=12",
-                "trainer.log_every_n_steps=5",
-            ]
-        },
-        {
-            "name": "Python Debugger: Train NICE - Prior",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "scripts/train_nice.py",
-            "console": "integratedTerminal",
-            "args": [
-                "trainer.debug_mode=true",
-                "model.prior_debug_mode=false",
-                "model.do_align=false",
-                "model.do_low_recon=false",
-                "model.do_high_recon=true",
-                "model.full_eval_every_epochs=1",
+
+                "model.full_eval_every_epochs=5",
+                "model.skip_eval_first_epoch=true",
                 "model.log_gradients=true",
-                "dataset.batch_size=32",
-                "dataset.limit_train_size=0.01",
-                "dataset.limit_val_size=0.2",
-                "trainer.compile_model=false",
-                "dataset.num_workers=12",
-                "trainer.log_every_n_steps=5",
-                "trainer.eeg_encoder_path=checkpoints/nice-align-unaligned_synclr_16/checkpoints/nice-epoch-41-VAL__loss-0.0038.ckpt"
+                "model.max_epochs=5",
             ]
         },
         {
@@ -94,19 +93,25 @@
             "request": "launch",
             "program": "scripts/train_comm.py",
             "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "",
+            },
             "args": [
                 "dataset=dummy",
                 "eeg_encoder@model.eeg_encoder=dummy",
+
                 "trainer.debug_mode=true",
-                "model.max_epochs=3",
+                "trainer.preload_images=false",
+                "trainer.cache_images=false",
+                "trainer.enable_barebones=true",
                 "trainer.wandb.enabled=False",
                 "trainer.log_every_n_steps=1",
+
+                "model.max_epochs=5",
                 "model.embed_dim=32",
                 "model.proj_dim=16",
                 "model.img_encoder=dummy_768",
-                "trainer.preload_images=false",
-                "trainer.cache_images=false",
-                "trainer.enable_barebones=true"
+
             ]
         },
         {
@@ -115,6 +120,9 @@
             "request": "launch",
             "program": "scripts/test_comm.py",
             "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "",
+            },
             "args": [
                 "logs/train/260130195833wxxriq",
             ]
