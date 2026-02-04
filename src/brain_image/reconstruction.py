@@ -28,6 +28,7 @@ from brain_image.model.encoder.img_encoder.img_encoder import (
     model_name_to_hf_name,
 )
 from brain_image.model.encoder.img_encoder.union import ImageEncoderName
+from brain_image.model.prior import BaseDiffusionPrior
 
 
 class ReconstructionPipeline(ABC):
@@ -666,3 +667,27 @@ def get_reconstructions(
     del pipe
 
     return reconstruction
+
+
+@torch.no_grad()
+def get_batched_reconstructions_from_eeg(
+    prior: BaseDiffusionPrior,
+    eeg_latent_normed: torch.Tensor,
+    batch_size: int,
+    seed: int | None = None,
+    progress_bar: bool = True
+):
+    device = eeg_latent_normed.device 
+    generator = torch.Generator(device).manual_seed(seed) if seed else None
+    pred = prior.batch_generate(
+        eeg_latent_normed.to(device),
+        generator=generator,
+        batch_size=batch_size,
+    )
+
+    reconstructions = get_reconstructions(
+        pred.to(device),
+        pipe_kwargs={"progress_bar": progress_bar, "generator": generator},
+    )
+
+    return reconstructions

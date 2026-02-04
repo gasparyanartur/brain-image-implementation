@@ -7,12 +7,15 @@ import logging
 from pathlib import Path
 import sys
 from collections.abc import Mapping
+import time
 from typing import Any, Literal, cast
 import uuid
 import dotenv
 from huggingface_hub import login
 import numpy as np
 from pydantic import BaseModel
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 import torch
 import os
 import PIL.Image
@@ -436,22 +439,25 @@ def find_duplicates(x: torch.Tensor) -> torch.Tensor:
     return dups
 
 
-
-def batchify_operation(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor, batch_size: int) -> torch.Tensor:
+def batchify_operation(
+    f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor, batch_size: int
+) -> torch.Tensor:
     n = len(x)
     res = []
     for i in range(0, n, batch_size):
-        res.append(f(x[i:i+batch_size]))
+        res.append(f(x[i : i + batch_size]))
     return torch.cat(res, dim=0)
 
 
-def gather_records(records: list[dict], tensor_gather: Literal["stack", "cat"] = "stack") -> dict[str, torch.Tensor]:
+def gather_records(
+    records: list[dict], tensor_gather: Literal["stack", "cat"] = "stack"
+) -> dict[str, torch.Tensor]:
     if not records:
         return {}
-    
+
     def gather_row(key: str, row: list[dict[str, Any]]) -> Any:
         example = row[0][key]
-        
+
         if isinstance(example, torch.Tensor):
             if tensor_gather == "stack":
                 return torch.stack([r[key] for r in row])
@@ -462,9 +468,8 @@ def gather_records(records: list[dict], tensor_gather: Literal["stack", "cat"] =
         else:
             raise ValueError(f"Unsupported type {type(example)} for key {key}")
 
-    return {
-        k: gather_row(k, records) for k in records[0].keys()
-    }
+    return {k: gather_row(k, records) for k in records[0].keys()}
+
 
 def prep_batch_for_logs(batch: dict[str, torch.Tensor]) -> dict[str, Any]:
     output = {}
@@ -487,7 +492,7 @@ def prep_batch_for_logs(batch: dict[str, torch.Tensor]) -> dict[str, Any]:
 
         if v.dim() == 0:
             v = v.item()
-        
+
         output[k] = v
 
     return output
@@ -496,5 +501,56 @@ def prep_batch_for_logs(batch: dict[str, torch.Tensor]) -> dict[str, Any]:
 def get_device_from_module(mod: nn.Module):
     return next(mod.parameters()).device
 
+
 def get_dtype_from_module(mod: nn.Module):
     return next(mod.parameters()).dtype
+
+
+@torch.compile()
+def z_norm(x: torch.Tensor, dim: int = -1, eps: float = 1e-8) -> torch.Tensor:
+    return (x - x.mean(dim=dim, keepdim=True)) / (x.std(dim=dim, keepdim=True) + eps)
+
+
+@torch.no_grad()
+def plot_projected_latents(
+    latents: Sequence[torch.Tensor] | torch.Tensor,
+    labels: Sequence[str],
+    title: str | None = None,
+    pca_dims: int = 50,
+):
+    pca = PCA(n_components=pca_dims)
+    tsne = TSNE(n_components=2)
+
+    if isinstance(latents, torch.Tensor):
+        latents = [latents]
+
+    assert len(latents) == len(labels)
+    logging.info(f"Projecting {len(latents)} latents to 2D space")
+
+    clean_latents = np.concatenate(
+        [z_norm(latent.flatten(1), dim=0).detach().cpu().numpy() for latent in latents],
+        axis=0
+    )
+
+    t1 = time.time()
+    clean_latents = pca.fit_transform(clean_latents)
+    projected_latents = tsne.fit_transform(clean_latents)
+    t2 = time.time()
+    logging.info(f"Finished projecting latents in {t2 - t1:.3f} seconds")
+
+    lengths = [latent.size(0) for latent in latents]
+    offset = 0
+    for (label, length) in zip(labels, lengths):
+        plt.scatter(
+            projected_latents[offset:offset + length, 0],
+            projected_latents[offset:offset + length, 1],
+            label=label,
+        )
+        offset += length
+
+    plt.legend()
+    if title is not None:
+        plt.title(title)
+
+    plot_image = current_fig_to_img()
+    return plot_image

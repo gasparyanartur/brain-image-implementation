@@ -11,10 +11,14 @@ from torchvision.models.feature_extraction import create_feature_extractor
 from torchvision.transforms import v2 as tv2
 import torch
 from torch import Tensor, nn
+from torch.nn import functional as F
 
 
-
-
+@torch.compile()
+def get_cosine_sim(pred: Tensor, gt: Tensor) -> Tensor:
+    pred = pred.flatten(1)
+    gt = gt.flatten(1)
+    return F.cosine_similarity(pred, gt, dim=1).mean()
 
 @torch.no_grad()
 def get_metric_pixcorr(pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
@@ -365,6 +369,14 @@ def get_top1_acc(logits: torch.Tensor, axis=1) -> torch.Tensor:
     correct = torch.argmax(logits, dim=axis) == indexes
     return correct.float().mean()
 
+@torch.compile()
+@torch.no_grad()
+def get_top1_acc_with_idx(logits: torch.Tensor, axis=1) -> tuple[torch.Tensor, torch.Tensor]:
+    indexes = torch.arange(len(logits), device=logits.device)
+    top_indexes = torch.argmax(logits, dim=axis)
+    correct = top_indexes == indexes
+    return correct.float().mean(), top_indexes
+
 
 @torch.compile()
 @torch.no_grad()
@@ -375,3 +387,14 @@ def get_retrieval_accuracy(z1: Tensor, z2: Tensor, norm: bool = True) -> tuple[t
     logits = z1 @ z2.T
     
     return (get_top1_acc(logits, axis=0), get_top1_acc(logits, axis=1))
+
+@torch.compile()
+@torch.no_grad()
+def get_retrieval_accuracy_with_idx(z1: Tensor, z2: Tensor, norm: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+    if norm:
+        z1 = nn.functional.normalize(z1, p=2, dim=-1)
+        z2 = nn.functional.normalize(z2, p=2, dim=-1)
+    logits = z1 @ z2.T
+    
+    acc, idx = get_top1_acc_with_idx(logits, axis=0)
+    return acc, idx
