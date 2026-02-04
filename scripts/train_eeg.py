@@ -4,20 +4,20 @@ import hydra
 from omegaconf import DictConfig
 from brain_image.configs import BaseConfig
 from brain_image.data.dataset.union import EEGDatasetConfigType
-from brain_image.trainer import EEGAlignTrainer, EEGAlignTrainerConfig
 from brain_image.model.eeg_alignment import EEGAlignmentConfig, EEGAlignmentModel
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
 
 from pathlib import Path
 
 from brain_image.configs import GlobalConfig
+from brain_image.trainer import Trainer, TrainerConfig
 from brain_image.utils import flatten_configs, get_dtype, setup
 
 
 class TrainEEGConfig(BaseConfig):
     dataset: EEGDatasetConfigType
     model: EEGAlignmentConfig 
-    trainer: EEGAlignTrainerConfig 
+    trainer: TrainerConfig 
 
     checkpoint_path: str | None = None
     resume_training: bool = False
@@ -52,8 +52,8 @@ def main(cfg: DictConfig):
         cache_dir=config.trainer.cache_dir,
     )
 
-    trainer = EEGAlignTrainer(
-        trainer_config=config.trainer,
+    trainer = Trainer(
+        config=config.trainer,
         model=model   
     )
 

@@ -16,7 +16,7 @@ model:
   modules_to_train:
     - eeg_encoder
 
-  max_epochs: 40
+  max_epochs: 50
   full_eval_every_epochs: 10
 
 trainer:

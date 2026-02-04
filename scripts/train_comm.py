@@ -6,19 +6,19 @@ from omegaconf import DictConfig
 from brain_image.configs import BaseConfig
 from brain_image.data.dataset.union import EEGDatasetConfigType
 from brain_image.model.comm_alignment import CommAlignmentConfig, CommAlignmentModel
-from brain_image.trainer import CommAlignTrainer, CommAlignTrainerConfig
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
 
 from pathlib import Path
 
 from brain_image.configs import GlobalConfig
+from brain_image.trainer import Trainer, TrainerConfig
 from brain_image.utils import flatten_configs, setup
 
 
 class TrainCommConfig(BaseConfig):
     dataset: EEGDatasetConfigType
     model: CommAlignmentConfig
-    trainer: CommAlignTrainerConfig = CommAlignTrainerConfig()
+    trainer: TrainerConfig
 
     checkpoint_path: str | None = None
     resume_training: bool = False
@@ -54,8 +54,8 @@ def main(cfg: DictConfig):
         cache_images=config.cache_images
     )
 
-    trainer = CommAlignTrainer(
-        trainer_config=config.trainer,
+    trainer = Trainer(
+        config=config.trainer,
         model=model   
     )
 

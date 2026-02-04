@@ -24,7 +24,7 @@ class WandbConfig(BaseConfig):
     mode: Literal["online", "offline"] = "online"
 
 
-class TrainConfig(BaseConfig):
+class TrainerConfig(BaseConfig):
     run_name: str
 
     compile_model: bool = True
@@ -56,19 +56,8 @@ class TrainConfig(BaseConfig):
     accelerator: str | None = None
 
 
-class EEGAlignTrainerConfig(TrainConfig):
-    run_name: str = "eeg_alignment"
-
-    init_weights: bool = False
-
-class LowLevelTrainerConfig(TrainConfig):
-    run_name: str = "low_level"
-
-class CommAlignTrainerConfig(TrainConfig):
-    run_name: str = "comm_alignment"
-
 class Trainer:
-    def __init__(self, config: TrainConfig, model: TrainingModule):
+    def __init__(self, config: TrainerConfig, model: TrainingModule):
         self.config = config
         self.model: TrainingModule = model
         self.pl_trainer = self.create_pl_trainer()
@@ -80,9 +69,8 @@ class Trainer:
 
         if self.config.save_checkpoints:
             filename = (
-                self.config.run_name
-                + "-epoch_{epoch:02d}-"
-                + self.config.checkpoint_monitor.replace("/", "-")
+                 "-epoch_{epoch:04d}-"
+                + self.config.checkpoint_monitor.replace("/", "_")
                 + "_{"
                 + self.config.checkpoint_monitor
                 + ":.4f}"
@@ -115,7 +103,7 @@ class Trainer:
         log_path.mkdir(parents=True, exist_ok=True)
         logging.info(f"Logging to path {log_path}...")
 
-        model_id_components = []
+        model_id_components = [self.config.run_name, "-"]
 
         if (slurm_array_job_id := os.getenv("SLURM_ARRAY_JOB_ID")) is not None:
             model_id_components.append(f"{slurm_array_job_id}")
@@ -292,29 +280,3 @@ class Trainer:
         self.model.load_state_dict(checkpoint["state_dict"])
 
         logging.info(f"Loaded checkpoint from {filepath}")
-
-
-class EEGAlignTrainer(Trainer):
-    def __init__(self, trainer_config: EEGAlignTrainerConfig, model: EEGAlignmentModel):
-        if isinstance(trainer_config, dict):
-            trainer_config = EEGAlignTrainerConfig.model_validate(trainer_config)
-
-        super().__init__(trainer_config, model)
-        self.model = model
-
-
-class LowLevelTrainer(Trainer):
-    def __init__(self, trainer_config: LowLevelTrainerConfig, model: LowLevelModule):
-        if isinstance(trainer_config, dict):
-            trainer_config = LowLevelTrainerConfig.model_validate(trainer_config)
-
-        super().__init__(trainer_config, model)
-        self.model = model
-
-class CommAlignTrainer(Trainer):
-    def __init__(self, trainer_config: CommAlignTrainerConfig, model: CommAlignmentModel):
-        if isinstance(trainer_config, dict):
-            trainer_config = CommAlignTrainerConfig.model_validate(trainer_config)
-
-        super().__init__(trainer_config, model)
-        self.model = model

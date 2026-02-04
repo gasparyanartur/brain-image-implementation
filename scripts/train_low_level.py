@@ -4,19 +4,19 @@ import hydra
 from omegaconf import DictConfig
 from brain_image.configs import BaseConfig
 from brain_image.model.low_level import LowLevelConfig, LowLevelModule
-from brain_image.trainer import LowLevelTrainer, LowLevelTrainerConfig
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
 
 from pathlib import Path
 
 from brain_image.configs import GlobalConfig
+from brain_image.trainer import Trainer, TrainerConfig
 from brain_image.utils import flatten_configs, setup
 
 
 class TrainLowLevelConfig(BaseConfig):
-    dataset: EEGDatasetConfig = EEGDatasetConfig()
-    model: LowLevelConfig = LowLevelConfig()
-    trainer: LowLevelTrainerConfig = LowLevelTrainerConfig()
+    dataset: EEGDatasetConfig 
+    model: LowLevelConfig 
+    trainer: TrainerConfig 
 
     checkpoint_path: str | None = None
     resume_training: bool = False
@@ -48,8 +48,8 @@ def main(cfg: DictConfig):
         compile=config.trainer.compile_model,
     )
 
-    trainer = LowLevelTrainer(
-        trainer_config=config.trainer,
+    trainer = Trainer(
+        config=config.trainer,
         model=model   
     )
 
