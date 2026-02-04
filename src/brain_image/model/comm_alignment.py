@@ -81,6 +81,33 @@ class CommAlignmentConfig(TrainingModuleConfig):
     eeg_idx: int = 1
     prototype_idx: int = 2
 
+    img_aug_flip_prob: float = 0.5
+    img_aug_color_jitter_prob: float = 1.0
+    img_aug_blur_prob: float = 0.5
+    img_aug_color_jitter_contrast: float = 0.3
+    img_aug_color_jitter_brightness: float = 0.4
+    img_aug_color_jitter_saturation: float = 0.4
+    img_aug_color_jitter_hue: float = 0.6
+    img_aug_blur_kernel_size: int = 5
+
+    eeg_aug_ampscale_prob: float = 0.75
+    eeg_aug_timeshift_prob: float = 0.75
+    eeg_aug_ampshift_prob: float = 0.75
+    eeg_aug_bandstop_prob: float = 0.75
+    eeg_aug_zeromask_prob: float = 0.5
+    eeg_aug_blur_prob: float = 0.75
+    eeg_aug_blur_std: float = 0.4
+
+    eeg_aug_ampscale_min: float = 0.2
+    eeg_aug_ampscale_max: float = 2.0
+    eeg_aug_timeshift_max_scale: float = 0.2
+    eeg_aug_ampshift_max_scale: float = 3
+    eeg_aug_zeromask_max_scale: float = 0.25
+    eeg_aug_bandstop_sample_rate: int = 200
+    eeg_aug_bandstop_min_freq: float = 2.8
+    eeg_aug_bandstop_max_freq: float = 82.5
+    eeg_aug_bandstop_width: float = 5
+
 
 class CommAlignmentModel(TrainingModule):
     def __init__(
@@ -173,19 +200,32 @@ class CommAlignmentModel(TrainingModule):
         )
 
         self.image_augmenter = ImageAugmentationPipeline(
-            flip_prob=0.5,
-            color_jitter_prob=0.5,
-            blur_prob=0.25,
-            color_jitter_contrast=0.2,
-            color_jitter_brightness=0.3,
+            flip_prob=config.img_aug_flip_prob,
+            color_jitter_prob=config.img_aug_color_jitter_prob,
+            blur_prob=config.img_aug_blur_prob,
+            color_jitter_contrast=config.img_aug_color_jitter_contrast,
+            color_jitter_brightness=config.img_aug_color_jitter_brightness,
+            color_jitter_saturation=config.img_aug_color_jitter_saturation,
+            color_jitter_hue=config.img_aug_color_jitter_hue,
+            blur_kernel_size=config.img_aug_blur_kernel_size,
         )
         self.eeg_augmenter = EEGAugmentationPipeline(
-            ampscale_prob=0.5,
-            timeshift_prob=0.5,
-            ampshift_prob=0.5,
-            bandstop_prob=0.5,
-            zeromask_prob=0.5,
-            blur_prob=0.5,
+            ampscale_prob=config.eeg_aug_ampshift_prob,
+            timeshift_prob=config.eeg_aug_timeshift_prob,
+            ampshift_prob=config.eeg_aug_ampshift_prob,
+            bandstop_prob=config.eeg_aug_bandstop_prob,
+            zeromask_prob=config.eeg_aug_zeromask_prob,
+            blur_prob=config.eeg_aug_blur_prob,
+            blur_std=config.eeg_aug_blur_std,
+            ampscale_min=config.eeg_aug_ampscale_min,
+            ampscale_max=config.eeg_aug_ampscale_max,
+            timeshift_max_scale=config.eeg_aug_timeshift_max_scale,
+            ampshift_max_scale=config.eeg_aug_ampshift_max_scale,
+            zeromask_max_scale=config.eeg_aug_zeromask_max_scale,
+            bandstop_sample_rate=config.eeg_aug_bandstop_sample_rate,
+            bandstop_min_freq=config.eeg_aug_bandstop_min_freq,
+            bandstop_max_freq=config.eeg_aug_bandstop_max_freq,
+            bandstop_width=config.eeg_aug_bandstop_width,
         )
         self.image_augmenter.requires_grad_(False)
         self.eeg_augmenter.requires_grad_(False)
@@ -522,9 +562,7 @@ class CommAlignmentModel(TrainingModule):
         # For each eeg signal, we create a prototype with each image
         z_protos = torch.stack(
             [
-                self.comm.encode_token(
-                    [z_eeg[i].unsqueeze(0).expand(n, -1, -1), z_img]
-                )
+                self.comm.encode_token([z_eeg[i].unsqueeze(0).expand(n, -1, -1), z_img])
                 for i in range(n)
             ]
         )  # <n_eeg, n_img, d>
