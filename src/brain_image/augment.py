@@ -23,7 +23,12 @@ class BaseAugment(nn.Module, ABC):
 
         x = x.clone()
         mask = torch.rand(x.shape[0], device=x.device) > self.prob
+        
+        if not mask.any().item():
+            return x
+        
         x[mask] = self.augment(x[mask])
+        x = x.contiguous()
         return x
 
     @abstractmethod
