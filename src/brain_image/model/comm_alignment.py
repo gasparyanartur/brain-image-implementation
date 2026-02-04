@@ -87,7 +87,7 @@ class CommAlignmentConfig(TrainingModuleConfig):
     img_aug_color_jitter_contrast: float = 0.3
     img_aug_color_jitter_brightness: float = 0.4
     img_aug_color_jitter_saturation: float = 0.4
-    img_aug_color_jitter_hue: float = 0.6
+    img_aug_color_jitter_hue: float = 0.5
     img_aug_blur_kernel_size: int = 5
 
     eeg_aug_ampscale_prob: float = 0.75
