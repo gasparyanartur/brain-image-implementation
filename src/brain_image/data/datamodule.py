@@ -33,7 +33,10 @@ class DataModule(LightningDataModule, ABC):
         }
         self.dataloaders: dict[str, torch.utils.data.DataLoader | None] = {}
 
-        self.embedding_stats = {}
+    @property
+    @abstractmethod
+    def embedding_stats(self) -> dict:
+        raise NotImplementedError
 
     @abstractmethod
     def get_metadata(self) -> dict:
@@ -113,8 +116,11 @@ class EEGDataModule(DataModule):
         self.embeddings_map = embeddings_map
         self.embeddings_to_compute_stats = embeddings_to_compute_stats
 
-        self.embeddings_stats = self.get_embeddings_stats()
-        logging.info(f"Got embedding stats for: {self.embeddings_stats.keys()}")
+        logging.info(f"Got embedding stats for: {self.embedding_stats.keys()}")
+
+    @property
+    def embedding_stats(self) -> dict:
+        return self.get_dataset("train").get_embedding_stats()
 
     def get_metadata(self) -> dict:
         return {}
@@ -123,7 +129,7 @@ class EEGDataModule(DataModule):
         self, split: Literal["train", "val", "test"], *args, **kwargs
     ) -> EEGDataset:
         self.config
-        return self.config.create_dataset(split, tensor_cache=self.tensor_cache, embeddings_map=self.embeddings_map)
+        return self.config.create_dataset(split, tensor_cache=self.tensor_cache, embeddings_map=self.embeddings_map, embeddings_to_compute_stats=self.embeddings_to_compute_stats)
 
     def create_dataloader(
         self,

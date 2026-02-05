@@ -69,7 +69,7 @@ class Trainer:
 
         if self.config.save_checkpoints:
             filename = (
-                 "-epoch_{epoch:04d}-"
+                 "epoch_{epoch:04d}-"
                 + self.config.checkpoint_monitor.replace("/", "_")
                 + "_{"
                 + self.config.checkpoint_monitor

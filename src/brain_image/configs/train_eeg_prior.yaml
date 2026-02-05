@@ -26,11 +26,11 @@ model:
   max_epochs: 500
   #max_epochs: 150
 
-  full_eval_every_epochs: 10
+  full_eval_every_epochs: 20
 
 trainer:
   checkpoint_monitor_early_stop: 150
-  check_val_every_n_epochs: 10
+  check_val_every_n_epochs: 5
 
 dataset:
   batch_size: 1024
