@@ -86,6 +86,7 @@ import re
 import tempfile
 import time
 import torch
+from torch import Tensor
 
 
 class EEGAlignmentConfig(TrainingModuleConfig):
@@ -193,16 +194,16 @@ class EEGAlignmentConfig(TrainingModuleConfig):
 
 class DataBatchT(TypedDict):
     img_path: list[str] | None
-    eeg_data: torch.Tensor | None
-    sub: torch.Tensor | None
-    idx: torch.Tensor | None
-    eeg_latent: torch.Tensor | None
-    eeg_latent_normed: torch.Tensor | None
-    align_img_latent: torch.Tensor | None
-    prior_img_latent: torch.Tensor | None
-    low_level_latent: torch.Tensor | None
-    prior_pred: torch.Tensor | None
-    prior_pred_single: torch.Tensor | None
+    eeg_data: Tensor | None
+    sub: Tensor | None
+    idx: Tensor | None
+    eeg_latent: Tensor | None
+    eeg_latent_normed: Tensor | None
+    align_img_latent: Tensor | None
+    prior_img_latent: Tensor | None
+    low_level_latent: Tensor | None
+    prior_pred: Tensor | None
+    prior_pred_single: Tensor | None
 
 
 class EEGAlignmentModel(TrainingModule):
@@ -274,7 +275,7 @@ class EEGAlignmentModel(TrainingModule):
             self.config.prior.d_input = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
 
             emb_stats = cast(
-                dict[ImageEncoderName, dict[str, torch.Tensor]] | None,
+                dict[ImageEncoderName, dict[str, Tensor]] | None,
                 {
                     self.config.prior_img_encoder: self.data_module.embedding_stats[
                         "prior_img_latent"
@@ -573,7 +574,6 @@ class EEGAlignmentModel(TrainingModule):
                     test_metrics,
                     test_img_outputs,
                     idxs,
-                    img_paths,
                     selected_img_idxs=self.config.highlighted_test_recons,
                 )
 
@@ -608,7 +608,7 @@ class EEGAlignmentModel(TrainingModule):
 
         eeg_latent = encode_eeg_latent(self.eeg_encoder, eeg, sub)
 
-        losses: dict[str, torch.Tensor] = {}
+        losses: dict[str, Tensor] = {}
         metrics = {}
         outputs = {}
         cache = {**eeg_latent}
@@ -815,8 +815,8 @@ class EEGAlignmentModel(TrainingModule):
 
         eeg_latent = batch_encode_eeg_latent(
             self.eeg_encoder,
-            cast(torch.Tensor, eeg),
-            cast(torch.Tensor, sub),
+            cast(Tensor, eeg),
+            cast(Tensor, sub),
             batch_size=self.data_module.config.get_batch_size(split),
             progress_bar=False,
         )
@@ -943,7 +943,7 @@ class EEGAlignmentModel(TrainingModule):
 
         return metrics, img_outputs
 
-    def run_full_test(self, **kwargs) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    def run_full_test(self, **kwargs) -> tuple[dict[str, Any], dict[str, Any], list[str], Tensor]:
         metrics = {}
         img_outputs = {}
 
@@ -957,15 +957,16 @@ class EEGAlignmentModel(TrainingModule):
             img_path := all_data.get("img_path")
         ) is not None, "Image path is not in batch"
         assert (
-            idxs := all_data.get("img_path")
+            idxs := all_data.get("idx")
         ) is not None, "idx not in batch"
+        
         assert (eeg := all_data.get("eeg_data")) is not None, "EEG data is not in batch"
         assert (sub := all_data.get("sub")) is not None, "Subject data is not in batch"
 
         eeg_latent = batch_encode_eeg_latent(
             self.eeg_encoder,
-            cast(torch.Tensor, eeg),
-            cast(torch.Tensor, sub),
+            cast(Tensor, eeg),
+            cast(Tensor, sub),
             batch_size=self.data_module.config.get_batch_size("test"),
             progress_bar=False,
         )["eeg_latent_normed"].to(device)
@@ -1010,17 +1011,21 @@ class EEGAlignmentModel(TrainingModule):
             )
 
             metrics.update({f"prior/{k}": v for k, v in prior_metrics.items()})
+
+            reconstructions = resize(reconstructions).detach().cpu()
+            targets = resize(targets).detach().cpu()
+
             img_outputs.update({
-                "prior/reconstruction": [x.detach().cpu() for x in resize(reconstructions)],
-                "prior/ground_truth": [x.detach().cpu() for x in resize(targets)],
+                "prior/reconstruction": reconstructions,
+                "prior/ground_truth": targets,
             })
 
         return metrics, img_outputs, img_path, idxs
 
     def _run_test_align(
         self,
-        eeg_latent: torch.Tensor,
-        img_latent: torch.Tensor,
+        eeg_latent: Tensor,
+        img_latent: Tensor,
         device: torch.device,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         metrics, img_outputs = {}, {}
@@ -1064,8 +1069,7 @@ class EEGAlignmentModel(TrainingModule):
         output_dir: Path,
         metrics: dict[str, Any],
         imgs: dict[str, Any],
-        idxs: list[str],
-        img_paths: list[str],
+        idxs: Tensor,
         selected_img_idxs: list[int] | None = None,
     ):
         metrics = {name: value.item() for name, value in metrics.items()}
@@ -1080,11 +1084,12 @@ class EEGAlignmentModel(TrainingModule):
             img_dir = Path(output_dir / "reconstructions")
             img_dir.mkdir(parents=True, exist_ok=True)
 
-            for reconstruction, ground_truth, idx, img_path in zip(
-                reconstructions, ground_truths, idxs, img_paths
-            ):
-                if selected_img_idxs is not None and idx not in selected_img_idxs:
+            for reconstruction, ground_truth, idx in zip(
+                reconstructions, ground_truths, idxs
+            ):             
+                if selected_img_idxs is not None and idx.item() not in selected_img_idxs:
                     continue
+                
                 save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
                 save_image(ground_truth, img_dir / f"{idx}_recon_gt.jpg")
 

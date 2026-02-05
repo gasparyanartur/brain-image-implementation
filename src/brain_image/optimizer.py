@@ -5,11 +5,11 @@ from torch import nn
 import torch
 
 
-def iter_params(*models: nn.Module | None):
-    param_list: list[nn.Parameter] = []
+def iter_named_params(*models: nn.Module | None):
+    param_list: list[tuple[str, nn.Parameter]] = []
     for model in models:
         if model is not None:
-            param_list.extend(model.parameters())
+            param_list.extend(model.named_parameters())
     return iter(param_list)
 
 
@@ -25,7 +25,40 @@ class OptimizerConfig:
     lr_scheduler: Literal["cosine_anneal", "none"]
 
 
-def get_optimizer_options(configs: list[OptimizerConfig], max_epochs: int, num_train_batches: int, modules_to_optimize: list[str] | None, optimizer_params: dict[str, Any]):
+def set_weight_decay_per_param(
+    *modules: nn.Module, weight_decay: float, skip_names=["bias", "norm", "ln", "bn"]
+) -> list[dict[str, list[nn.Parameter] | float]]:
+    logging.info(
+        f"Setting weight decay to {weight_decay} for all parameters except biases and norms. Skipping parameters with names containing: {skip_names}"
+    )
+
+    no_decay: list[nn.Parameter] = []
+    with_decay: list[nn.Parameter] = []
+
+    for param_name, param in iter_named_params(*modules):
+        if not param.requires_grad:
+            continue
+
+        if param.ndim < 2 or any(skip_name in param_name for skip_name in skip_names):
+            no_decay.append(param)
+
+        else:
+            with_decay.append(param)
+
+    params: list[dict[str, list[nn.Parameter] | float]] = [
+        {"params": no_decay, "weight_decay": 0.0},
+        {"params": with_decay, "weight_decay": weight_decay},
+    ]
+    return params
+
+
+def get_optimizer_options(
+    configs: list[OptimizerConfig],
+    max_epochs: int,
+    num_train_batches: int,
+    modules_to_optimize: list[str] | None,
+    optimizer_params: dict[str, Any],
+):
     optimizer_options = []
 
     for config in configs:
@@ -50,9 +83,10 @@ def get_optimizer_options(configs: list[OptimizerConfig], max_epochs: int, num_t
         warmup_steps = config.warmup_epochs * num_train_batches
         delay_steps = config.delay_epochs * num_train_batches
         total_steps = max_epochs * num_train_batches
-
+        
+        weight_decay = optimizer_params.pop("weight_decay") if "weight_decay" in optimizer_params else 0.0
         optimizer = torch.optim.AdamW(
-            iter_params(*modules_to_opt),
+            set_weight_decay_per_param(*modules_to_opt, weight_decay=weight_decay),
             lr=config.lr,
             **optimizer_params,
         )
@@ -65,7 +99,7 @@ def get_optimizer_options(configs: list[OptimizerConfig], max_epochs: int, num_t
             )
             milestones.append(delay_steps + max(milestones or [0]))
 
-        if warmup_steps > 0:
+        if delay_steps < total_steps and warmup_steps > 0:
             schedulers.append(
                 torch.optim.lr_scheduler.LinearLR(
                     optimizer,
@@ -74,23 +108,26 @@ def get_optimizer_options(configs: list[OptimizerConfig], max_epochs: int, num_t
             )
             milestones.append(warmup_steps + max(milestones or [0]))
 
-        if config.lr_scheduler == "cosine_anneal":
-            schedulers.append(
-                torch.optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer,
-                    T_max=total_steps - max(milestones or [0]),
-                    eta_min=config.min_lr,
+        if delay_steps + warmup_steps < total_steps:
+            if config.lr_scheduler == "cosine_anneal":
+                schedulers.append(
+                    torch.optim.lr_scheduler.CosineAnnealingLR(
+                        optimizer,
+                        T_max=total_steps - max(milestones or [0]),
+                        eta_min=config.min_lr,
+                    )
                 )
-            )
-        elif config.lr_scheduler == "none":
-            schedulers.append(
-                torch.optim.lr_scheduler.ConstantLR(
-                    optimizer,
-                    factor=1.0,
+            elif config.lr_scheduler == "none":
+                schedulers.append(
+                    torch.optim.lr_scheduler.ConstantLR(
+                        optimizer,
+                        factor=1.0,
+                    )
                 )
-            )
-        else:
-            raise ValueError(f"Unknown lr_scheduler: {config.lr_scheduler}")
+            else:
+                raise ValueError(f"Unknown lr_scheduler: {config.lr_scheduler}")
+
+        milestones = milestones[: len(schedulers) - 1]
 
         scheduler = torch.optim.lr_scheduler.SequentialLR(
             optimizer,

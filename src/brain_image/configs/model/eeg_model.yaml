@@ -3,7 +3,7 @@ defaults:
   - _self_
 
 #align_target_encoder: "unaligned_synclr_vitb16"
-align_img_encoder: "clip_vith14"
+align_img_encoder: "unaligned_synclr_vitb16"
 low_level_encoder: "ip_sdxl_turbo"
 prior_img_encoder: "clip_vith14"
 
