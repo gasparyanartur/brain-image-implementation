@@ -100,6 +100,7 @@ class EEGDataModule(DataModule):
         tensor_cache: TensorCache | None = None,
         embeddings_map: LatentTypeMapT | None = None,
         embeddings_to_compute_stats: list[ImageEncoderName] | None = None,
+        embeddings_map_override: dict[str, ImageEncoderName] | None = None
     ):
         super().__init__(config)
 
@@ -110,6 +111,9 @@ class EEGDataModule(DataModule):
             "low_level_latent": None,
             "eeg_latent": None,
         }
+        if embeddings_map_override:
+            embeddings_map.update(embeddings_map_override) # type: ignore
+
         embeddings_to_compute_stats = embeddings_to_compute_stats or []
         self.config: EEGDatasetConfig = config
         self.tensor_cache = tensor_cache

@@ -111,7 +111,6 @@
                 "model.embed_dim=32",
                 "model.proj_dim=16",
                 "model.img_encoder=dummy_768",
-
             ]
         },
         {

@@ -23,10 +23,10 @@ class BaseAugment(nn.Module, ABC):
 
         x = x.clone()
         mask = torch.rand(x.shape[0], device=x.device) > self.prob
-        
+
         if not mask.any().item():
             return x
-        
+
         x[mask] = self.augment(x[mask])
         x = x.contiguous()
         return x
@@ -231,15 +231,15 @@ class AugmentationPipeline(nn.Module):
 
         if disabled:
             return x
-        
+
         for augment in self.augment_modules:
             x = augment(x)
         x = self.postprocess(x)
         return x
-    
+
     def preprocess(self, x: Tensor) -> Tensor:
         return x
-    
+
     def postprocess(self, x: Tensor) -> Tensor:
         return x
 
@@ -304,7 +304,7 @@ class EEGAugmentationPipeline(AugmentationPipeline):
             ]
         )
         self._reshape_to_4d: bool = False
-        self._stored_size: Sequence[int] | None = None 
+        self._stored_size: Sequence[int] | None = None
 
     def preprocess(self, x):
         if x.ndim == 4:
@@ -314,7 +314,7 @@ class EEGAugmentationPipeline(AugmentationPipeline):
             x = x.reshape(-1, C, T)
 
         return x
-    
+
     def postprocess(self, x):
         if self._reshape_to_4d and x.ndim == 3:
             assert self._stored_size is not None
@@ -326,7 +326,7 @@ class EEGAugmentationPipeline(AugmentationPipeline):
 
 
 class ImageAugmentationPipeline(AugmentationPipeline):
-    # Augmentations: 
+    # Augmentations:
     # - Random flips
     # - Random color jitter
     # - Gaussian blur
@@ -342,27 +342,98 @@ class ImageAugmentationPipeline(AugmentationPipeline):
         blur_kernel_size: int = 5,
         blur_prob: float = 0.1,
     ):
-        super().__init__([
-            WrapAugment(tv2.RandomHorizontalFlip(flip_prob)),
-            WrapAugment(tv2.ColorJitter(
-                brightness=color_jitter_brightness,
-                contrast=color_jitter_contrast,
-                saturation=color_jitter_saturation,
-                hue=color_jitter_hue,
-            ), color_jitter_prob),
-            WrapAugment(tv2.GaussianBlur(
-                kernel_size=blur_kernel_size, sigma=(0.2, 2.0)
-            ), blur_prob)
-        ])
+        super().__init__(
+            [
+                WrapAugment(tv2.RandomHorizontalFlip(flip_prob)),
+                WrapAugment(
+                    tv2.ColorJitter(
+                        brightness=color_jitter_brightness,
+                        contrast=color_jitter_contrast,
+                        saturation=color_jitter_saturation,
+                        hue=color_jitter_hue,
+                    ),
+                    color_jitter_prob,
+                ),
+                WrapAugment(
+                    tv2.GaussianBlur(kernel_size=blur_kernel_size, sigma=(0.2, 2.0)),
+                    blur_prob,
+                ),
+            ]
+        )
 
     def preprocess(self, x: Tensor) -> Tensor:
         assert x.ndim == 4, "Expected input to be 4D (B, C, H, W)"
 
         if (x > 3).any():
-            x = x / 255.
+            x = x / 255.0
 
         return x
 
     def postprocess(self, x: Tensor) -> Tensor:
         x = x.clamp(0, 1)
         return x
+
+
+class LatentAffine(nn.Module):
+    def __init__(
+        self,
+        scale_std: float = 0.1,
+        shift_std: float = 0.1,
+    ):
+        super().__init__()
+        self.scale_std = scale_std
+        self.shift_std = shift_std
+
+    def forward(self, x: Tensor) -> Tensor:
+        # x: <B, D>
+        # scale: B
+        # Shift: B
+
+        scale = torch.randn(x.shape[0], device=x.device) * self.scale_std + 1
+        shift = torch.randn(x.shape[0], device=x.device) * self.shift_std
+
+        return x * scale[:, None] + shift[:, None]
+
+
+class LatentNoise(nn.Module):
+    def __init__(
+        self,
+        noise_std: float = 0.05,
+        relative: bool = True,
+    ):
+        super().__init__()
+        self.noise_std = noise_std
+        self.relative = relative
+
+    def forward(self, z: Tensor) -> Tensor:
+        eps = torch.randn_like(z)
+
+        if self.relative:
+            scale = z.std(dim=-1, keepdim=True).clamp(min=1e-6)
+            eps = eps * scale
+
+        return z + eps * self.noise_std
+
+
+class LatentDropout(nn.Module):
+    def __init__(
+        self,
+        drop_prob: float = 0.1,
+    ):
+        super().__init__()
+        self.drop_prob = drop_prob
+
+    def forward(self, z: Tensor) -> Tensor:
+        mask = torch.rand_like(z) > self.drop_prob
+        return z * mask
+
+
+class LatentAugmentationPipeline(AugmentationPipeline):
+    def __init__(
+        self, affine_scale_std: float = 0.1, affine_shift_std: float = 0.1, affine_prob: float = 0.5, noise_std: float = 0.05, noise_prob: float = 1.0, dropout_prob: float = 0.1,
+    ):
+        super().__init__([
+            WrapAugment(LatentAffine(affine_scale_std, affine_shift_std), affine_prob),
+            WrapAugment(LatentNoise(noise_std), noise_prob),
+            WrapAugment(LatentDropout(dropout_prob), 1.0)
+        ])

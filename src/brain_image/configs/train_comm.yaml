@@ -11,8 +11,22 @@ resume_training: false
 model:
   seed: 42
   max_epochs: 30
-  embed_dim: 512
-  proj_dim: 256
+  eeg_encoder_path: null
+
+  encoder_lr: 3e-4
+  encoder_min_lr: 1e-5
+  encoder_warmup_epochs: 1
+  encoder_delay_epochs: 1
+
+  comm_embed_dim: 256
+  comm_dropout: 0.1
+  comm_num_heads: 4
+  comm_num_layers: 1
+  comm_proj_dim: 256
+
+  use_img_encoder: false
 
 dataset:
-  batch_size: 64
+  batch_size: 128
+  val_batch_size: 256
+  test_batch_size: 256

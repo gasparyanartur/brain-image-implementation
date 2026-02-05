@@ -15,7 +15,8 @@ import itertools as it
 
 import tqdm
 
-from brain_image.augment import EEGAugmentationPipeline, ImageAugmentationPipeline
+from brain_image.augment import EEGAugmentationPipeline, ImageAugmentationPipeline, LatentAugmentationPipeline
+from brain_image.data.data import LatentTypeMapT
 from brain_image.data.io import batch_load_images
 from brain_image.data.datamodule import EEGDataModule
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
@@ -49,8 +50,13 @@ class CommAlignmentConfig(TrainingModuleConfig):
     img_encoder: ImageEncoderName = "unaligned_synclr_vitb16"
     eeg_encoder: EEGEncoderConfigType
 
-    embed_dim: int = 128
-    proj_dim: int = 128
+    debug: bool = False
+
+    comm_embed_dim: int = 64
+    comm_dropout: float = 0.1
+    comm_num_heads: int = 4
+    comm_num_layers: int = 1
+    comm_proj_dim: int = 64
 
     img_size: int = 224
     models_path: Path = Path("models")
@@ -58,8 +64,8 @@ class CommAlignmentConfig(TrainingModuleConfig):
 
     encoder_lr: float = 3e-4
     encoder_min_lr: float = 1e-6
-    encoder_warmup_epochs: int = 1
-    encoder_delay_epochs: int = 0
+    encoder_warmup_epochs: int = 5
+    encoder_delay_epochs: int = 5
 
     comm_lr: float = 3e-4
     comm_min_lr: float = 1e-6
@@ -70,11 +76,14 @@ class CommAlignmentConfig(TrainingModuleConfig):
     betas: tuple[float, float] = (0.9, 0.999)
 
     train_img_encoder: bool = False
+    use_img_encoder: bool = False
+    add_alignment: bool = True
+
+
     eeg_scale: float = 1.0
     img_scale: float = 0.5
 
     modules_to_train: list[str] = ["eeg_encoder", "comm"]
-    add_alignment: bool = False
 
     img_idx: int = 0
     eeg_idx: int = 1
@@ -88,6 +97,13 @@ class CommAlignmentConfig(TrainingModuleConfig):
     img_aug_color_jitter_saturation: float = 0.4
     img_aug_color_jitter_hue: float = 0.5
     img_aug_blur_kernel_size: int = 5
+
+    img_enc_affine_scale_std: float = 0.5
+    img_enc_affine_shift_std: float = 0.05
+    img_enc_affine_prob: float = 0.75
+    img_enc_noise_std: float = 0.05
+    img_enc_noise_prob: float = 0.75
+    img_enc_dropout_prob: float = 0.1
 
     eeg_aug_ampscale_prob: float = 0.75
     eeg_aug_timeshift_prob: float = 0.75
@@ -106,6 +122,7 @@ class CommAlignmentConfig(TrainingModuleConfig):
     eeg_aug_bandstop_min_freq: float = 2.8
     eeg_aug_bandstop_max_freq: float = 82.5
     eeg_aug_bandstop_width: float = 5
+
 
 
 class CommAlignmentModel(TrainingModule):
@@ -134,8 +151,13 @@ class CommAlignmentModel(TrainingModule):
         self.config = config
         self.model_id = model_id
 
+        embeddings_map: dict[str, ImageEncoderName] = {}
+        if not self.config.use_img_encoder:
+            embeddings_map["align_img_latent"] = self.config.img_encoder
+
         self.data_module = EEGDataModule(
             dataset_config,
+            embeddings_map_override=embeddings_map
         )
 
         logging.info(f"Seeding everything with seed: {self.config.seed}")
@@ -143,14 +165,44 @@ class CommAlignmentModel(TrainingModule):
 
         device = self.device
 
-        self.img_encoder = load_image_encoder(
-            config.img_encoder,
-            models_path=config.models_path,
-            device=device,
-            compile=False,
-        )
-        if not self.config.train_img_encoder:
+        if self.config.use_img_encoder:
+            self.img_encoder = load_image_encoder(
+                config.img_encoder,
+                models_path=config.models_path,
+                device=device,
+                compile=False,
+            )
+            if not self.config.train_img_encoder:
+                self.img_encoder.requires_grad_(False)
+
+
+            self.image_augmenter = ImageAugmentationPipeline(
+                flip_prob=config.img_aug_flip_prob,
+                color_jitter_prob=config.img_aug_color_jitter_prob,
+                blur_prob=config.img_aug_blur_prob,
+                color_jitter_contrast=config.img_aug_color_jitter_contrast,
+                color_jitter_brightness=config.img_aug_color_jitter_brightness,
+                color_jitter_saturation=config.img_aug_color_jitter_saturation,
+                color_jitter_hue=config.img_aug_color_jitter_hue,
+                blur_kernel_size=config.img_aug_blur_kernel_size,
+            )
+
+        else:
+            assert not self.config.train_img_encoder, "Cannot train image encoder if it is not used"
+            self.img_encoder = nn.Identity()
             self.img_encoder.requires_grad_(False)
+
+            self.image_augmenter = LatentAugmentationPipeline(
+                affine_scale_std=config.img_enc_affine_scale_std,
+                affine_shift_std=config.img_enc_affine_shift_std,
+                affine_prob=config.img_enc_affine_prob,
+                noise_std=config.img_enc_noise_std,
+                noise_prob=config.img_enc_noise_prob,
+                dropout_prob=config.img_enc_dropout_prob,
+            )
+
+        self.image_augmenter.requires_grad_(False)
+
 
         eeg_encoder_path = eeg_encoder_path or self.config.eeg_encoder_path
 
@@ -177,13 +229,13 @@ class CommAlignmentModel(TrainingModule):
         input_adapters.insert(
             config.img_idx,
             FeaturesInputAdapter(
-                IMAGE_ENCODER_DIM[self.config.img_encoder], self.config.embed_dim
+                IMAGE_ENCODER_DIM[self.config.img_encoder], self.config.comm_embed_dim
             ),
         )
         input_adapters.insert(
             config.eeg_idx,
             FeaturesInputAdapter(
-                self.config.eeg_encoder.d_output, self.config.embed_dim
+                self.config.eeg_encoder.d_output, self.config.comm_embed_dim
             ),
         )
 
@@ -191,23 +243,18 @@ class CommAlignmentModel(TrainingModule):
             encoder=MMFusion(
                 encoders=encoders,
                 input_adapters=input_adapters,
-                embed_dim=self.config.embed_dim,
+                embed_dim=self.config.comm_embed_dim,
+                n_layers=self.config.comm_num_layers,
+                n_heads=self.config.comm_num_heads,
+                dropout=self.config.comm_dropout,
+                pool="mean"
             ),
             projection=CoMM._build_mlp(
-                self.config.embed_dim, self.config.embed_dim, self.config.proj_dim
+                self.config.comm_embed_dim, self.config.comm_embed_dim, self.config.comm_proj_dim
             ),
         )
 
-        self.image_augmenter = ImageAugmentationPipeline(
-            flip_prob=config.img_aug_flip_prob,
-            color_jitter_prob=config.img_aug_color_jitter_prob,
-            blur_prob=config.img_aug_blur_prob,
-            color_jitter_contrast=config.img_aug_color_jitter_contrast,
-            color_jitter_brightness=config.img_aug_color_jitter_brightness,
-            color_jitter_saturation=config.img_aug_color_jitter_saturation,
-            color_jitter_hue=config.img_aug_color_jitter_hue,
-            blur_kernel_size=config.img_aug_blur_kernel_size,
-        )
+        
         self.eeg_augmenter = EEGAugmentationPipeline(
             ampscale_prob=config.eeg_aug_ampshift_prob,
             timeshift_prob=config.eeg_aug_timeshift_prob,
@@ -226,7 +273,6 @@ class CommAlignmentModel(TrainingModule):
             bandstop_max_freq=config.eeg_aug_bandstop_max_freq,
             bandstop_width=config.eeg_aug_bandstop_width,
         )
-        self.image_augmenter.requires_grad_(False)
         self.eeg_augmenter.requires_grad_(False)
 
         self.image_pipe = tv2.Compose(
@@ -251,7 +297,7 @@ class CommAlignmentModel(TrainingModule):
         self.cache_images = cache_images
         self.preload_images = preload_images
 
-        if preload_images:
+        if preload_images and self.config.use_img_encoder:
             for split in ["train", "val", "test"]:
                 dataset = self.data_module.get_dataset(
                     cast(Literal["train", "val", "test"], split)
@@ -321,7 +367,10 @@ class CommAlignmentModel(TrainingModule):
         eeg = batch["eeg_data"].to(device)
         img_paths = batch["img_path"]
 
-        imgs = self.get_images(img_paths).to(device)
+        if self.config.use_img_encoder:
+            imgs = self.get_images(img_paths).to(device)
+        else:
+            imgs = batch["align_img_latent"].to(device)
 
         img_aug1 = self.image_augmenter(imgs)
         img_aug2 = self.image_augmenter(imgs)
@@ -347,6 +396,8 @@ class CommAlignmentModel(TrainingModule):
         return output_dict["aug1_embed"], output_dict["aug2_embed"]
 
     def forward(self, batch):
+        eeg = batch["eeg"]
+        img = batch["img"]
         eeg_aug1 = batch["eeg_aug1"]
         eeg_aug2 = batch["eeg_aug2"]
         img_aug1 = batch["img_aug1"]
@@ -365,22 +416,39 @@ class CommAlignmentModel(TrainingModule):
                     "loss_eeg_to_proto": comm_loss_dict[self.config.eeg_idx],
                     "loss_img_to_proto": comm_loss_dict[self.config.img_idx],
                     "loss_proto_to_proto": comm_loss_dict[self.config.prototype_idx],
+                    "loss_eeg_to_proto_balance": comm_loss_dict[f"balance_{self.config.eeg_idx}"],
+                    "loss_img_to_proto_balance": comm_loss_dict[f"balance_{self.config.img_idx}"],
                 }
             )
 
         if "align_loss" in self.losses:
             align_loss = self.losses["align_loss"]
-            align_loss_dict = align_loss(
+            align_loss_dict1 = align_loss(
                 z1[self.config.eeg_idx], z2[self.config.img_idx], norm=True
+            )
+            align_loss_dict2 = align_loss(
+                z2[self.config.eeg_idx], z1[self.config.img_idx], norm=True
             )
             loss_dict.update(
                 {
-                    "loss_eeg_to_img": align_loss_dict["loss_e"],
-                    "loss_img_to_eeg": align_loss_dict["loss_i"],
+                    "loss_eeg_to_img": (align_loss_dict1["loss_e"] + align_loss_dict2["loss_e"]) / 2,
+                    "loss_img_to_eeg": (align_loss_dict1["loss_i"] + align_loss_dict2["loss_i"]) / 2
                 }
             )
 
         loss_dict["loss"] = torch.stack(list(loss_dict.values())).sum()
+
+        if self.config.debug:
+            with torch.no_grad():
+                img_to_img_sim = F.cosine_similarity(z1[self.config.img_idx], z2[self.config.img_idx], dim=-1).mean().detach().cpu()
+                eeg_to_eeg_sim = F.cosine_similarity(z1[self.config.eeg_idx], z2[self.config.eeg_idx], dim=-1).mean().detach().cpu()
+                img_aug_norm = 2 * (img_aug1 - img_aug2).norm(dim=-1).mean().detach().cpu() / (img.norm(dim=-1).mean().detach().cpu())
+                eeg_aug_norm = 2 * (eeg_aug1 - eeg_aug2).norm(dim=-1).mean().detach().cpu() / (eeg.norm(dim=-1).mean().detach().cpu())
+
+                self.log("debug/img_to_img_sim", img_to_img_sim)
+                self.log("debug/eeg_to_eeg_sim", eeg_to_eeg_sim)
+                self.log("debug/img_aug_norm", img_aug_norm)
+                self.log("debug/eeg_aug_norm", eeg_aug_norm)
 
         return loss_dict
 

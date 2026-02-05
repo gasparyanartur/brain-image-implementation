@@ -13,12 +13,13 @@ class CoMMLoss(nn.Module):
         [1] What to align in multimodal contrastive learning, Dufumier & Castillo-Navarro et al., ICLR 2025
     """
 
-    def __init__(self, temperature=0.1, weights=None, skip_idxs: list[int] = []):
+    def __init__(self, temperature=0.1, weights=None, skip_idxs: list[int] = [], loss_balance_factor: float = 5.0):
         super().__init__()
         self.temperature = nn.Parameter(torch.tensor(temperature)) 
         self.weights = weights
         self.skip_idxs = skip_idxs
         self.INF = 1e8
+        self.loss_balance_factor = loss_balance_factor
 
     def infonce(self, z1, z2):
         N = len(z1)
@@ -72,9 +73,10 @@ class CoMMLoss(nn.Module):
 
             loss1 = self.infonce(zm1, zp2)
             loss2 = self.infonce(zm2, zp1)
-            
-            loss = ((loss1 + loss2) / 2.)
-            losses[m] = loss
+
+            if m != prototype_idx:
+                losses["balance_" + str(m)] = self.loss_balance_factor * (loss1 - loss2).square()
+            losses[m] = ((loss1 + loss2) / 2.)
         
         return losses
 

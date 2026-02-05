@@ -242,8 +242,8 @@ class FusionTransformer(nn.Module):
                             dropout=dropout,
                             batch_first=batch_first,
                         )
-                        for _ in range(n_layers)
-                    ]
+                        for _ in range(2 * n_layers)
+                    ],
                 )
                 for _ in range(2)
             ]
@@ -255,14 +255,23 @@ class FusionTransformer(nn.Module):
         proj_std = (self.width**-0.5) * ((2 * self.layers) ** -0.5)
         attn_std = self.width**-0.5
         fc_std = (2 * self.width) ** -0.5
-        for block in self.resblocks:
-            nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
-            nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
-            nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
-            nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
+        if self.fusion == "concat":
+            for block in self.resblocks:
+                nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
+                nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
+                nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
+                nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
+        elif self.fusion == "x-attn":
+            for resblock in self.resblocks:
+                assert isinstance(resblock, nn.Sequential)
+                for block in resblock:
+                    nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
+                    nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
+                    nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
+                    nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
 
     def forward(
-        self, x: List[torch.Tensor], key_padding_mask: List[torch.Tensor] = None
+        self, x: List[torch.Tensor], key_padding_mask: List[torch.Tensor]  | None = None
     ):
         """
         :param x: input tensors
@@ -271,6 +280,8 @@ class FusionTransformer(nn.Module):
         """
         # Concatenate over tokens + self-attention
         if self.fusion == "concat":
+            # x: [B, N, D]
+
             x = torch.cat(x, dim=self.token_dim)
             if key_padding_mask is not None:
                 key_padding_mask = torch.cat(key_padding_mask, dim=self.token_dim)
@@ -307,7 +318,7 @@ class FusionTransformer(nn.Module):
                     "Only 2 modalities are currently accepted for cross-attention"
                 )
             if key_padding_mask is not None:
-                raise NotImplementedError()
+                raise NotImplementedError("Key padding mask not implemented for cross-attention.")
             x1, x2 = x
             x = torch.cat(
                 [
