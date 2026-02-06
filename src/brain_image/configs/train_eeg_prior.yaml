@@ -6,7 +6,8 @@ model:
   do_align: false
   do_recon: true
   do_recon_low: false
-  
+  skip_reconstruction: true
+
   eeg_encoder_path: null
 
   encoder_lr: 1e-3
@@ -24,6 +25,7 @@ model:
   prior_min_lr: 1e-7
   prior_warmup_epochs: 5
   prior_delay_epochs: 0
+  
 
   max_epochs: 500
   #max_epochs: 150

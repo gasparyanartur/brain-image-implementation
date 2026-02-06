@@ -101,6 +101,8 @@ class EEGAlignmentConfig(TrainingModuleConfig):
     do_recon_low: bool = False
     do_recon: bool = True
 
+    skip_reconstruction: bool = False
+
     align_input_noise: float = 0.0
 
     plot_lowdim_proj: bool = False
@@ -960,21 +962,23 @@ class EEGAlignmentModel(TrainingModule):
             batch_size=self.data_module.config.get_batch_size("test"),
         )
 
-        recon_idxs = self.config.highlighted_val_recons
-        conditioning = torch.cat(
-            [
-                prior_pred[recon_idxs].to(device),
-                prior_img_latent[recon_idxs].to(device),
-            ],
-            dim=0,
-        )
-        recon = get_reconstructions(conditioning, pipe_kwargs={"generator": generator})
-        recon_pred, recon_target = recon.chunk(2, dim=0)
 
-        img_outputs = {
-            "eval/recon/pred": [x.detach().cpu().float() for x in recon_pred],
-            "eval/recon/target": [x.detach().cpu().float() for x in recon_target],
-        }
+        if not self.config.skip_reconstruction:
+            recon_idxs = self.config.highlighted_val_recons
+            conditioning = torch.cat(
+                [
+                    prior_pred[recon_idxs].to(device),
+                    prior_img_latent[recon_idxs].to(device),
+                ],
+                dim=0,
+            )
+            recon = get_reconstructions(conditioning, pipe_kwargs={"generator": generator})
+            recon_pred, recon_target = recon.chunk(2, dim=0)
+
+            img_outputs.update({
+                "eval/recon/pred": [x.detach().cpu().float() for x in recon_pred],
+                "eval/recon/target": [x.detach().cpu().float() for x in recon_target],
+            })
 
         metrics.update(
             {
@@ -1033,7 +1037,7 @@ class EEGAlignmentModel(TrainingModule):
                 }
             )
 
-        if self.config.do_recon:
+        if self.config.do_recon and not self.config.skip_reconstruction:
             assert self.prior is not None
 
             reconstructions = get_batched_reconstructions_from_eeg(
