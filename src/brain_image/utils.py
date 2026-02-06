@@ -71,6 +71,7 @@ def gather_dataloader(
         all_samples[k] = torch.stack(all_samples[k])
 
     return all_samples
+    
 
 
 def current_fig_to_img():

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Literal, TypedDict, Union
+from typing import Any, Literal, Mapping, Type, TypeVar, TypedDict, Union, cast
 
 import numpy as np
 import torch
@@ -12,6 +12,8 @@ from torch import Tensor
 from brain_image.data.tensorcache import TensorCache
 from brain_image.model.encoder.eeg_encoder.union import EEGEncoderName
 from brain_image.model.encoder.img_encoder.union import ImageEncoderName
+
+T = TypeVar('T')
 
 SPLIT = Literal["train", "val", "test"]
 DSPLIT = Literal["train", "test"]
@@ -180,3 +182,9 @@ def merge_data(
         merged_data.append(joined_object)
 
     return merged_data
+
+
+def get_from_batch(key: str, batch: Mapping[str, Any], type_: Type[T]) -> T:
+    assert (val := batch.get(key)) is not None, f"{key} is not in batch"
+    assert isinstance(val, type_), f"{key} is not of type {type_}"
+    return cast(T, val)

@@ -22,6 +22,7 @@ from brain_image.data.io import batch_load_images
 from brain_image.data.tensorcache import TensorCache
 from brain_image.data.data import (
     LatentTypeMapT,
+    get_from_batch,
 )
 from brain_image.metrics import (
     MetricName,
@@ -59,7 +60,7 @@ from brain_image.model.prior import (
 )
 
 
-from typing import Any, Literal, Mapping, TypedDict, cast
+from typing import Any, Generic, Literal, Mapping, Type, TypeVar, TypedDict, cast
 import logging
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
 from brain_image.reconstruction import (
@@ -88,6 +89,8 @@ import tempfile
 import time
 import torch
 from torch import Tensor
+
+T = TypeVar("T")
 
 
 class EEGAlignmentConfig(TrainingModuleConfig):
@@ -245,9 +248,7 @@ class EEGAlignmentModel(TrainingModule):
             config = EEGAlignmentConfig.model_validate(config)
 
         super().__init__(config, **kwargs)
-        self.automatic_optimization = (
-            False  # Disable automatic optimization, we will handle it manually
-        )
+        self.automatic_optimization = False  # Disable automatic optimization, we will handle it manually
 
         if self.config.aug_eeg:
             self.eeg_augmenter = EEGAugmentationPipeline(
@@ -276,22 +277,14 @@ class EEGAlignmentModel(TrainingModule):
         pl.seed_everything(self.config.seed)
 
         self.config: EEGAlignmentConfig = (
-            config
-            if isinstance(config, EEGAlignmentConfig)
-            else EEGAlignmentConfig.model_validate(config)
+            config if isinstance(config, EEGAlignmentConfig) else EEGAlignmentConfig.model_validate(config)
         )
 
         tensor_cache = TensorCache(cache_dir)
         embeddings_map: LatentTypeMapT = {
-            "align_img_latent": (
-                self.config.align_img_encoder if self.config.do_align else None
-            ),
-            "prior_img_latent": (
-                self.config.prior_img_encoder if self.config.do_recon else None
-            ),
-            "low_level_latent": (
-                self.config.low_level_encoder if self.config.do_recon_low else None
-            ),
+            "align_img_latent": (self.config.align_img_encoder if self.config.do_align else None),
+            "prior_img_latent": (self.config.prior_img_encoder if self.config.do_recon else None),
+            "low_level_latent": (self.config.low_level_encoder if self.config.do_recon_low else None),
             "eeg_latent": None,
         }
 
@@ -320,9 +313,7 @@ class EEGAlignmentModel(TrainingModule):
             emb_stats = cast(
                 dict[ImageEncoderName, dict[str, Tensor]] | None,
                 {
-                    self.config.prior_img_encoder: self.data_module.embedding_stats[
-                        "prior_img_latent"
-                    ],
+                    self.config.prior_img_encoder: self.data_module.embedding_stats["prior_img_latent"],
                 },
             )
 
@@ -333,9 +324,7 @@ class EEGAlignmentModel(TrainingModule):
             ).to(dtype)
 
         elif self.config.do_recon_low:
-            raise ValueError(
-                "Cannot do low level reconstruction in without high level reconstruction"
-            )
+            raise ValueError("Cannot do low level reconstruction in without high level reconstruction")
 
         eeg_encoder_path = eeg_encoder_path or self.config.eeg_encoder_path
 
@@ -358,13 +347,9 @@ class EEGAlignmentModel(TrainingModule):
             case "infonce":
                 self.align_loss = InfoNCELoss(self.config.clip_temperature)
             case "siglip":
-                self.align_loss = SigLipLoss(
-                    self.config.clip_temperature, self.config.clip_bias
-                )
+                self.align_loss = SigLipLoss(self.config.clip_temperature, self.config.clip_bias)
             case _:
-                raise ValueError(
-                    f"Unknown align_loss_type: {self.config.align_loss_type}"
-                )
+                raise ValueError(f"Unknown align_loss_type: {self.config.align_loss_type}")
 
         if compile:
             for module in self.config.modules_to_compile:
@@ -473,9 +458,7 @@ class EEGAlignmentModel(TrainingModule):
                 nn.init.zeros_(m.bias)
 
     @classmethod
-    def load_checkpoint(
-        cls, checkpoint_path: str | Path, undo_compile: bool = False, **kwargs
-    ):
+    def load_checkpoint(cls, checkpoint_path: str | Path, undo_compile: bool = False, **kwargs):
         if not undo_compile:
             return super().load_from_checkpoint(checkpoint_path, **kwargs)
 
@@ -496,9 +479,7 @@ class EEGAlignmentModel(TrainingModule):
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as temp_file:
             torch.save(checkpoint, temp_file.name)
-            return cls.load_checkpoint(
-                temp_file.name, undo_compile=False, compile=False, **kwargs
-            )
+            return cls.load_checkpoint(temp_file.name, undo_compile=False, compile=False, **kwargs)
 
     def training_step(self, batch, batch_idx):
         self.atleast_one_training_step = True
@@ -529,9 +510,7 @@ class EEGAlignmentModel(TrainingModule):
 
         metrics["lr/step"] = scheduler.last_epoch if scheduler is not None else -1
         for opt_option in self.optimizer_options:
-            metrics["lr/" + opt_option["name"]] = opt_option[
-                "lr_scheduler"
-            ].get_last_lr()[0]
+            metrics["lr/" + opt_option["name"]] = opt_option["lr_scheduler"].get_last_lr()[0]
 
         if self.config.log_gradients:
             with torch.no_grad():
@@ -561,14 +540,10 @@ class EEGAlignmentModel(TrainingModule):
 
         return losses["loss"]
 
-    def validation_step(
-        self, batch, batch_idx
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    def validation_step(self, batch, batch_idx) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         losses, outputs, metrics = self.run_step(batch, batch_idx, "val")
 
-        if self.atleast_one_training_step and (
-            batch_idx == self.data_module.get_num_batches("val") - 1
-        ):
+        if self.atleast_one_training_step and (batch_idx == self.data_module.get_num_batches("val") - 1):
             eval_metrics, eval_outputs = self.run_full_validation(split="val")
             metrics.update(eval_metrics)
 
@@ -578,9 +553,7 @@ class EEGAlignmentModel(TrainingModule):
                     wandb_logger.log_image(key=f"{prefix}{k}", images=v)
 
         for metric_name, metric_value in it.chain(losses.items(), metrics.items()):
-            prefix = (
-                "val/" if metric_name.split("/")[0] not in ("debug", "eval") else ""
-            )
+            prefix = "val/" if metric_name.split("/")[0] not in ("debug", "eval") else ""
             name = f"{prefix}{metric_name}"
             self.log(
                 name,
@@ -592,14 +565,10 @@ class EEGAlignmentModel(TrainingModule):
 
         return losses, outputs, metrics
 
-    def test_step(
-        self, batch, batch_idx
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    def test_step(self, batch, batch_idx) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         losses, outputs, metrics = self.run_step(batch, batch_idx, "test")
 
-        if self.atleast_one_training_step and (
-            batch_idx == self.data_module.get_num_batches("test") - 1
-        ):
+        if self.atleast_one_training_step and (batch_idx == self.data_module.get_num_batches("test") - 1):
             eval_metrics, eval_outputs = self.run_full_validation(split="test")
             metrics.update(eval_metrics)
 
@@ -640,14 +609,10 @@ class EEGAlignmentModel(TrainingModule):
         batch_idx,
         stage: Literal["train", "val", "test"],
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-        device = (
-            self.device
-            if isinstance(self.device, torch.device)
-            else get_device(self.device)
-        )
+        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
 
-        assert (eeg := batch.get("eeg_data")) is not None, "EEG data is not in batch"
-        assert (sub := batch.get("sub")) is not None, "Subject is not in batch"
+        eeg = get_from_batch("eeg", batch, Tensor).to(device)
+        sub = get_from_batch("sub", batch, Tensor).to(device)
 
         if stage == "train":
             eeg = self.eeg_augmenter(eeg)
@@ -673,9 +638,7 @@ class EEGAlignmentModel(TrainingModule):
 
             if self.config.do_recon and (
                 (self.current_epoch >= self.config.prior_delay_epochs)
-                or (
-                    stage != "train"
-                )  # On training step, no need to run this if it's not time
+                or (stage != "train")  # On training step, no need to run this if it's not time
             ):
                 self._run_step_do_recon(
                     batch=batch,
@@ -702,14 +665,10 @@ class EEGAlignmentModel(TrainingModule):
         stage,
         device,
     ) -> None:
-        assert (
-            eeg_latent_normed := cache.get("eeg_latent_normed")
-        ) is not None, "EEG latent is not initialized"
-        assert (
-            align_img_latent := batch.get("align_img_latent")
-        ) is not None, "Align image latent is not in batch"
-        assert (idx := batch.get("idx")) is not None, "Index is not initialized"
         assert self.align_loss is not None, "Align loss is not initialized"
+
+        eeg_latent_normed = get_from_batch("eeg_latent_normed", batch, Tensor).to(device)
+        align_img_latent = get_from_batch("align_img_latent", batch, Tensor).to(device)
 
         with torch.no_grad():
             align_img_latent_normed = F.normalize(align_img_latent.to(device))
@@ -721,18 +680,13 @@ class EEGAlignmentModel(TrainingModule):
                 * self.config.align_input_noise
             )
 
-        align_clip_loss, align_logits = self.align_loss(
-            eeg_latent_normed, align_img_latent_normed
-        )
+        align_clip_loss, align_logits = self.align_loss(eeg_latent_normed, align_img_latent_normed)
 
         align_clip_loss = (
-            align_clip_loss
-            * self.config.align_loss_factor
-            * (self.current_epoch >= self.config.align_loss_epoch)
+            align_clip_loss * self.config.align_loss_factor * (self.current_epoch >= self.config.align_loss_epoch)
         )
         align_mse_loss = (
-            torch.nn.functional.mse_loss(eeg_latent_normed, align_img_latent_normed)
-            * self.config.align_mse_loss_factor
+            torch.nn.functional.mse_loss(eeg_latent_normed, align_img_latent_normed) * self.config.align_mse_loss_factor
         )
 
         losses.update(
@@ -766,14 +720,9 @@ class EEGAlignmentModel(TrainingModule):
     ) -> None:
         assert self.config.prior is not None, "Prior config is not initialized"
         assert self.prior is not None, "Prior is not initialized"
-        assert (
-            target_latent := batch["prior_img_latent"]
-        ) is not None, "Prior image latent is not defined"
-        assert (
-            eeg_latent_normed := cache["eeg_latent_normed"]
-        ) is not None, "Normed eeg latent is not defined"
-        target_latent = target_latent.to(device)
-        eeg_latent_normed = eeg_latent_normed.to(device)
+
+        target_latent = get_from_batch("target_latent", batch, Tensor).to(device)
+        eeg_latent_normed = get_from_batch("eeg_latent_normed", batch, Tensor).to(device)
 
         target_latent = self.prior.scale_target(target_latent)
         batch_size = target_latent.size(0)
@@ -797,9 +746,7 @@ class EEGAlignmentModel(TrainingModule):
             )
             * self.config.prior_sim_mse_loss_factor
         )
-        pred_mse_loss = (
-            F.mse_loss(pred, target_latent) * self.config.prior_pred_mse_loss_factor
-        )
+        pred_mse_loss = F.mse_loss(pred, target_latent) * self.config.prior_pred_mse_loss_factor
 
         losses.update(
             {
@@ -818,35 +765,27 @@ class EEGAlignmentModel(TrainingModule):
             )
 
             metrics.update(
-                {
-                    "prior/pred_cos": VCLR(
-                        torch.linalg.vecdot(
-                            F.normalize(target_latent), F.normalize(pred_50), dim=-1
-                        )
-                    )
-                }
+                {"prior/pred_cos": VCLR(torch.linalg.vecdot(F.normalize(target_latent), F.normalize(pred_50), dim=-1))}
             )
 
     @property
     def is_full_val_epoch(self) -> bool:
         if self.config.full_eval_every_epochs == 0:
             return False
-        
+
         if self.config.full_eval_every_epochs == 1:
             return True
-        
+
         if self.config.skip_eval_first_epoch and self.current_epoch == 0:
-            return False 
+            return False
 
         if (self.current_epoch + 1) % self.config.full_eval_every_epochs == 0:
             return True
-        
+
         return False
 
     @torch.no_grad()
-    def run_full_validation(
-        self, split: Literal["val", "test"]
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
+    def run_full_validation(self, split: Literal["val", "test"]) -> tuple[dict[str, Any], dict[str, Any]]:
         if not (self.is_full_val_epoch or split == "test"):
             return {}, {}
 
@@ -856,13 +795,13 @@ class EEGAlignmentModel(TrainingModule):
         data_loader = self.data_module.get_dataloader(split)
         all_data = gather_dataloader(data_loader)
 
-        assert (eeg := all_data.get("eeg_data")) is not None, "EEG data is not in batch"
-        assert (sub := all_data.get("sub")) is not None, "Subject data is not in batch"
+        sub = get_from_batch("sub", all_data, Tensor)
+        eeg = get_from_batch("eeg_data", all_data, Tensor)
 
         eeg_latent = batch_encode_eeg_latent(
             self.eeg_encoder,
-            cast(Tensor, eeg),
-            cast(Tensor, sub),
+            eeg,
+            sub,
             batch_size=self.data_module.config.get_batch_size(split),
             progress_bar=False,
         )
@@ -872,16 +811,12 @@ class EEGAlignmentModel(TrainingModule):
         device, dtype = self._get_device_dtype()
 
         if self.config.do_align:
-            metrics_align, img_outputs_align = self._run_validation_align(
-                all_data, device  # type: ignore
-            )
+            metrics_align, img_outputs_align = self._run_validation_align(all_data, device)  # type: ignore
             metrics.update(metrics_align)
             img_outputs.update(img_outputs_align)
 
         if self.config.do_recon:
-            metrics_prior, img_outputs_prior = self._run_validation_recon(
-                all_data, device, split  # type: ignore
-            )
+            metrics_prior, img_outputs_prior = self._run_validation_recon(all_data, device, split)  # type: ignore
             metrics.update(metrics_prior)
             img_outputs.update(img_outputs_prior)
 
@@ -895,30 +830,15 @@ class EEGAlignmentModel(TrainingModule):
     @torch.no_grad()
     def _run_validation_align(
         self,
-        all_data: DataBatchT,
+        all_data: dict[str, Any],
         device: torch.device,
     ):
-        assert (
-            eeg_latent_normed := all_data.get("eeg_latent_normed")
-        ) is not None, "EEG latent is not in batch"
+        eeg_latent_normed = get_from_batch("eeg_latent_normed", all_data, Tensor).to(device)
+        align_img_latent = get_from_batch("align_img_latent", all_data, Tensor).to(device)
+        indexes = get_from_batch("idx", all_data, Tensor).to(device)
+        img_paths = get_from_batch("img_path", all_data, list[str])
 
-        assert (
-            img_paths := all_data.get("img_path")
-        ) is not None, "Image paths are not in batch"
-
-        assert (
-            align_img_latent := all_data.get("align_img_latent")
-        ) is not None, "Align img latent is not in batch"
-
-        assert (indexes := all_data.get("idx")) is not None, "Indices are not in batch"
-
-        eeg_latent_normed = eeg_latent_normed.to(device)
-        align_img_latent = align_img_latent.to(device)
-        indexes = indexes.to(device)
-
-        top1_acc, chosen_idx = get_retrieval_accuracy_with_idx(
-            eeg_latent_normed, align_img_latent, norm=True
-        )
+        top1_acc, chosen_idx = get_retrieval_accuracy_with_idx(eeg_latent_normed, align_img_latent, norm=True)
 
         target_img_paths = [Path(img_paths[i]) for i in indexes[:3]]
         chosen_img_paths = [Path(img_paths[i]) for i in chosen_idx[:3]]
@@ -946,11 +866,8 @@ class EEGAlignmentModel(TrainingModule):
         if self.prior is None:
             return {}, {}
 
-        assert (target := all_data.get("prior_img_latent")) is not None
-        assert (
-            eeg_latent_normed := all_data.get("eeg_latent_normed")
-        ) is not None, "EEG latent is not in batch"
-        assert (prior_img_latent := all_data.get("prior_img_latent")) is not None
+        target = get_from_batch("prior_img_latent", all_data, Tensor).to(device)
+        eeg_latent_normed = get_from_batch("eeg_latent_normed", all_data, Tensor).to(device)
 
         metrics = {}
         img_outputs = {}
@@ -962,31 +879,27 @@ class EEGAlignmentModel(TrainingModule):
             batch_size=self.data_module.config.get_batch_size("test"),
         )
 
-
         if not self.config.skip_reconstruction:
             recon_idxs = self.config.highlighted_val_recons
             conditioning = torch.cat(
                 [
                     prior_pred[recon_idxs].to(device),
-                    prior_img_latent[recon_idxs].to(device),
+                    target[recon_idxs].to(device),
                 ],
                 dim=0,
             )
             recon = get_reconstructions(conditioning, pipe_kwargs={"generator": generator})
             recon_pred, recon_target = recon.chunk(2, dim=0)
 
-            img_outputs.update({
-                "eval/recon/pred": [x.detach().cpu().float() for x in recon_pred],
-                "eval/recon/target": [x.detach().cpu().float() for x in recon_target],
-            })
+            img_outputs.update(
+                {
+                    "eval/recon/pred": [x.detach().cpu().float() for x in recon_pred],
+                    "eval/recon/target": [x.detach().cpu().float() for x in recon_target],
+                }
+            )
 
         metrics.update(
-            {
-                "eval/prior/pred_cos": F.cosine_similarity(prior_pred, target.to(device))
-                .mean()
-                .detach()
-                .cpu()
-            }
+            {"eval/prior/pred_cos": F.cosine_similarity(prior_pred, target.to(device)).mean().detach().cpu()}
         )
 
         return metrics, img_outputs
@@ -1001,15 +914,10 @@ class EEGAlignmentModel(TrainingModule):
 
         device = self.device
 
-        assert (
-            img_path := all_data.get("img_path")
-        ) is not None, "Image path is not in batch"
-        assert (
-            idxs := all_data.get("idx")
-        ) is not None, "idx not in batch"
-        
-        assert (eeg := all_data.get("eeg_data")) is not None, "EEG data is not in batch"
-        assert (sub := all_data.get("sub")) is not None, "Subject data is not in batch"
+        img_path = get_from_batch("img_path", all_data, list[str])
+        eeg = get_from_batch("eeg_data", all_data, Tensor).to(device)
+        sub = get_from_batch("sub", all_data, Tensor).to(device)
+        idxs = get_from_batch("idx", all_data, Tensor)
 
         eeg_latent = batch_encode_eeg_latent(
             self.eeg_encoder,
@@ -1019,16 +927,13 @@ class EEGAlignmentModel(TrainingModule):
             progress_bar=False,
         )["eeg_latent_normed"].to(device)
 
-
         if self.config.do_align:
             assert (
                 align_img_latent := all_data.get("align_img_latent")
             ) is not None, "Align image latent is not in batch"
 
             align_img_latent = align_img_latent.to(device)
-            brain_acc, image_acc = get_retrieval_accuracy(
-                eeg_latent, align_img_latent, norm=True
-            )
+            brain_acc, image_acc = get_retrieval_accuracy(eeg_latent, align_img_latent, norm=True)
 
             metrics.update(
                 {
@@ -1046,9 +951,7 @@ class EEGAlignmentModel(TrainingModule):
                 self.data_module.config.get_batch_size("test"),
                 self.config.seed,
             )
-            targets = batch_load_images(img_path, parallel=True, progressbar=True).to(
-                device
-            )
+            targets = batch_load_images(img_path, parallel=True, progressbar=True).to(device)
 
             prior_metrics = evaluate_metrics(reconstructions, targets, metrics=self.config.test_recon_metrics)
             resize = tv2.Compose(
@@ -1063,10 +966,12 @@ class EEGAlignmentModel(TrainingModule):
             reconstructions = resize(reconstructions).detach().cpu()
             targets = resize(targets).detach().cpu()
 
-            img_outputs.update({
-                "prior/reconstruction": reconstructions,
-                "prior/ground_truth": targets,
-            })
+            img_outputs.update(
+                {
+                    "prior/reconstruction": reconstructions,
+                    "prior/ground_truth": targets,
+                }
+            )
 
         return metrics, img_outputs, img_path, idxs
 
@@ -1090,9 +995,7 @@ class EEGAlignmentModel(TrainingModule):
 
         return metrics, img_outputs
 
-    def plot_lowdim_projection(
-        self, all_data: DataBatchT
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
+    def plot_lowdim_projection(self, all_data: DataBatchT) -> tuple[dict[str, Any], dict[str, Any]]:
 
         latents = []
         labels = []
@@ -1102,9 +1005,7 @@ class EEGAlignmentModel(TrainingModule):
                 latents.append(all_data[key])
                 labels.append(key)
 
-        plot_image = plot_projected_latents(
-            latents, labels, "Low Dim Projection", self.config.low_dim_proj_pca
-        )
+        plot_image = plot_projected_latents(latents, labels, "Low Dim Projection", self.config.low_dim_proj_pca)
         metrics = {}
         img_outputs = {
             "plot/lowdim": [plot_image],
@@ -1132,12 +1033,10 @@ class EEGAlignmentModel(TrainingModule):
             img_dir = Path(output_dir / "reconstructions")
             img_dir.mkdir(parents=True, exist_ok=True)
 
-            for reconstruction, ground_truth, idx in zip(
-                reconstructions, ground_truths, idxs
-            ):             
+            for reconstruction, ground_truth, idx in zip(reconstructions, ground_truths, idxs):
                 if selected_img_idxs is not None and idx.item() not in selected_img_idxs:
                     continue
-                
+
                 save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
                 save_image(ground_truth, img_dir / f"{idx}_recon_gt.jpg")
 
@@ -1147,9 +1046,7 @@ class EEGAlignmentModel(TrainingModule):
             selected_img_outputs = {k: [] for k in imgs.keys()}
             for k, v in imgs.items():
                 for imgs, idx in zip(v, idxs):
-                    if (self.config.highlighted_test_recons is None) or (
-                        idx in self.config.highlighted_test_recons
-                    ):
+                    if (self.config.highlighted_test_recons is None) or (idx in self.config.highlighted_test_recons):
                         selected_img_outputs[k].append(imgs)
 
             for k, v in selected_img_outputs.items():
@@ -1182,12 +1079,6 @@ class EEGAlignmentModel(TrainingModule):
         return self.data_module.test_dataloader()
 
     def _get_device_dtype(self) -> tuple[torch.device, torch.dtype]:
-        dtype = (
-            self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
-        )
-        device = (
-            self.device
-            if isinstance(self.device, torch.device)
-            else get_device(self.device)
-        )
+        dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
+        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
         return device, dtype
