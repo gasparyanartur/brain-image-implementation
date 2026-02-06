@@ -60,11 +60,11 @@ class DummyEEGDataset(EEGDataset):
     def get_eeg_paths(self, split: DSPLIT | None = None, subs: list[int] | None = None) -> list[Path]:
         return [self.config.dummy_eeg_path]
 
-    def _compute_embedding_stats(self):
+    def _load_embedding_stats(self):
         stats = {}
-        for emb_type, emb_name in self.embeddings_map.items():
+        for emb_type, emb_name in self.embeddings_key_to_name.items():
             emb_name = cast(ImageEncoderName, emb_name) 
-            if emb_name not in self.embeddings_to_compute_stats:
+            if emb_name not in self.load_embedding_stats:
                 continue
 
             dim = IMAGE_ENCODER_DIM[emb_name]
@@ -78,7 +78,7 @@ class DummyEEGDataset(EEGDataset):
     
     def get_embeddings(self, img_path):
         embedding_stack = {}
-        for emb_type, emb_name in self.embeddings_map.items():
+        for emb_type, emb_name in self.embeddings_key_to_name.items():
             emb_name = cast(ImageEncoderName, emb_name)
             if emb_name is None:
                 continue

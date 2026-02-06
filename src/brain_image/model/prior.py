@@ -28,6 +28,7 @@ from dalle2_pytorch.dalle2_pytorch import CausalTransformer, SinusoidalPosEmb, M
 from brain_image.configs import BaseConfig
 from brain_image.model.encoder.img_encoder.union import ImageEncoderName
 from brain_image.model.model import LinearLayerNorm
+from brain_image.stats import StatsType
 from brain_image.utils import (
     get_device_from_module,
     l2_scale,
@@ -555,13 +556,11 @@ class BaseDiffusionPrior(ABC, nn.Module):
     def __init__(
         self,
         config: DiffusionPriorConfig,
-        latent_name: ImageEncoderName,
-        embedding_stats: dict[ImageEncoderName, dict[str, Tensor]] | None = None,
+        embedding_stats: StatsType | None = None,
     ):
         super().__init__()
 
         self.config = config
-        self.latent_name = latent_name
         self.embedding_stats = embedding_stats
 
         if config.norm_scheme == "z_scale" and embedding_stats is None:
@@ -590,8 +589,6 @@ class BaseDiffusionPrior(ABC, nn.Module):
 
     @torch.no_grad()
     def scale_target(self, target: Tensor) -> Tensor:
-        latent_name = cast(ImageEncoderName, self.latent_name)
-
         match self.config.norm_scheme:
             case "none":
                 return target
@@ -599,14 +596,10 @@ class BaseDiffusionPrior(ABC, nn.Module):
                 return l2_scale(target)
             case "z_scale":
                 assert self.embedding_stats is not None
-
-                stats = self.embedding_stats[latent_name]
-                return z_scale(target, stats["mean"], stats["std"])
+                return z_scale(target, self.embedding_stats["mean"], self.embedding_stats["std"])
 
     @torch.no_grad()
     def reverse_scale_target(self, target: Tensor) -> Tensor:
-        latent_name = cast(ImageEncoderName, self.latent_name)
-
         match self.config.norm_scheme:
             case "none":
                 return target
@@ -614,9 +607,7 @@ class BaseDiffusionPrior(ABC, nn.Module):
                 return reverse_l2_scale(target)
             case "z_scale":
                 assert self.embedding_stats is not None
-
-                stats = self.embedding_stats[latent_name]
-                return reverse_z_scale(target, stats["mean"], stats["std"])
+                return reverse_z_scale(target, self.embedding_stats["mean"], self.embedding_stats["std"])
             
     @torch.no_grad()
     def batch_generate(
@@ -693,10 +684,9 @@ class SimpleDiffusionPrior(BaseDiffusionPrior):
     def __init__(
         self,
         config: DiffusionPriorConfig,
-        latent_name: ImageEncoderName,
-        embedding_stats: dict[ImageEncoderName, dict[str, Tensor]] | None = None,
+        embedding_stats: StatsType | None = None,
     ):
-        super().__init__(config, latent_name, embedding_stats)
+        super().__init__(config, embedding_stats)
         self.config = config
 
 

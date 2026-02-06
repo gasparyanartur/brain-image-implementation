@@ -13,9 +13,10 @@ from typing import Literal, Sequence, cast
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from brain_image.data.data import DSPLIT, EEGSampleT, LatentGroupT, LatentStats, LatentTypeMapT, get_embeddings_stats
+from brain_image.data.data import DSPLIT, EEGSampleT, LatentGroupT, LatentTypeMapT, load_stats, old_get_embeddings_stats
 from brain_image.data.tensorcache import TensorCache
 from brain_image.model.encoder.encoder import EncoderName, LatentName
+from brain_image.stats import StatsType
 
 
 class DataConfig(BaseConfig, ABC):
@@ -70,15 +71,15 @@ class EEGDataset(Dataset, ABC):
         config: EEGDatasetConfig,
         split: Literal["train", "val", "test"],
         tensor_cache: TensorCache | None = None,
-        embeddings_map: LatentTypeMapT | None = None,
-        embeddings_to_compute_stats: Sequence[str] = ("prior_img_latent",),
+        embeddings_key_to_name: LatentTypeMapT | None = None,
+        load_embedding_stats: Sequence[str] = ("prior_img_latent",),
         limit_size: float | None = None,
         limit_shuffle: bool = True,
         preload_cache: bool | None = None,
         compute_stats: bool | None = None,
     ):
         tensor_cache = tensor_cache or TensorCache()
-        embeddings_map = embeddings_map or {
+        embeddings_key_to_name = embeddings_key_to_name or {
             "align_img_latent": None,
             "prior_img_latent": None,
             "low_level_latent": None,
@@ -86,7 +87,7 @@ class EEGDataset(Dataset, ABC):
         }
 
         logging.info(f"Setting up latents loader with embeddings map:")
-        for k, v in embeddings_map.items():
+        for k, v in embeddings_key_to_name.items():
             logging.info(f"  {k}: {v}")
 
         compute_stats = split == "train" if compute_stats is None else compute_stats
@@ -96,11 +97,11 @@ class EEGDataset(Dataset, ABC):
         self.config = config
         self.split: Literal["train", "val", "test"] = split
         self.tensor_cache = tensor_cache
-        self.embeddings_map = embeddings_map
-        self.embeddings_to_compute_stats = embeddings_to_compute_stats
+        self.embeddings_key_to_name = embeddings_key_to_name
+        self.load_embedding_stats = load_embedding_stats
         self.limit_size = limit_size
         self.compute_stats = compute_stats
-        self.embedding_stats: dict[LatentName, LatentStats] = {}
+        self.embedding_stats: dict[LatentName, StatsType] = {}
         self.eeg_stats = {}
 
         logging.info(f"Loading EEG")
@@ -120,7 +121,7 @@ class EEGDataset(Dataset, ABC):
             self._preload_cache()
 
         if compute_stats:
-            self.embedding_stats = self._compute_embedding_stats()
+            self.embedding_stats = self._load_embedding_stats("train" if self.split == "train" else "test")
 
     @abstractmethod
     def load_eeg_from_path(self, eeg_path: Path) -> torch.Tensor:
@@ -159,34 +160,19 @@ class EEGDataset(Dataset, ABC):
                 key: self._get_image_latent_from_cache(
                     img_path, cast(EncoderName, value), self.split
                 )
-                for key, value in self.embeddings_map.items()
+                for key, value in self.embeddings_key_to_name.items()
                 if value is not None
             },
         )
 
-    def _compute_embedding_stats(self) -> dict[LatentName, LatentStats]:
-        img_paths = self.get_image_paths()
+    def _load_embedding_stats(self, split: DSPLIT) -> dict[str, StatsType]:
+        mapped_stats = {}
 
-        embedding_types = [
-            str(v)
-            for k, v in self.embeddings_map.items()
-            if v in self.embeddings_to_compute_stats and v is not None
-        ]
-        embedding_stats = get_embeddings_stats(
-            tensorcache=self.tensor_cache,
-            img_paths=img_paths,
-            embedding_names=embedding_types,  # type: ignore
-            split="train",
-        )
+        for key, embedding_name in self.embeddings_key_to_name.items():
+            embedding_name = cast(str, embedding_name)
+            stats = load_stats(self.config.stats_path, self.config.dataset, split, embedding_name)
+            mapped_stats[key] = stats
 
-        # Convert from specific encoder name to general encoding role
-        # E.g. ATMS -> EEG_encoder
-        mapped_stats = {
-            k: embedding_stats[v]
-            for k, v in self.embeddings_map.items()
-            if v in embedding_stats
-        }
-        mapped_stats = cast(dict[LatentName, LatentStats], mapped_stats)
         return mapped_stats
 
     def _get_image_latent_from_cache(
@@ -211,13 +197,14 @@ class EEGDataset(Dataset, ABC):
             for i in tqdm.tqdm(range(len(self)), desc="Preloading latents"):
                 self.__getitem__(i)
 
-    def get_embedding_stats(self) -> dict[LatentName, LatentStats]:
+    def get_embedding_stats(self) -> dict[LatentName, StatsType]:
         return self.embedding_stats
 
 
 class EEGDatasetConfig(DataConfig, ABC):
     data_path: Path
     dataset: str
+    stats_path: Path = Path("statistics")
     subs: list[int] | None
     num_channels: int
     time_length: int

@@ -70,4 +70,5 @@ def create_eeg_encoder(
 
 
 EEGEncoderName = Literal["atms", "nice", "dummy"]
+EEGEncoderChoices = ["atms", "nice", "dummy"]
 EEGEncoderConfigType = Annotated[NiceEEGEncoderConfig | AtmsEEGEncoderConfig | DummyEEGEncoderConfig, Field(discriminator="eeg_encoder")]

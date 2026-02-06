@@ -21,6 +21,19 @@ ImageEncoderName = typing.Literal[
     "unaligned_synclr_vitb16",
     "dummy_768",
 ]
+ImageEncoderChoices = [
+    "clip_vitl14",
+    "clip_vith14",
+    "clip_vitb32",
+    "sd_variations_v2",
+    "ip_sdxl_turbo",
+    "ip_sdxl_turbo_256",
+    "ip_sdxl_turbo_128",
+    "synclr_vitb16",
+    "aligned_synclr_vitb16",
+    "unaligned_synclr_vitb16",
+    "dummy_768",
+]
 VAE_ENCODER = typing.Literal[
     "sd_variations_v2", "ip_sdxl_turbo", "ip_sdxl_turbo_256", "ip_sdxl_turbo_128"
 ]

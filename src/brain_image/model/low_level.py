@@ -157,8 +157,8 @@ class LowLevelModule(TrainingModule):
         self.data_module = EEGDataModule(
             dataset_config,
             tensorcache,
-            embeddings_map=emb_map,
-            embeddings_to_compute_stats=[],
+            embeddings_key_to_name=emb_map,
+            load_embedding_stats=[],
         )
 
         self.eeg_encoder = create_eeg_encoder(

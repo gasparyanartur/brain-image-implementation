@@ -1,0 +1,16 @@
+defaults:
+  - base
+  - dataset: things-eeg2
+  - _self_
+
+model_names:
+- aligned_synclr_vitb16
+- unaligned_synclr_vitb16
+
+splits:
+  - train
+  - test
+
+stat_path: statistics
+cache_dir: tensorcache
+batch_size: 512

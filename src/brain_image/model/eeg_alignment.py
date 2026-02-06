@@ -40,6 +40,7 @@ from brain_image.model.encoder.eeg_encoder.union import (
     EEGEncoderConfigType,
     create_eeg_encoder,
 )
+from brain_image.model.encoder.encoder import EncoderName
 from brain_image.model.encoder.img_encoder.union import (
     VAE_ENCODER,
 )
@@ -247,7 +248,17 @@ class EEGAlignmentModel(TrainingModule):
         if isinstance(config, dict):
             config = EEGAlignmentConfig.model_validate(config)
 
+        # Update interdependent config values
+        config.eeg_encoder.d_channels = dataset_config.num_channels
+        config.eeg_encoder.d_time = dataset_config.time_length
+        config.eeg_encoder.d_output = IMAGE_ENCODER_DIM[self.config.align_img_encoder]
+        if config.do_recon:
+            assert config.prior is not None
+            config.prior.d_cond = config.eeg_encoder.d_output
+            config.prior.d_input = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
+
         super().__init__(config, **kwargs)
+
         self.automatic_optimization = False  # Disable automatic optimization, we will handle it manually
 
         if self.config.aug_eeg:
@@ -281,18 +292,17 @@ class EEGAlignmentModel(TrainingModule):
         )
 
         tensor_cache = TensorCache(cache_dir)
-        embeddings_map: LatentTypeMapT = {
+        embeddings_map: dict[str, EncoderName | None] = {
             "align_img_latent": (self.config.align_img_encoder if self.config.do_align else None),
             "prior_img_latent": (self.config.prior_img_encoder if self.config.do_recon else None),
             "low_level_latent": (self.config.low_level_encoder if self.config.do_recon_low else None),
-            "eeg_latent": None,
         }
 
         self.data_module = EEGDataModule(
             dataset_config,
             tensor_cache=tensor_cache,
-            embeddings_map=embeddings_map,
-            embeddings_to_compute_stats=[self.config.prior_img_encoder],
+            embeddings_key_to_name=embeddings_map,
+            load_embedding_stats=[self.config.prior_img_encoder],
         )
 
         if init_weights:
@@ -306,21 +316,9 @@ class EEGAlignmentModel(TrainingModule):
         if self.config.do_recon:
             assert self.config.prior, "Prior config must be provided"
 
-            self.config.prior.d_cond = self.eeg_dim
-
-            self.config.prior.d_input = IMAGE_ENCODER_DIM[self.config.prior_img_encoder]
-
-            emb_stats = cast(
-                dict[ImageEncoderName, dict[str, Tensor]] | None,
-                {
-                    self.config.prior_img_encoder: self.data_module.embedding_stats["prior_img_latent"],
-                },
-            )
-
             self.prior = SimpleDiffusionPrior(
                 self.config.prior,
-                latent_name=self.config.prior_img_encoder,
-                embedding_stats=emb_stats,
+                embedding_stats=self.data_module.get_embedding_stats()["prior_img_latent"],
             ).to(dtype)
 
         elif self.config.do_recon_low:
@@ -328,18 +326,11 @@ class EEGAlignmentModel(TrainingModule):
 
         eeg_encoder_path = eeg_encoder_path or self.config.eeg_encoder_path
 
-        self.config.eeg_encoder.d_channels = dataset_config.num_channels
-        self.config.eeg_encoder.d_time = dataset_config.time_length
-        self.config.eeg_encoder.d_output = self.eeg_dim
 
         self.eeg_encoder = create_eeg_encoder(
             self.config.eeg_encoder,
             checkpoint_path=eeg_encoder_path,
         )
-
-        self.config.eeg_encoder = cast(
-            EEGEncoderConfigType, self.eeg_encoder.config
-        )  # Update config with the actual config used, otherwise model dump is wrong
 
         match self.config.align_loss_type:
             case "clip":
@@ -357,6 +348,11 @@ class EEGAlignmentModel(TrainingModule):
                 if submodule is not None:
                     logging.info(f"Compiling {module}")
                     submodule.compile()
+
+
+        # Update configs with actual module values (in case something has been modified), otherwise model_dump is wrong
+        self.config.eeg_encoder = self.eeg_encoder.config # type: ignore
+        self.config.prior = self.prior.config # type: ignore
 
         self.save_hyperparameters(
             {
@@ -394,9 +390,6 @@ class EEGAlignmentModel(TrainingModule):
 
         return "-".join(name_components)
 
-    @property
-    def eeg_dim(self) -> int:
-        return IMAGE_ENCODER_DIM[self.config.align_img_encoder]
 
     def configure_optimizers(self):
         logging.info("Configuring optimizers")

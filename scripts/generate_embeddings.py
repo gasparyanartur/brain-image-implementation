@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
 from brain_image.data.datamodule import EEGDataModule
 from brain_image.data.dataset.eeg_dataset import EEGDataset, EEGDatasetConfig
+from brain_image.data.dataset.union import EEGDatasetConfigType
 from brain_image.data.tensorcache import TensorCache
 from brain_image.model.encoder.img_encoder.img_encoder import BaseImageEncoder
 from brain_image.model.encoder.img_encoder.union import ImageEncoderName, load_image_encoder
@@ -18,7 +19,7 @@ from brain_image.data.io import batch_load_images
 
 
 class EmbeddingGenerationConfig(BaseConfig):
-    dataset: EEGDatasetConfig
+    dataset: EEGDatasetConfigType
     model_names: list[ImageEncoderName] = ["clip_vith14", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
     batch_size: int = 512
     splits: list[Literal["train", "test"]] = ["train", "test"]

@@ -2,7 +2,6 @@ from lightning.pytorch import LightningDataModule
 from torch.utils.data import Dataset
 from abc import ABC, abstractmethod
 from brain_image.configs import get_device_str
-from brain_image.data.data import LatentTypeMapT
 
 
 import torch
@@ -12,8 +11,10 @@ import logging
 import multiprocessing as mp
 from typing import Literal, cast
 
+from brain_image.data.data import DSPLIT
 from brain_image.data.dataset.eeg_dataset import DataConfig, EEGDataset, EEGDatasetConfig
 from brain_image.data.tensorcache import TensorCache
+from brain_image.model.encoder.encoder import EncoderName
 from brain_image.model.encoder.img_encoder.union import ImageEncoderName
 
 
@@ -28,14 +29,12 @@ class DataModule(LightningDataModule, ABC):
             "test": None,
         }
 
-        self.datasets: dict[str, Dataset | None] = {
-            split: None for split in ["train", "val", "test"]
-        }
+        self.datasets: dict[str, Dataset | None] = {split: None for split in ["train", "val", "test"]}
         self.dataloaders: dict[str, torch.utils.data.DataLoader | None] = {}
 
     @property
     @abstractmethod
-    def embedding_stats(self) -> dict:
+    def get_embedding_stats(self) -> dict:
         raise NotImplementedError
 
     @abstractmethod
@@ -98,42 +97,37 @@ class EEGDataModule(DataModule):
         self,
         config: EEGDatasetConfig,
         tensor_cache: TensorCache | None = None,
-        embeddings_map: LatentTypeMapT | None = None,
-        embeddings_to_compute_stats: list[ImageEncoderName] | None = None,
-        embeddings_map_override: dict[str, ImageEncoderName] | None = None
+        embeddings_key_to_name: dict[str, EncoderName | None] | None = None,
+        load_embedding_stats: list[ImageEncoderName] | None = None,
     ):
         super().__init__(config)
 
         tensor_cache = tensor_cache or TensorCache()
-        embeddings_map = embeddings_map or {
-            "align_img_latent": None,
-            "prior_img_latent": None,
-            "low_level_latent": None,
-            "eeg_latent": None,
-        }
-        if embeddings_map_override:
-            embeddings_map.update(embeddings_map_override) # type: ignore
+        embeddings_key_to_name = embeddings_key_to_name or {}
+        embeddings_key_to_name = {k: v for k, v in embeddings_key_to_name.items() if v is not None}
 
-        embeddings_to_compute_stats = embeddings_to_compute_stats or []
+        load_embedding_stats = load_embedding_stats or []
         self.config: EEGDatasetConfig = config
         self.tensor_cache = tensor_cache
-        self.embeddings_map = embeddings_map
-        self.embeddings_to_compute_stats = embeddings_to_compute_stats
+        self.embeddings_key_to_name = embeddings_key_to_name
+        self.load_embedding_stats = load_embedding_stats
 
-        logging.info(f"Got embedding stats for: {self.embedding_stats.keys()}")
+        logging.info(f"Got embedding stats for: {self.get_embedding_stats().keys()}")
 
-    @property
-    def embedding_stats(self) -> dict:
-        return self.get_dataset("train").get_embedding_stats()
+    def get_embedding_stats(self, split: DSPLIT = "train") -> dict:
+        return self.get_dataset(split).get_embedding_stats()
 
     def get_metadata(self) -> dict:
         return {}
 
-    def create_dataset(
-        self, split: Literal["train", "val", "test"], *args, **kwargs
-    ) -> EEGDataset:
+    def create_dataset(self, split: Literal["train", "val", "test"], *args, **kwargs) -> EEGDataset:
         self.config
-        return self.config.create_dataset(split, tensor_cache=self.tensor_cache, embeddings_map=self.embeddings_map, embeddings_to_compute_stats=self.embeddings_to_compute_stats)
+        return self.config.create_dataset(
+            split,
+            tensor_cache=self.tensor_cache,
+            embeddings_key_to_name=self.embeddings_key_to_name,
+            load_embedding_stats=self.load_embedding_stats,
+        )
 
     def create_dataloader(
         self,

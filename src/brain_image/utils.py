@@ -27,7 +27,6 @@ from torch import nn
 import re
 
 
-
 import matplotlib.pyplot as plt
 
 
@@ -74,7 +73,6 @@ def gather_dataloader(
         all_samples[k] = torch.stack(all_samples[k])
 
     return all_samples
-    
 
 
 def current_fig_to_img():
@@ -142,9 +140,7 @@ else:
     DTYPE = torch.float32
 
 
-def update_config_with_nested_key(
-    key: str, value: Any, config: dict[str, Any]
-) -> dict[str, Any]:
+def update_config_with_nested_key(key: str, value: Any, config: dict[str, Any]) -> dict[str, Any]:
     """Update a config with a nested key, creating intermediate dicts as needed."""
     config = {**config}
     if "." in key:
@@ -261,9 +257,7 @@ def setup():
     logging.info(f"Using directory: {os.getcwd()}")
 
 
-def flatten_configs(
-    configs: Mapping[str, Any] | BaseModel, prefix=""
-) -> dict[str, Any]:
+def flatten_configs(configs: Mapping[str, Any] | BaseModel, prefix="") -> dict[str, Any]:
     flat_configs = {}
 
     if isinstance(configs, BaseModel):
@@ -293,14 +287,10 @@ def init_wandb():
             with open(config_path, "r") as f:
                 config = yaml.load(f, Loader=yaml.FullLoader)
                 if "api_key" in config:
-                    logging.info(
-                        "WANDB_API_KEY found in config, attempting to login to wandb..."
-                    )
+                    logging.info("WANDB_API_KEY found in config, attempting to login to wandb...")
                     api_key = config["api_key"]
         else:
-            logging.warning(
-                "WANDB_API_KEY not found in environment and config not found."
-            )
+            logging.warning("WANDB_API_KEY not found in environment and config not found.")
 
         wandb.login(key=api_key)
         logging.info("Successfully logged in to wandb")
@@ -311,9 +301,7 @@ def init_wandb():
 
 
 def get_mean_gradients(model: torch.nn.Module) -> torch.Tensor | None:
-    grads = [
-        p.grad.norm(dim=-1).mean() for p in model.parameters() if p.grad is not None
-    ]
+    grads = [p.grad.norm(dim=-1).mean() for p in model.parameters() if p.grad is not None]
     if len(grads) == 0:
         return None
     return torch.stack(grads).mean()
@@ -332,9 +320,11 @@ def get_subgroup_name(full_name: str, module_pattern: re.Pattern, only_subgroup:
     match = module_pattern.match(full_name)
     if match is None:
         return None
-    
+
     if len(match.groups()) > 1:
-        raise NotImplementedError(f"Got multiple matches for the pattern {str(module_pattern)} in name {full_name}. Currently only one match is supported.")
+        raise NotImplementedError(
+            f"Got multiple matches for the pattern {str(module_pattern)} in name {full_name}. Currently only one match is supported."
+        )
 
     span = match.span(0)
 
@@ -351,7 +341,11 @@ def get_submodules_with_pattern(state_dict: dict, pattern: re.Pattern | str, onl
     if isinstance(pattern, str):
         pattern = re.compile(pattern)
 
-    return {(k if get_full_name else name): v for k, v in state_dict.items() if (name := get_subgroup_name(k, pattern, only_subgroup=only_subgroup)) is not None}
+    return {
+        (k if get_full_name else name): v
+        for k, v in state_dict.items()
+        if (name := get_subgroup_name(k, pattern, only_subgroup=only_subgroup)) is not None
+    }
 
 
 def key_in_dict(key: str, d: Mapping[str, Any]) -> bool:
@@ -385,15 +379,13 @@ def create_model_id(seed: int | None = None) -> str:
     return timestamp + unique_word
 
 
-@torch.compile()
+@torch.compile(disable=True)
 def z_scale(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
     return (x - mean.to(x.device)) / std.to(x.device)
 
 
-@torch.compile()
-def reverse_z_scale(
-    x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor
-) -> torch.Tensor:
+@torch.compile(disable=True)
+def reverse_z_scale(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
     return x * std.to(x.device) + mean.to(x.device)
 
 
@@ -408,9 +400,7 @@ def reverse_l2_scale(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.compile()
-def tensor_split(
-    x: torch.Tensor, dim: int, idxs: tuple[int, ...]
-) -> list[torch.Tensor]:
+def tensor_split(x: torch.Tensor, dim: int, idxs: tuple[int, ...]) -> list[torch.Tensor]:
     all_tensors = []
 
     curr_idx = 0
@@ -420,9 +410,7 @@ def tensor_split(
         curr_idx += part.size(dim)
 
     if x.size(dim) != curr_idx:
-        raise ValueError(
-            f"Tried to split tensor of size {x.size(dim)} into {len(idxs)} parts - Received output with size {curr_idx}"
-        )
+        raise ValueError(f"Tried to split tensor of size {x.size(dim)} into {len(idxs)} parts - Received output with size {curr_idx}")
 
     return all_tensors
 
@@ -448,9 +436,7 @@ def find_duplicates(x: torch.Tensor) -> torch.Tensor:
     return dups
 
 
-def batchify_operation(
-    f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor, batch_size: int
-) -> torch.Tensor:
+def batchify_operation(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor, batch_size: int) -> torch.Tensor:
     n = len(x)
     res = []
     for i in range(0, n, batch_size):
@@ -458,9 +444,7 @@ def batchify_operation(
     return torch.cat(res, dim=0)
 
 
-def gather_records(
-    records: list[dict], tensor_gather: Literal["stack", "cat"] = "stack"
-) -> dict[str, torch.Tensor]:
+def gather_records(records: list[dict], tensor_gather: Literal["stack", "cat"] = "stack") -> dict[str, torch.Tensor]:
     if not records:
         return {}
 
@@ -536,10 +520,7 @@ def plot_projected_latents(
     assert len(latents) == len(labels)
     logging.info(f"Projecting {len(latents)} latents to 2D space")
 
-    clean_latents = np.concatenate(
-        [z_norm(latent.flatten(1), dim=0).detach().cpu().numpy() for latent in latents],
-        axis=0
-    )
+    clean_latents = np.concatenate([z_norm(latent.flatten(1), dim=0).detach().cpu().numpy() for latent in latents], axis=0)
 
     t1 = time.time()
     clean_latents = pca.fit_transform(clean_latents)
@@ -549,10 +530,10 @@ def plot_projected_latents(
 
     lengths = [latent.size(0) for latent in latents]
     offset = 0
-    for (label, length) in zip(labels, lengths):
+    for label, length in zip(labels, lengths):
         plt.scatter(
-            projected_latents[offset:offset + length, 0],
-            projected_latents[offset:offset + length, 1],
+            projected_latents[offset : offset + length, 0],
+            projected_latents[offset : offset + length, 1],
             label=label,
         )
         offset += length

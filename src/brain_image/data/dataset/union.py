@@ -19,6 +19,7 @@ from brain_image.data.dataset.dummy_eeg_dataset import DummyEEGDatasetConfig, Du
 
 
 EEGDatasetName = Literal["alljoined-eeg2", "things-eeg2", "dummy"]
+EEGDatasetChoices = ["alljoined-eeg2", "things-eeg2", "dummy"]
 EEGDatasetConfigType = (
     Annotated[AlljoinedEEG2DatasetConfig | ThingsEEG2DatasetConfig | DummyEEGDatasetConfig, Field(discriminator="dataset")]
 )

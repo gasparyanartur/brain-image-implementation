@@ -7,16 +7,41 @@ from typing import Any, Literal, Mapping, Type, TypeVar, TypedDict, Union, cast
 import numpy as np
 import torch
 from torch import Tensor
-
+from torch import nn
+from torchvision.transforms import v2 as tv2
 
 from brain_image.data.tensorcache import TensorCache
 from brain_image.model.encoder.eeg_encoder.union import EEGEncoderName
 from brain_image.model.encoder.img_encoder.union import ImageEncoderName
+from brain_image.stats import StatsType
 
 T = TypeVar('T')
 
 SPLIT = Literal["train", "val", "test"]
 DSPLIT = Literal["train", "test"]
+
+DEFAULT_IMAGE_PIPE = tv2.Compose([
+    tv2.ToImage(),
+    tv2.ToDtype(torch.float32, scale=True),
+])
+def resize_crop_image(image: Tensor, size: int = 224) -> Tensor:
+    h, w = image.shape[-2:]
+
+    if w > h:
+        h = size
+        w = int(size * w / h)
+    else:
+        w = size
+        h = int(size * h / w)
+
+    img = tv2.functional.resize(image, size=[h, w], antialias=True, interpolation=tv2.InterpolationMode.BICUBIC)
+    img = tv2.functional.center_crop(img, [size, size])
+    return img
+
+def preprocess_image(image: Tensor, pipe: nn.Module = DEFAULT_IMAGE_PIPE, size: int = 224) -> Tensor:
+    image = pipe(image)
+    image = resize_crop_image(image, size=size)
+    return image
 
 class LatentTypeMapT(TypedDict):
     """Maps the role of the latent to the specific encoder used."""
@@ -81,18 +106,21 @@ def preprocess_eeg_data(
     return preprocessed_data, idxs
 
 
-class LatentStats(TypedDict):
-    mean: Tensor
-    std: Tensor
-
+@torch.no_grad()
+def load_stats(
+    stat_dir: Path, dataset_name, split, stat_name: str
+) -> StatsType:
+    stat_path = stat_dir / "datasets" / dataset_name / split / f"{stat_name}.pt"
+    stats = torch.load(stat_path)
+    return stats
 
 @torch.no_grad()
-def get_embeddings_stats(
+def old_get_embeddings_stats(
     tensorcache: TensorCache,
     img_paths: list[Path],
     embedding_names: list[ImageEncoderName],
     split: Literal["train", "test"],
-) -> dict[ImageEncoderName, LatentStats]:
+) -> dict[ImageEncoderName, StatsType]:
     """Compute a mapping from encoder name to stats.
     E.g. stable_diffusion_v2 -> {mean: 0, std: 1}..."""
 
@@ -107,7 +135,7 @@ def get_embeddings_stats(
 
     logging.info(f"Keys gathered: {_running_embeddings.keys()}")
 
-    embedding_stats: dict[ImageEncoderName, LatentStats] = {
+    embedding_stats: dict[ImageEncoderName, StatsType] = {
         k: {
             "mean": torch.mean(v, dim=0),
             "std": torch.std(v, dim=0),
