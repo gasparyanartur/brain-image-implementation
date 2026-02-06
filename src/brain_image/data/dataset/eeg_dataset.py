@@ -79,12 +79,7 @@ class EEGDataset(Dataset, ABC):
         compute_stats: bool | None = None,
     ):
         tensor_cache = tensor_cache or TensorCache()
-        embeddings_key_to_name = embeddings_key_to_name or {
-            "align_img_latent": None,
-            "prior_img_latent": None,
-            "low_level_latent": None,
-            "eeg_latent": None,
-        }
+        embeddings_key_to_name = embeddings_key_to_name or {}
 
         logging.info(f"Setting up latents loader with embeddings map:")
         for k, v in embeddings_key_to_name.items():

@@ -545,7 +545,7 @@ class DiffusionPriorConfig:
     act_func: Literal["silu", "elu", "gelu", "relu"] = "silu"
     dropout: float = 0.1
 
-    cond_drop_prob: float = 0.1
+    cond_drop_prob: float = 0.2
     norm_scheme: Literal["z_scale", "l2_scale", "none"] = "none"
     layer_norm_out: bool = False
 
@@ -579,6 +579,7 @@ class BaseDiffusionPrior(ABC, nn.Module):
         condition: torch.Tensor | None = None,
         noise: torch.Tensor | None = None,
         timesteps: torch.Tensor | None = None,
+        cond_drop_prob: float | None = None,  # override config.cond_drop_p
         **kwargs,
     ) -> torch.Tensor:
         raise NotImplementedError
@@ -771,8 +772,8 @@ class SimpleDiffusionPrior(BaseDiffusionPrior):
         x = self.input_proj(x)
         batch_size = x.size(0)
 
-        cond_keep_mask = torch.rand(batch_size) >= cond_drop_prob
-        cond_keep_mask = cond_keep_mask.unsqueeze(1).to(x.device)
+        cond_keep_mask = torch.rand(batch_size, device=x.device) >= cond_drop_prob
+        cond_keep_mask = cond_keep_mask.unsqueeze(1)
 
         if timestep.dim() == 0:
             time_is_scalar = True
@@ -811,12 +812,11 @@ class SimpleDiffusionPrior(BaseDiffusionPrior):
 
         return x
 
-    @torch.compile()
     def sample(
         self,
         target: torch.Tensor,
         condition: torch.Tensor | None = None,
-        disable_cond_drop: bool = False,
+        cond_drop_prob: float | None = None,
         noise: torch.Tensor | None = None,  # <B, D>
         timesteps: torch.Tensor | None = None,  # <B>
         *args,
@@ -824,6 +824,9 @@ class SimpleDiffusionPrior(BaseDiffusionPrior):
     ) -> torch.Tensor:
         device = target.device
         batch_size = target.size(0)
+        
+        if cond_drop_prob is None:
+            cond_drop_prob = self.config.cond_drop_prob
 
         noise = torch.randn_like(target) if noise is None else noise
 
@@ -835,6 +838,8 @@ class SimpleDiffusionPrior(BaseDiffusionPrior):
             else timesteps
         )
 
+        self.scheduler.set_timesteps(self.config.num_training_timesteps, device=device)
+
         noisy_latent = self.scheduler.add_noise(
             target, noise, timesteps=cast(torch.IntTensor, timesteps)
         )
@@ -842,7 +847,7 @@ class SimpleDiffusionPrior(BaseDiffusionPrior):
             noisy_latent,
             timesteps,
             condition,
-            cond_drop_prob=self.config.cond_drop_prob if not disable_cond_drop else 0,
+            cond_drop_prob=cond_drop_prob,
             *args,
             **kwargs,
         )
@@ -908,8 +913,8 @@ class SimpleDiffusionPrior(BaseDiffusionPrior):
                 noise_pred = self.forward(latent, t)
 
             else:  # Classifier Free Guidance
-                noise_pred_cond = self.forward(latent, t, conditioning)
-                noise_pred_uncond = self.forward(latent, t)
+                noise_pred_cond = self.forward(latent, t, conditioning, cond_drop_prob=0)
+                noise_pred_uncond = self.forward(latent, t, None, cond_drop_prob=1)
                 noise_pred = (
                     noise_pred_uncond
                     + (noise_pred_cond - noise_pred_uncond) * guidance_scale

@@ -28,8 +28,8 @@ class TrainerConfig(BaseConfig):
     run_name: str
 
     compile_model: bool = True
-    init_weights: bool = True
     debug_mode: bool = False
+    detect_anomaly: bool = False
 
     log_dir: Path = Path("logs/train")
     enable_barebones: bool = False
@@ -221,10 +221,12 @@ class Trainer:
         ckpt_path_str = str(ckpt_path) if ckpt_path else None
 
         self.model.train()
-        self.pl_trainer.fit(
-            model=self.model,
-            ckpt_path=ckpt_path_str,
-        )
+
+        with torch.autograd.set_detect_anomaly(self.config.detect_anomaly):
+            self.pl_trainer.fit(
+                model=self.model,
+                ckpt_path=ckpt_path_str,
+            )
 
         logging.info("Training completed!")
 

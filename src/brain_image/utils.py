@@ -388,12 +388,12 @@ def reverse_z_scale(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> t
 
 @torch.compile()
 def l2_scale(x: torch.Tensor) -> torch.Tensor:
-    return F.normalize(x) / (x.size(-1) ** 0.5)
+    return F.normalize(x, dim=-1) / (x.size(-1) ** 0.5)
 
 
 @torch.compile()
 def reverse_l2_scale(x: torch.Tensor) -> torch.Tensor:
-    return F.normalize(x)
+    return F.normalize(x, dim=-1)
 
 
 @torch.compile()

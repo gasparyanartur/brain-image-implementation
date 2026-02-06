@@ -238,7 +238,10 @@ class AugmentationPipeline(nn.Module):
 
         for augment in self.augment_modules:
             x = augment(x)
+            
         x = self.postprocess(x)
+
+        x = x.clone().contiguous()
         return x
 
     def preprocess(self, x: Tensor) -> Tensor:

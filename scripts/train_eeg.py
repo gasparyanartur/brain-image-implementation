@@ -47,7 +47,6 @@ def main(cfg: DictConfig):
         config=config.model,
         dataset_config=config.dataset,
         compile=config.trainer.compile_model,
-        init_weights=config.trainer.init_weights,
         dtype=get_dtype(config.trainer.dtype),
         cache_dir=config.trainer.cache_dir,
     )
