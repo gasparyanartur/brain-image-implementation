@@ -759,7 +759,7 @@ class EEGAlignmentModel(TrainingModule):
         eeg_latent_normed = get_from_batch("eeg_latent_normed", all_data, Tensor).to(device)
         align_img_latent = get_from_batch("align_img_latent", all_data, Tensor).to(device)
         indexes = get_from_batch("idx", all_data, Tensor).to(device)
-        img_paths = get_from_batch("img_path", all_data, list[str])
+        img_paths = get_from_batch("img_path", all_data, list)
 
         top1_acc, chosen_idx = get_retrieval_accuracy_with_idx(eeg_latent_normed, align_img_latent, norm=True)
 
@@ -835,7 +835,7 @@ class EEGAlignmentModel(TrainingModule):
 
         device = self.device
 
-        img_path = get_from_batch("img_path", all_data, list[str])
+        img_path = get_from_batch("img_path", all_data, list)
         eeg = get_from_batch("eeg_data", all_data, Tensor).to(device)
         sub = get_from_batch("sub", all_data, Tensor).to(device)
         idxs = get_from_batch("idx", all_data, Tensor)
