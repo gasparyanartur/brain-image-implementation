@@ -14,6 +14,7 @@ from torchvision.transforms import v2 as tv2
 import itertools as it
 from contextlib import nullcontext
 from pathlib import Path
+from brain_image.augment import EEGAugmentationPipeline
 from brain_image.configs import get_device
 from brain_image.data.datamodule import EEGDataModule
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
@@ -145,6 +146,24 @@ class EEGAlignmentConfig(TrainingModuleConfig):
     debug_metrics: bool = False
     eeg_encoder_path: Path | None = None
 
+    eeg_aug_ampscale_prob: float = 0.75
+    eeg_aug_timeshift_prob: float = 0.75
+    eeg_aug_ampshift_prob: float = 0.75
+    eeg_aug_bandstop_prob: float = 0
+    eeg_aug_zeromask_prob: float = 0.5
+    eeg_aug_blur_prob: float = 0.75
+    eeg_aug_blur_std: float = 0.4
+    eeg_aug_ampscale_min: float = 0.2
+    eeg_aug_ampscale_max: float = 2.0
+    eeg_aug_timeshift_max_scale: float = 0.2
+    eeg_aug_ampshift_max_scale: float = 3
+    eeg_aug_zeromask_max_scale: float = 0.25
+    eeg_aug_bandstop_sample_rate: int = 200
+    eeg_aug_bandstop_min_freq: float = 2.8
+    eeg_aug_bandstop_max_freq: float = 82.5
+    eeg_aug_bandstop_width: float = 5
+    aug_eeg: bool = False
+
     highlighted_val_recons: list[int] = [0, 1, 2]
     highlighted_test_recons: list[int] = [
         161,  # Seaweed
@@ -227,6 +246,28 @@ class EEGAlignmentModel(TrainingModule):
         self.automatic_optimization = (
             False  # Disable automatic optimization, we will handle it manually
         )
+
+        if self.config.aug_eeg:
+            self.eeg_augmenter = EEGAugmentationPipeline(
+                ampscale_prob=config.eeg_aug_ampshift_prob,
+                timeshift_prob=config.eeg_aug_timeshift_prob,
+                ampshift_prob=config.eeg_aug_ampshift_prob,
+                bandstop_prob=config.eeg_aug_bandstop_prob,
+                zeromask_prob=config.eeg_aug_zeromask_prob,
+                blur_prob=config.eeg_aug_blur_prob,
+                blur_std=config.eeg_aug_blur_std,
+                ampscale_min=config.eeg_aug_ampscale_min,
+                ampscale_max=config.eeg_aug_ampscale_max,
+                timeshift_max_scale=config.eeg_aug_timeshift_max_scale,
+                ampshift_max_scale=config.eeg_aug_ampshift_max_scale,
+                zeromask_max_scale=config.eeg_aug_zeromask_max_scale,
+                bandstop_sample_rate=config.eeg_aug_bandstop_sample_rate,
+                bandstop_min_freq=config.eeg_aug_bandstop_min_freq,
+                bandstop_max_freq=config.eeg_aug_bandstop_max_freq,
+                bandstop_width=config.eeg_aug_bandstop_width,
+            )
+        else:
+            self.eeg_augmenter = nn.Identity()
 
         self.model_id = model_id
         logging.info(f"Seeding everything with seed: {self.config.seed}")
@@ -605,6 +646,9 @@ class EEGAlignmentModel(TrainingModule):
 
         assert (eeg := batch.get("eeg_data")) is not None, "EEG data is not in batch"
         assert (sub := batch.get("sub")) is not None, "Subject is not in batch"
+
+        if stage == "train":
+            eeg = self.eeg_augmenter(eeg)
 
         eeg_latent = encode_eeg_latent(self.eeg_encoder, eeg, sub)
 

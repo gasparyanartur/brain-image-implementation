@@ -92,7 +92,6 @@ class EEGTimeShift(nn.Module):
             device=dvc,
         )
 
-        x = x.clone()
         for i in range(B):
             s = shifts[i].item()
 
@@ -140,17 +139,22 @@ class EEGZeroMasking(nn.Module):
         # x: (B, C, T)
         assert x.ndim == 3
         B, C, T = x.shape
+        device = x.device
 
-        x = x.clone()
+        max_len = max(1, int(self.max_mask_len * T))
+        max_start = max(1, T - max_len + 1)
 
-        for i in range(B):
-            for j in range(C):
-                mask_len = int(torch.rand(1) * self.max_mask_len * T)
-                start = int(torch.rand(1) * (T - mask_len))
-                x[i, j, start : start + mask_len] = 0
+        mask_sizes = torch.randint(1, max_len + 1, (B, C), device=device)
+        mask_starts = torch.randint(0, max_start, (B, C), device=device)
+        mask_ends = mask_starts + mask_sizes  # <= T guaranteed by max_start construction
+
+        t = torch.arange(T, device=device).view(1, 1, T)  # (1,1,T)
+        mask = (t >= mask_starts.unsqueeze(-1)) & (t < mask_ends.unsqueeze(-1))  # (B,C,T)
+
+        # In-place zeroing
+        x.masked_fill_(mask, 0)
 
         return x
-
 
 class EEGGaussianNoise(nn.Module):
     def __init__(self, std: float = 0.1):

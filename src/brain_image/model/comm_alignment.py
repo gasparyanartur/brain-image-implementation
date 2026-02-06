@@ -108,7 +108,7 @@ class CommAlignmentConfig(TrainingModuleConfig):
     eeg_aug_ampscale_prob: float = 0.75
     eeg_aug_timeshift_prob: float = 0.75
     eeg_aug_ampshift_prob: float = 0.75
-    eeg_aug_bandstop_prob: float = 0.75
+    eeg_aug_bandstop_prob: float = 0
     eeg_aug_zeromask_prob: float = 0.5
     eeg_aug_blur_prob: float = 0.75
     eeg_aug_blur_std: float = 0.4

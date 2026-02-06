@@ -16,11 +16,12 @@ model:
   modules_to_train:
     - eeg_encoder
 
-  max_epochs: 100
-  full_eval_every_epochs: 10
+  max_epochs: 200
+  full_eval_every_epochs: 20
+  aug_eeg: true
 
 trainer:
-  checkpoint_monitor_early_stop: 10
+  checkpoint_monitor_early_stop: 20
   check_val_every_n_epochs: 5
 
 dataset:
