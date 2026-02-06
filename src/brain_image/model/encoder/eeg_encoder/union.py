@@ -1,6 +1,6 @@
 from pydantic import Field
 from brain_image.model.encoder.eeg_encoder.eeg_encoder import EEGEncoder, EEGEncoderConfig
-from brain_image.utils import find_module_content_in_state_dict, flatten_configs
+from brain_image.utils import flatten_configs, get_submodules_with_pattern
 
 from brain_image.model.encoder.eeg_encoder.nice import NiceEEGEncoder, NiceEEGEncoderConfig
 from brain_image.model.encoder.eeg_encoder.atms import AtmsEEGEncoder, AtmsEEGEncoderConfig
@@ -61,9 +61,7 @@ def create_eeg_encoder(
     logging.info(f"Loading EEG checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path)
 
-    eeg_encoder_state_dict = find_module_content_in_state_dict(
-        "state_dict", checkpoint, module_name="eeg_encoder"
-    )
+    eeg_encoder_state_dict = get_submodules_with_pattern(checkpoint["state_dict"], "eeg_encoder")
     if not eeg_encoder_state_dict:
         raise ValueError("Could not find EEG encoder in checkpoint")
 

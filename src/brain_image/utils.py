@@ -24,6 +24,9 @@ import yaml
 from torch.nn import functional as F
 from torch import nn
 
+import re
+
+
 
 import matplotlib.pyplot as plt
 
@@ -325,25 +328,30 @@ def state_dict_equal(state_dict1, state_dict2):
     return True
 
 
-def find_module_content_in_state_dict(
-    key: str, state_dict: dict[str, Any], module_name: str
-):
-    if f"{module_name}." in key:
-        return state_dict
+def get_subgroup_name(full_name: str, module_pattern: re.Pattern, only_subgroup: bool = False) -> str | None:
+    match = module_pattern.match(full_name)
+    if match is None:
+        return None
+    
+    if len(match.groups()) > 1:
+        raise NotImplementedError(f"Got multiple matches for the pattern {str(module_pattern)} in name {full_name}. Currently only one match is supported.")
 
-    pure_dict = {}
-    for key, value in state_dict.items():
-        if isinstance(value, dict):
-            result = find_module_content_in_state_dict(
-                key, value, module_name=module_name
-            )
-            if result is not None:
-                pure_dict.update(result)
+    span = match.span(0)
 
-        elif f"{module_name}." in key:
-            pure_dict[key.replace(f"{module_name}.", "")] = value
+    if only_subgroup:
+        start_idx = span[1] + 1
 
-    return pure_dict
+    else:
+        start_idx = span[0]
+
+    return full_name[start_idx:]
+
+
+def get_submodules_with_pattern(state_dict: dict, pattern: re.Pattern | str, only_subgroup: bool = True, get_full_name: bool = False) -> dict:
+    if isinstance(pattern, str):
+        pattern = re.compile(pattern)
+
+    return {(k if get_full_name else name): v for k, v in state_dict.items() if (name := get_subgroup_name(k, pattern, only_subgroup=only_subgroup)) is not None}
 
 
 def key_in_dict(key: str, d: Mapping[str, Any]) -> bool:
