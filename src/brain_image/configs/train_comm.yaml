@@ -26,6 +26,11 @@ model:
 
   use_img_encoder: false
 
+  modules_to_train:
+  - comm
+  # - eeg_encoder
+
+
 dataset:
   batch_size: 128
   val_batch_size: 256
