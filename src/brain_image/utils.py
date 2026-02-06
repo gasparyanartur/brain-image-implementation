@@ -7,15 +7,12 @@ import logging
 from pathlib import Path
 import sys
 from collections.abc import Mapping
-import time
 from typing import Any, Literal, cast
 import uuid
 import dotenv
 from huggingface_hub import login
 import numpy as np
 from pydantic import BaseModel
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
 import torch
 import os
 import PIL.Image
@@ -379,12 +376,12 @@ def create_model_id(seed: int | None = None) -> str:
     return timestamp + unique_word
 
 
-@torch.compile(disable=True)
+@torch.compile()
 def z_scale(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
     return (x - mean.to(x.device)) / std.to(x.device)
 
 
-@torch.compile(disable=True)
+@torch.compile()
 def reverse_z_scale(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
     return x * std.to(x.device) + mean.to(x.device)
 
@@ -504,43 +501,3 @@ def z_norm(x: torch.Tensor, dim: int = -1, eps: float = 1e-8) -> torch.Tensor:
     return (x - x.mean(dim=dim, keepdim=True)) / (x.std(dim=dim, keepdim=True) + eps)
 
 
-@torch.no_grad()
-def plot_projected_latents(
-    latents: Sequence[torch.Tensor] | torch.Tensor,
-    labels: Sequence[str],
-    title: str | None = None,
-    pca_dims: int = 50,
-):
-    pca = PCA(n_components=pca_dims)
-    tsne = TSNE(n_components=2)
-
-    if isinstance(latents, torch.Tensor):
-        latents = [latents]
-
-    assert len(latents) == len(labels)
-    logging.info(f"Projecting {len(latents)} latents to 2D space")
-
-    clean_latents = np.concatenate([z_norm(latent.flatten(1), dim=0).detach().cpu().numpy() for latent in latents], axis=0)
-
-    t1 = time.time()
-    clean_latents = pca.fit_transform(clean_latents)
-    projected_latents = tsne.fit_transform(clean_latents)
-    t2 = time.time()
-    logging.info(f"Finished projecting latents in {t2 - t1:.3f} seconds")
-
-    lengths = [latent.size(0) for latent in latents]
-    offset = 0
-    for label, length in zip(labels, lengths):
-        plt.scatter(
-            projected_latents[offset : offset + length, 0],
-            projected_latents[offset : offset + length, 1],
-            label=label,
-        )
-        offset += length
-
-    plt.legend()
-    if title is not None:
-        plt.title(title)
-
-    plot_image = current_fig_to_img()
-    return plot_image

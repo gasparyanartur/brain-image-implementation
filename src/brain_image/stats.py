@@ -1,5 +1,12 @@
+import logging
 from pathlib import Path
+import time
 from typing import TypedDict
+
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 from brain_image.configs import get_device
 
 
@@ -8,6 +15,8 @@ from torch import Tensor
 
 
 from collections.abc import Sequence
+
+from brain_image.utils import current_fig_to_img, z_norm
 
 
 class IterativeStats:
@@ -81,3 +90,45 @@ class IterativeStats:
 class StatsType(TypedDict):
     mean: Tensor
     std: Tensor
+
+
+@torch.no_grad()
+def plot_projected_latents(
+    latents: Sequence[torch.Tensor] | torch.Tensor,
+    labels: Sequence[str],
+    title: str | None = None,
+    pca_dims: int = 50,
+):
+    pca = PCA(n_components=pca_dims)
+    tsne = TSNE(n_components=2)
+
+    if isinstance(latents, torch.Tensor):
+        latents = [latents]
+
+    assert len(latents) == len(labels)
+    logging.info(f"Projecting {len(latents)} latents to 2D space")
+
+    clean_latents = np.concatenate([z_norm(latent.flatten(1), dim=0).detach().cpu().numpy() for latent in latents], axis=0)
+
+    t1 = time.time()
+    clean_latents = pca.fit_transform(clean_latents)
+    projected_latents = tsne.fit_transform(clean_latents)
+    t2 = time.time()
+    logging.info(f"Finished projecting latents in {t2 - t1:.3f} seconds")
+
+    lengths = [latent.size(0) for latent in latents]
+    offset = 0
+    for label, length in zip(labels, lengths):
+        plt.scatter(
+            projected_latents[offset : offset + length, 0],
+            projected_latents[offset : offset + length, 1],
+            label=label,
+        )
+        offset += length
+
+    plt.legend()
+    if title is not None:
+        plt.title(title)
+
+    plot_image = current_fig_to_img()
+    return plot_image

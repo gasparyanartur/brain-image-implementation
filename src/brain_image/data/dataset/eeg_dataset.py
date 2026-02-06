@@ -101,7 +101,7 @@ class EEGDataset(Dataset, ABC):
         self.load_embedding_stats = load_embedding_stats
         self.limit_size = limit_size
         self.compute_stats = compute_stats
-        self.embedding_stats: dict[LatentName, StatsType] = {}
+        self.embedding_stats: dict[str, StatsType] = {}
         self.eeg_stats = {}
 
         logging.info(f"Loading EEG")
@@ -197,7 +197,7 @@ class EEGDataset(Dataset, ABC):
             for i in tqdm.tqdm(range(len(self)), desc="Preloading latents"):
                 self.__getitem__(i)
 
-    def get_embedding_stats(self) -> dict[LatentName, StatsType]:
+    def get_embedding_stats(self) -> dict[str, StatsType]:
         return self.embedding_stats
 
 

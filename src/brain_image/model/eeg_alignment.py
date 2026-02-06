@@ -69,6 +69,7 @@ from brain_image.reconstruction import (
     get_batched_reconstructions_from_eeg,
     get_reconstructions,
 )
+from brain_image.stats import plot_projected_latents
 from brain_image.utils import (
     DTYPE,
     VCLR,
@@ -79,7 +80,6 @@ from brain_image.utils import (
     get_device_from_module,
     get_dtype,
     get_mean_gradients,
-    plot_projected_latents,
     reverse_l2_scale,
     reverse_z_scale,
 )
