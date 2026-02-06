@@ -391,6 +391,7 @@ class MMFusion(nn.Module):
         x: List[torch.Tensor],
         mask_modalities: Optional[Union[List[bool], List[List[bool]]]] = None,
         mod_idx: Optional[List[int]] = None,
+        skip_encoder: bool = False,
     ):
         """
         :param x: List of tensors
@@ -465,7 +466,7 @@ class MMFusion(nn.Module):
         # 1. Encode input modalities
         z = []
         for enc, xi in zip(encoders, x):
-            embedding = enc(xi)
+            embedding = enc(xi) if not skip_encoder else xi
             attn_mask_ = None
             if isinstance(embedding, dict):  # attention mask must be considered
                 attn_mask_ = embedding["attention_mask"]

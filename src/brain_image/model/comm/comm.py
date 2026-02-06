@@ -126,7 +126,7 @@ class CoMM(BaseModel):
             self.device
         )
 
-    def encode_feature(self, x: torch.Tensor | List[torch.Tensor], mod_idx: int | List[int], head: bool = True) -> torch.Tensor:
+    def encode_feature(self, x: torch.Tensor | List[torch.Tensor], mod_idx: int | List[int], head: bool = True, skip_encoder: bool = False) -> torch.Tensor:
         # X is a list of each modality
         if isinstance(x, torch.Tensor):
             x = [x]
@@ -136,7 +136,7 @@ class CoMM(BaseModel):
 
         assert len(x) == len(mod_idx)
 
-        z = self.encoder(x, mod_idx=mod_idx)
+        z = self.encoder(x, mod_idx=mod_idx, skip_encoder=skip_encoder)
         if head:
             z = self.head(z)
         return z

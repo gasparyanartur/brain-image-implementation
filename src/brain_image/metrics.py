@@ -362,7 +362,7 @@ def _correlation_distance(
 
 
 
-@torch.compile()
+@torch.compile(disable=True)
 @torch.no_grad()
 def get_top1_acc(logits: torch.Tensor, axis=1) -> torch.Tensor:
     indexes = torch.arange(len(logits), device=logits.device)
@@ -378,7 +378,7 @@ def get_top1_acc_with_idx(logits: torch.Tensor, axis=1) -> tuple[torch.Tensor, t
     return correct.float().mean(), top_indexes
 
 
-@torch.compile()
+@torch.compile(disable=True)
 @torch.no_grad()
 def get_retrieval_accuracy(z1: Tensor, z2: Tensor, norm: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
     if norm:
