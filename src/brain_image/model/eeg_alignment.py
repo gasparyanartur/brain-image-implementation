@@ -328,7 +328,8 @@ class EEGAlignmentModel(TrainingModule):
 
         # Update configs with actual module values (in case something has been modified), otherwise model_dump is wrong
         self.config.eeg_encoder = self.eeg_encoder.config  # type: ignore
-        self.config.prior = self.prior.config  # type: ignore
+        if self.prior is not None:
+            self.config.prior = self.prior.config  # type: ignore
 
         self.save_hyperparameters(
             {
