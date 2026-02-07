@@ -5,8 +5,6 @@ from pydantic import Field
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from torchvision.utils import save_image
-from lightning.pytorch.loggers import WandbLogger
 from torchvision.transforms import v2 as tv2
 import itertools as it
 from contextlib import nullcontext
@@ -19,6 +17,7 @@ from brain_image.data.io import batch_load_images
 from brain_image.data.tensorcache import TensorCache
 from brain_image.data.data import (
     get_from_batch,
+    preprocess_image,
 )
 from brain_image.metrics import (
     MetricName,
@@ -49,6 +48,7 @@ from brain_image.model.loss import CLIPLoss, InfoNCELoss, SigLipLoss
 from brain_image.model.model import (
     TrainingModule,
     TrainingModuleConfig,
+    dump_test_output,
 )
 from brain_image.model.prior import (
     BaseDiffusionPrior,
@@ -70,6 +70,7 @@ from brain_image.utils import (
     gather_dataloader,
     get_dtype,
     get_mean_gradients,
+    prep_batch_for_logs,
 )
 
 import torch
@@ -164,6 +165,7 @@ class EEGAlignmentConfig(TrainingModuleConfig):
         141,  # Possum
         198,  # Wine
     ]
+    log_image_size: int = 512
 
     max_epochs: int = 100
 
@@ -185,6 +187,11 @@ class EEGAlignmentConfig(TrainingModuleConfig):
         "clip",
         "efficientnet",
         "swav",
+    ]
+    val_recon_metrics: list[MetricName] = [
+        "ssim",
+        "alex2",
+        "clip"
     ]
 
     embeddings_to_compute_stats: list[str] = ["prior_img_latent"]
@@ -222,10 +229,8 @@ class EEGAlignmentModel(TrainingModule):
         compile: bool = True,
         cache_dir: Path = Path("tensorcache"),
         eeg_encoder_path: Path | None = None,
-        model_id: str | None = None,
         **kwargs,
     ):
-
         if isinstance(config, dict):
             config = EEGAlignmentConfig.model_validate(config)
 
@@ -238,7 +243,22 @@ class EEGAlignmentModel(TrainingModule):
             config.prior.d_cond = config.eeg_encoder.d_output
             config.prior.d_input = IMAGE_ENCODER_DIM[config.prior_img_encoder]
 
-        super().__init__(config, **kwargs)
+        tensor_cache = TensorCache(cache_dir)
+        embeddings_map: dict[str, EncoderName | None] = {
+            "align_img_latent": (config.align_img_encoder if config.do_align else None),
+            "prior_img_latent": (config.prior_img_encoder if config.do_recon else None),
+            "low_level_latent": (config.low_level_encoder if config.do_recon_low else None),
+        }
+
+        data_module = EEGDataModule(
+            dataset_config,
+            tensor_cache=tensor_cache,
+            embeddings_key_to_name=embeddings_map,
+            load_embedding_stats=[config.prior_img_encoder],
+        )
+
+        super().__init__(config, data_module, **kwargs)
+        self.config = config
 
         self.automatic_optimization = False  # Disable automatic optimization, we will handle it manually
 
@@ -263,26 +283,6 @@ class EEGAlignmentModel(TrainingModule):
             )
         else:
             self.eeg_augmenter = nn.Identity()
-
-        self.model_id = model_id
-        logging.info(f"Seeding everything with seed: {self.config.seed}")
-        pl.seed_everything(self.config.seed)
-
-        self.config: EEGAlignmentConfig = config if isinstance(config, EEGAlignmentConfig) else EEGAlignmentConfig.model_validate(config)
-
-        tensor_cache = TensorCache(cache_dir)
-        embeddings_map: dict[str, EncoderName | None] = {
-            "align_img_latent": (self.config.align_img_encoder if self.config.do_align else None),
-            "prior_img_latent": (self.config.prior_img_encoder if self.config.do_recon else None),
-            "low_level_latent": (self.config.low_level_encoder if self.config.do_recon_low else None),
-        }
-
-        self.data_module = EEGDataModule(
-            dataset_config,
-            tensor_cache=tensor_cache,
-            embeddings_key_to_name=embeddings_map,
-            load_embedding_stats=[self.config.prior_img_encoder],
-        )
 
         self.prior: BaseDiffusionPrior | None = None
         self.prior_input_encoder: nn.ParameterDict | None = None
@@ -338,12 +338,7 @@ class EEGAlignmentModel(TrainingModule):
             },
         )
 
-        self.compile: bool = compile
-
         self.optimizer_options: list[dict[str, Any]] = []
-
-        self.atleast_one_training_step: bool = False
-
         logging.info(f"Finished initializing model")
 
     def get_name(self, timestamp: bool = False) -> str:
@@ -427,9 +422,10 @@ class EEGAlignmentModel(TrainingModule):
         for opt in optimizers:
             opt.zero_grad()
 
-        losses, metrics, outputs = self.run_step(batch, batch_idx, "train")
+        losses, outputs, metrics = self.run_step(batch, batch_idx, "train")
+        loss = losses["train/loss"]
 
-        self.manual_backward(losses["loss"])
+        self.manual_backward(loss)
 
         for opt in optimizers:
             opt.step()
@@ -446,10 +442,8 @@ class EEGAlignmentModel(TrainingModule):
 
         if self.config.log_gradients:
             with torch.no_grad():
-                for name, module in [
-                    ("eeg_encoder", self.eeg_encoder),
-                    ("prior", self.prior),
-                ]:
+                for name in self.config.modules_to_train:
+                    module = getattr(self, name, None) 
                     if module is None:
                         continue
 
@@ -458,39 +452,32 @@ class EEGAlignmentModel(TrainingModule):
                         metrics["grad/" + name] = grads
 
         for metric_name, metric_value in it.chain(losses.items(), metrics.items()):
-            name = (
-                # f"train/{metric_name}" if ("/" not in metric_name[:10]) else metric_name
-                f"train/{metric_name}"
-            )
             self.log(
-                name,
+                metric_name,
                 metric_value,
-                prog_bar=name in self.config.prog_bar_metrics,
+                prog_bar=metric_name in self.config.prog_bar_metrics,
                 on_step=self.config.log_on_step,
                 on_epoch=not self.config.log_on_step,
             )
 
-        return losses["loss"]
+        return loss
 
     def validation_step(self, batch, batch_idx) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         losses, outputs, metrics = self.run_step(batch, batch_idx, "val")
 
         if self.atleast_one_training_step and (batch_idx == self.data_module.get_num_batches("val") - 1):
-            eval_metrics, eval_outputs = self.run_full_validation(split="val")
+            eval_metrics, eval_img_outputs = self.run_full_validation(split="val")
             metrics.update(eval_metrics)
 
-            if eval_outputs and ((wandb_logger := self.get_wandb_logger()) is not None):
-                for k, v in eval_outputs.items():
-                    prefix = "val/" if k.split("/")[0] != "debug" else ""
-                    wandb_logger.log_image(key=f"{prefix}{k}", images=v)
+            if eval_img_outputs and ((wandb_logger := self.get_wandb_logger()) is not None):
+                for img_type, img_dump in eval_img_outputs.items():                   
+                    wandb_logger.log_image(key=img_type, images=[(v * 255).int().clamp(0, 255) for v in img_dump["values"]])
 
         for metric_name, metric_value in it.chain(losses.items(), metrics.items()):
-            prefix = "val/" if metric_name.split("/")[0] not in ("debug", "eval") else ""
-            name = f"{prefix}{metric_name}"
             self.log(
-                name,
+                metric_name,
                 metric_value,
-                prog_bar=name in self.config.prog_bar_metrics,
+                prog_bar=metric_name in self.config.prog_bar_metrics,
                 on_step=False,
                 on_epoch=True,
             )
@@ -501,24 +488,18 @@ class EEGAlignmentModel(TrainingModule):
         losses, outputs, metrics = self.run_step(batch, batch_idx, "test")
 
         if self.atleast_one_training_step and (batch_idx == self.data_module.get_num_batches("test") - 1):
-            eval_metrics, eval_outputs = self.run_full_validation(split="test")
+            eval_metrics, eval_img_outputs = self.run_full_validation(split="test")
             metrics.update(eval_metrics)
 
-            if eval_outputs and ((wandb_logger := self.get_wandb_logger()) is not None):
-                for k, v in eval_outputs.items():
-                    wandb_logger.log_image(key="test/" + k, images=v)
-
-            test_metrics, test_img_outputs, img_paths, idxs = self.run_full_test()
-
-            self.log_test_output(test_metrics, test_img_outputs, idxs)
+            if eval_img_outputs and ((wandb_logger := self.get_wandb_logger()) is not None):
+                for img_type, img_dump in eval_img_outputs.items():
+                    wandb_logger.log_image(key=img_type, images=[(v * 255).int().clamp(0, 255) for v in img_dump["values"]])
 
             if self.log_dir is not None:
-                self.dump_test_output(
+                dump_test_output(
                     self.log_dir,
-                    test_metrics,
-                    test_img_outputs,
-                    idxs,
-                    selected_img_idxs=self.config.highlighted_test_recons,
+                    eval_metrics,
+                    eval_img_outputs,
                 )
 
             # Delete training loader to kill persistent workers
@@ -526,7 +507,7 @@ class EEGAlignmentModel(TrainingModule):
 
         for metric_name, metric_value in it.chain(losses.items(), metrics.items()):
             self.log(
-                f"test/{metric_name}",
+                metric_name,
                 metric_value,
                 prog_bar=False,
                 on_step=False,
@@ -563,7 +544,7 @@ class EEGAlignmentModel(TrainingModule):
                     losses=losses,
                     metrics=metrics,
                     device=device,
-                    stage=stage,
+                    split=stage,
                 )
 
             if self.config.do_recon and (
@@ -573,12 +554,12 @@ class EEGAlignmentModel(TrainingModule):
                     batch=batch,
                     losses=losses,
                     metrics=metrics,
-                    stage=stage,
+                    split=stage,
                     device=device,
                 )
 
         loss = torch.stack([v for v in losses.values()]).sum()
-        losses["loss"] = loss
+        losses[f"{stage}/loss"] = loss
 
         return losses, outputs, metrics
 
@@ -587,10 +568,11 @@ class EEGAlignmentModel(TrainingModule):
         batch: dict[str, Any],
         losses: dict[str, Any],
         metrics: dict[str, Any],
-        stage,
+        split,
         device,
     ) -> None:
         assert self.align_loss is not None, "Align loss is not initialized"
+        prefix = f"{split}/align"
 
         eeg_latent_normed = get_from_batch("eeg_latent_normed", batch, Tensor).to(device)
         align_img_latent = get_from_batch("align_img_latent", batch, Tensor).to(device)
@@ -605,20 +587,20 @@ class EEGAlignmentModel(TrainingModule):
 
         losses.update(
             {
-                "align/mse_loss": align_mse_loss,
-                "align/clip_loss": align_clip_loss,
+                f"{prefix}/mse_loss": align_mse_loss,
+                f"{prefix}/clip_loss": align_clip_loss,
             }
         )
 
-        if stage == "val":
+        if split == "val":
             align_logits = align_logits.detach()
 
             with torch.no_grad():
                 metrics.update(
                     {
-                        "align/top1": get_top1_acc(align_logits, axis=1).cpu(),
-                        "align/cos": align_logits.diag().mean().cpu(),
-                        "align/logit_scale": self.align_loss.logit_scale.detach().cpu(),
+                        f"{prefix}/top1": get_top1_acc(align_logits, axis=1).cpu(),
+                        f"{prefix}/cos": align_logits.diag().mean().cpu(),
+                        f"{prefix}/logit_scale": self.align_loss.logit_scale.detach().cpu(),
                     }
                 )
 
@@ -634,12 +616,13 @@ class EEGAlignmentModel(TrainingModule):
         batch: Mapping[str, Any],
         losses: dict[str, Any],
         metrics: dict[str, Any],
-        stage,
+        split,
         device,
     ) -> None:
         assert self.config.prior is not None, "Prior config is not initialized"
         assert self.prior is not None, "Prior is not initialized"
         assert self.prior_align_loss
+        prefix = f"{split}/prior"
 
         target_latent = get_from_batch("prior_img_latent", batch, Tensor).to(device)
         eeg_latent_normed = get_from_batch("eeg_latent_normed", batch, Tensor).to(device)
@@ -674,13 +657,13 @@ class EEGAlignmentModel(TrainingModule):
 
         losses.update(
             {
-                "prior/sim_loss": sim_loss,
-                "prior/huber_loss": huber_loss,
-                "prior/align_loss": clip_loss,
+                f"{prefix}/sim_loss": sim_loss,
+                f"{prefix}/huber_loss": huber_loss,
+                f"{prefix}/align_loss": clip_loss,
             }
         )
 
-        if stage == "val":
+        if split == "val":
             last_timesteps = self.prior.config.num_training_timesteps * torch.ones(batch_size, device=device, dtype=torch.int32) - 1
             pred_noise = self.prior.sample(
                 torch.randn_like(target_latent),
@@ -689,7 +672,7 @@ class EEGAlignmentModel(TrainingModule):
                 cond_drop_prob=0,
             )
 
-            metrics.update({"prior/pred_cos": F.cosine_similarity(target_latent, pred_noise, dim=-1).mean().detach().cpu()})
+            metrics.update({f"{prefix}/pred_cos": F.cosine_similarity(target_latent, pred_noise, dim=-1).mean().detach().cpu()})
 
     @property
     def is_full_val_epoch(self) -> bool:
@@ -709,6 +692,8 @@ class EEGAlignmentModel(TrainingModule):
 
     @torch.no_grad()
     def run_full_validation(self, split: Literal["val", "test"]) -> tuple[dict[str, Any], dict[str, Any]]:
+        self.eval()
+
         if not (self.is_full_val_epoch or split == "test"):
             return {}, {}
 
@@ -730,11 +715,10 @@ class EEGAlignmentModel(TrainingModule):
         )
 
         all_data.update(eeg_latent)
-
-        device, dtype = self._get_device_dtype()
+        device = self.device
 
         if self.config.do_align:
-            metrics_align, img_outputs_align = self._run_validation_align(all_data, device)  # type: ignore
+            metrics_align, img_outputs_align = self._run_validation_align(all_data, device, split)  # type: ignore
             metrics.update(metrics_align)
             img_outputs.update(img_outputs_align)
 
@@ -748,6 +732,7 @@ class EEGAlignmentModel(TrainingModule):
             metrics.update(metrics_plot)
             img_outputs.update(img_outputs_plot)
 
+        metrics = prep_batch_for_logs(metrics)
         return metrics, img_outputs
 
     @torch.no_grad()
@@ -755,34 +740,52 @@ class EEGAlignmentModel(TrainingModule):
         self,
         all_data: dict[str, Any],
         device: torch.device,
+        split: Literal["val", "test"],
     ):
         eeg_latent_normed = get_from_batch("eeg_latent_normed", all_data, Tensor).to(device)
         align_img_latent = get_from_batch("align_img_latent", all_data, Tensor).to(device)
-        indexes = get_from_batch("idx", all_data, Tensor).to(device)
+        idxs = get_from_batch("idx", all_data, Tensor).to(device)
         img_paths = get_from_batch("img_path", all_data, list)
 
-        top1_acc, chosen_idx = get_retrieval_accuracy_with_idx(eeg_latent_normed, align_img_latent, norm=True)
-
-        target_img_paths = [Path(img_paths[i]) for i in indexes[:3]]
-        chosen_img_paths = [Path(img_paths[i]) for i in chosen_idx[:3]]
-        chosen_imgs = batch_load_images(chosen_img_paths)
-
+        brain_acc, chosen_idx = get_retrieval_accuracy_with_idx(eeg_latent_normed, align_img_latent, norm=True)
+        image_acc, _ = get_retrieval_accuracy_with_idx(align_img_latent, eeg_latent_normed, norm=True)
         eeg_align_cos = F.cosine_similarity(align_img_latent, eeg_latent_normed).mean()
 
+        highlighted_idxs = self.config.highlighted_val_recons if split == "val" else self.config.highlighted_test_recons
+        selected_target_idxs, selected_mask = self.get_selected_idxs(idxs, highlighted_idxs)
+        selected_chosen_idxs = idxs[chosen_idx][selected_mask]
+        selected_target_img_paths = [Path(img_paths[int(i.detach().cpu().item())]) for i in selected_target_idxs]
+        selected_chosen_img_paths = [Path(img_paths[int(i.detach().cpu().item())]) for i in selected_chosen_idxs]
+
+        chosen_imgs = batch_load_images(selected_chosen_img_paths)
+        target_imgs = batch_load_images(selected_target_img_paths)
+
+        chosen_imgs = preprocess_image(chosen_imgs, size=self.config.log_image_size).detach().cpu().float()
+        target_imgs = preprocess_image(target_imgs, size=self.config.log_image_size).detach().cpu().float()
+
+        labels = [p.stem for p in selected_target_img_paths]
+
         metrics = {
-            "eval/align/top1_acc": top1_acc.detach().cpu(),
-            "eval/align/eeg_cos": eeg_align_cos.detach().cpu(),
+            f"eval/{split}/align/brain_acc": brain_acc.detach().cpu(),
+            f"eval/{split}/align/image_acc": image_acc.detach().cpu(),
+            f"eval/{split}/align/sim": eeg_align_cos.detach().cpu(),
         }
 
         img_outputs = {
-            "eval/align/chosen": [x.detach().cpu().float() for x in chosen_imgs],
-            "eval/align/target": target_img_paths,
+            f"eval/{split}/align/chosen": {
+                "values": [v for v in chosen_imgs],
+                "labels": labels,
+            },
+            f"eval/{split}/align/target": {
+                "values": [v for v in target_imgs],
+                "labels": labels,
+            },
         }
         return metrics, img_outputs
 
     def _run_validation_recon(
         self,
-        all_data: DataBatchT,
+        all_data: dict[str, Any],
         device: torch.device,
         split: Literal["val", "test"] = "val",
     ):
@@ -791,131 +794,62 @@ class EEGAlignmentModel(TrainingModule):
 
         target = get_from_batch("prior_img_latent", all_data, Tensor).to(device)
         eeg_latent_normed = get_from_batch("eeg_latent_normed", all_data, Tensor).to(device)
+        idxs = get_from_batch("idx", all_data, Tensor).to(device)
+        img_paths = get_from_batch("img_path", all_data, list)
 
         metrics = {}
         img_outputs = {}
 
         generator = torch.Generator(device).manual_seed(self.config.seed)
         prior_pred = self.prior.batch_generate(
-            eeg_latent_normed.to(device),
+            eeg_latent_normed,
             generator=generator,
             batch_size=self.data_module.config.get_batch_size("test"),
         )
+        pred_cos = F.cosine_similarity(prior_pred, target).mean().detach().cpu()
+        metrics.update({f"eval/{split}/prior/pred_cos": pred_cos})
 
         if not self.config.skip_reconstruction:
-            recon_idxs = self.config.highlighted_val_recons
-            conditioning = torch.cat(
-                [
-                    prior_pred[recon_idxs].to(device),
-                    target[recon_idxs].to(device),
-                ],
-                dim=0,
-            )
-            recon = get_reconstructions(conditioning, pipe_kwargs={"generator": generator})
-            recon_pred, recon_target = recon.chunk(2, dim=0)
+            highlighted_idxs = self.config.highlighted_val_recons if split == "val" else self.config.highlighted_test_recons
+            recon_metrics = self.config.val_recon_metrics if split == "val" else self.config.test_recon_metrics
 
-            img_outputs.update(
-                {
-                    "eval/recon/pred": [x.detach().cpu().float() for x in recon_pred],
-                    "eval/recon/target": [x.detach().cpu().float() for x in recon_target],
-                }
-            )
+            selected_idxs, select_mask = self.get_selected_idxs(idxs, highlighted_idxs)
+            selected_img_paths = [img_paths[int(i.detach().cpu().item())] for i in selected_idxs]
 
-        metrics.update({"eval/prior/pred_cos": F.cosine_similarity(prior_pred, target.to(device)).mean().detach().cpu()})
+            if len(selected_idxs) == 0:
+                logging.warning(f"Failed to find any highlighted idxs in {split} set for set {highlighted_idxs}")
+            else:
+                reconstructions = get_batched_reconstructions_from_eeg(
+                    self.prior,
+                    eeg_latent_normed[select_mask],
+                    self.data_module.config.get_batch_size("test"),
+                    self.config.seed,
+                )
+                ground_truths = batch_load_images(selected_img_paths)
+                recon_metrics = evaluate_metrics(reconstructions, ground_truths, metrics=recon_metrics)
 
-        return metrics, img_outputs
+                reconstructions = preprocess_image(reconstructions, size=self.config.log_image_size).detach().cpu().float()
+                ground_truths = preprocess_image(ground_truths, size=self.config.log_image_size).detach().cpu().float()
+                labels = [Path(p).stem for p in selected_img_paths]
 
-    def run_full_test(self, **kwargs) -> tuple[dict[str, Any], dict[str, Any], list[str], Tensor]:
-        metrics = {}
-        img_outputs = {}
+                img_outputs.update(
+                    {
+                        f"eval/{split}/prior/recon": {
+                            "values": [v for v in reconstructions],
+                            "labels": labels,
+                        },
+                        f"eval/{split}/prior/gt": {
+                            "values": [v for v in ground_truths],
+                            "labels": labels,
+                        }
+                    }
+                )
 
-        data_loader = self.data_module.get_dataloader("test")
-        all_data = gather_dataloader(data_loader)
-        all_data = cast(DataBatchT, all_data)
-
-        device = self.device
-
-        img_path = get_from_batch("img_path", all_data, list)
-        eeg = get_from_batch("eeg_data", all_data, Tensor).to(device)
-        sub = get_from_batch("sub", all_data, Tensor).to(device)
-        idxs = get_from_batch("idx", all_data, Tensor)
-
-        eeg_latent = batch_encode_eeg_latent(
-            self.eeg_encoder,
-            cast(Tensor, eeg),
-            cast(Tensor, sub),
-            batch_size=self.data_module.config.get_batch_size("test"),
-            progress_bar=False,
-        )["eeg_latent_normed"].to(device)
-
-        if self.config.do_align:
-            assert (align_img_latent := all_data.get("align_img_latent")) is not None, "Align image latent is not in batch"
-
-            align_img_latent = align_img_latent.to(device)
-            brain_acc, image_acc = get_retrieval_accuracy(eeg_latent, align_img_latent, norm=True)
-
-            metrics.update(
-                {
-                    "align/brain_acc": brain_acc,
-                    "align/image_acc": image_acc,
-                }
-            )
-
-        if self.config.do_recon and not self.config.skip_reconstruction:
-            assert self.prior is not None
-
-            reconstructions = get_batched_reconstructions_from_eeg(
-                self.prior,
-                eeg_latent.to(device),
-                self.data_module.config.get_batch_size("test"),
-                self.config.seed,
-            )
-            targets = batch_load_images(img_path, parallel=True, progressbar=True).to(device)
-
-            prior_metrics = evaluate_metrics(reconstructions, targets, metrics=self.config.test_recon_metrics)
-            resize = tv2.Compose(
-                [
-                    tv2.ToDtype(torch.float32, scale=True),
-                    tv2.Resize((512, 512)),
-                ]
-            )
-
-            metrics.update({f"prior/{k}": v for k, v in prior_metrics.items()})
-
-            reconstructions = resize(reconstructions).detach().cpu()
-            targets = resize(targets).detach().cpu()
-
-            img_outputs.update(
-                {
-                    "prior/reconstruction": reconstructions,
-                    "prior/ground_truth": targets,
-                }
-            )
-
-        return metrics, img_outputs, img_path, idxs
-
-    def _run_test_align(
-        self,
-        eeg_latent: Tensor,
-        img_latent: Tensor,
-        device: torch.device,
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        metrics, img_outputs = {}, {}
-
-        eeg_latent = eeg_latent.to(device)
-        img_latent = img_latent.to(device)
-
-        brain_acc, image_acc = get_retrieval_accuracy(eeg_latent, img_latent, norm=True)
-
-        metrics = {
-            "align/brain_acc": brain_acc,
-            "align/image_acc": image_acc,
-        }
+                metrics.update({f"eval/{split}/prior/recon/{k}": v for k, v in recon_metrics.items()})
 
         return metrics, img_outputs
 
-    def plot_lowdim_projection(self, all_data: DataBatchT) -> tuple[dict[str, Any], dict[str, Any]]:
-
+    def plot_lowdim_projection(self, all_data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         latents = []
         labels = []
 
@@ -931,73 +865,9 @@ class EEGAlignmentModel(TrainingModule):
         }
 
         return metrics, img_outputs
-
-    def dump_test_output(
-        self,
-        output_dir: Path,
-        metrics: dict[str, Any],
-        imgs: dict[str, Any],
-        idxs: Tensor,
-        selected_img_idxs: list[int] | None = None,
-    ):
-        metrics = {name: value.item() for name, value in metrics.items()}
-
-        with open(output_dir / "test_metrics.json", "w") as f:
-            json.dump(metrics, f, indent=4)
-
-        # Reconstructions
-        if self.config.do_recon:
-            reconstructions = imgs["prior/reconstruction"]
-            ground_truths = imgs["prior/ground_truth"]
-            img_dir = Path(output_dir / "reconstructions")
-            img_dir.mkdir(parents=True, exist_ok=True)
-
-            for reconstruction, ground_truth, idx in zip(reconstructions, ground_truths, idxs):
-                if selected_img_idxs is not None and idx.item() not in selected_img_idxs:
-                    continue
-
-                save_image(reconstruction, img_dir / f"{idx}_recon.jpg")
-                save_image(ground_truth, img_dir / f"{idx}_recon_gt.jpg")
-
-    def log_test_output(self, metrics, imgs, idxs):
-        if imgs and ((wandb_logger := self.get_wandb_logger()) is not None):
-            # Log selected handful of images to weights and biases
-            selected_img_outputs = {k: [] for k in imgs.keys()}
-            for k, v in imgs.items():
-                for imgs, idx in zip(v, idxs):
-                    if (self.config.highlighted_test_recons is None) or (idx in self.config.highlighted_test_recons):
-                        selected_img_outputs[k].append(imgs)
-
-            for k, v in selected_img_outputs.items():
-                logging.info(f"Logging {len(v)} images for {k}")
-                wandb_logger.log_image(key="full_test/" + k, images=v)
-
-        if metrics:
-            for k, v in metrics.items():
-                self.log(
-                    f"full_test/{k}",
-                    v,
-                    prog_bar=False,
-                    on_step=False,
-                    on_epoch=True,
-                )
-
-    def get_wandb_logger(self) -> WandbLogger | None:
-        for logger in self.loggers:
-            if isinstance(logger, WandbLogger):
-                return logger
-        return None
-
-    def train_dataloader(self):
-        return self.data_module.train_dataloader()
-
-    def val_dataloader(self):
-        return self.data_module.val_dataloader()
-
-    def test_dataloader(self):
-        return self.data_module.test_dataloader()
-
-    def _get_device_dtype(self) -> tuple[torch.device, torch.dtype]:
-        dtype = self.dtype if isinstance(self.dtype, torch.dtype) else get_dtype(self.dtype)
-        device = self.device if isinstance(self.device, torch.device) else get_device(self.device)
-        return device, dtype
+    
+    def get_selected_idxs(self, idxs: Tensor, highlighted_idxs: list[int]) -> tuple[Tensor, Tensor]:
+        highlighted_idxs_tensor = torch.tensor(highlighted_idxs).to(self.device)
+        select_mask = torch.isin(idxs, highlighted_idxs_tensor)
+        selected_idxs = idxs[select_mask]
+        return selected_idxs, select_mask

@@ -133,10 +133,8 @@ class CommAlignmentModel(TrainingModule):
         cache_images: bool = True,
         eeg_encoder_path: Path | None = None,
         compile: bool = True,
-        model_id: str | None = None,
         **kwargs,
     ):
-
         if isinstance(config, dict):
             config = CommAlignmentConfig(**config)
 
@@ -144,24 +142,19 @@ class CommAlignmentModel(TrainingModule):
 
         config.eeg_encoder.d_channels = dataset_config.num_channels
         config.eeg_encoder.d_time = dataset_config.time_length
-        config.eeg_encoder.d_output = config.eeg_encoder.d_output or IMAGE_ENCODER_DIM[self.config.img_encoder]
-
-        super().__init__(config, **kwargs)
-        self.automatic_optimization = False  # Disable automatic optimization, we will handle it manually
-        self.config = config
-        self.model_id = model_id
+        config.eeg_encoder.d_output = config.eeg_encoder.d_output or IMAGE_ENCODER_DIM[config.img_encoder]
 
         embeddings_map: dict[str, EncoderName | None] = {}
-        if not self.config.use_img_encoder:
-            embeddings_map["align_img_latent"] = self.config.img_encoder
+        if not config.use_img_encoder:
+            embeddings_map["align_img_latent"] = config.img_encoder
 
-        self.data_module = EEGDataModule(
+        data_module = EEGDataModule(
             dataset_config,
             embeddings_key_to_name=embeddings_map,
         )
 
-        logging.info(f"Seeding everything with seed: {self.config.seed}")
-        pl.seed_everything(self.config.seed)
+        super().__init__(config, data_module, **kwargs)
+        self.config = config
 
         if self.config.use_img_encoder:
             self.img_encoder = load_image_encoder(
@@ -292,9 +285,6 @@ class CommAlignmentModel(TrainingModule):
                 "dataset_config": self.data_module.config.model_dump(mode="json"),
             },
         )
-
-        self.compile: bool = compile
-        self.atleast_one_training_step: bool = False
 
         logging.info(f"Finished initializing model")
 
