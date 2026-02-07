@@ -101,7 +101,7 @@ class CommAlignmentConfig(TrainingModuleConfig):
     img_enc_affine_scale_std: float = 0.5
     img_enc_affine_shift_std: float = 0.05
     img_enc_affine_prob: float = 0.75
-    img_enc_noise_std: float = 0.05
+    img_enc_noise_std: float = 0.5
     img_enc_noise_prob: float = 0.75
     img_enc_dropout_prob: float = 0.1
 

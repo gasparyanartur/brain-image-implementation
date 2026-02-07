@@ -61,7 +61,7 @@ def create_eeg_encoder(
     logging.info(f"Loading EEG checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path)
 
-    eeg_encoder_state_dict = get_submodules_with_pattern(checkpoint["state_dict"], "eeg_encoder")
+    eeg_encoder_state_dict = get_submodules_with_pattern(checkpoint["state_dict"], r"eeg_encoder\.")
     if not eeg_encoder_state_dict:
         raise ValueError("Could not find EEG encoder in checkpoint")
 
