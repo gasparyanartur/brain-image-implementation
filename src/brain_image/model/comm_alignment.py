@@ -155,6 +155,8 @@ class CommAlignmentModel(TrainingModule):
 
         super().__init__(config, data_module, **kwargs)
         self.config = config
+        self.automatic_optimization = False  # Disable automatic optimization, we will handle it manually
+
 
         if self.config.use_img_encoder:
             self.img_encoder = load_image_encoder(

@@ -326,7 +326,7 @@ def get_subgroup_name(full_name: str, module_pattern: re.Pattern, only_subgroup:
     span = match.span(0)
 
     if only_subgroup:
-        start_idx = span[1] + 1
+        start_idx = span[1]
 
     else:
         start_idx = span[0]
@@ -499,5 +499,3 @@ def get_dtype_from_module(mod: nn.Module):
 @torch.compile()
 def z_norm(x: torch.Tensor, dim: int = -1, eps: float = 1e-8) -> torch.Tensor:
     return (x - x.mean(dim=dim, keepdim=True)) / (x.std(dim=dim, keepdim=True) + eps)
-
-
