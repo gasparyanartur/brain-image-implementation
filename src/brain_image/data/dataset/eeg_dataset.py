@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 
 import torch
+from torch.nn import functional as F
 import tqdm
 from brain_image.configs import BaseConfig
 from torch.utils.data import Dataset
@@ -65,6 +66,21 @@ class DataConfig(BaseConfig, ABC):
                 return self.test_batch_size or self.batch_size
 
 
+class EEGDatasetConfig(DataConfig, ABC):
+    data_path: Path
+    dataset: str
+    stats_path: Path = Path("statistics")
+    subs: list[int] | None
+    num_channels: int
+    time_length: int
+    norm_over_channels: bool = False
+
+    preload_cache: bool = True
+
+    @abstractmethod
+    def create_dataset(self, split, *args, **kwargs) -> EEGDataset:
+        raise NotImplementedError
+
 class EEGDataset(Dataset, ABC):
     def __init__(
         self,
@@ -103,6 +119,10 @@ class EEGDataset(Dataset, ABC):
         self.eeg = torch.stack(
             [self.load_eeg_from_path(eeg_path) for eeg_path in self.get_eeg_paths()]
         ).float()  # <sub, image, channel, time>
+
+        if self.config.norm_over_channels:
+            self.eeg = self.eeg - self.eeg.mean(dim=-1, keepdim=True)  
+            self.eeg = self.eeg / (self.eeg.std(dim=-1, keepdim=True) + 1e-6)
 
         logging.info(f"Reducing dataset size to {limit_size * 100:.2f}%")
         self.limit_data_size(limit_size, limit_shuffle)
@@ -196,16 +216,3 @@ class EEGDataset(Dataset, ABC):
         return self.embedding_stats
 
 
-class EEGDatasetConfig(DataConfig, ABC):
-    data_path: Path
-    dataset: str
-    stats_path: Path = Path("statistics")
-    subs: list[int] | None
-    num_channels: int
-    time_length: int
-
-    preload_cache: bool = True
-
-    @abstractmethod
-    def create_dataset(self, split, *args, **kwargs) -> EEGDataset:
-        raise NotImplementedError
