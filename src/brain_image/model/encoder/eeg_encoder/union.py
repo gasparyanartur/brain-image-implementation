@@ -5,6 +5,8 @@ from brain_image.utils import flatten_configs, get_submodules_with_pattern
 from brain_image.model.encoder.eeg_encoder.nice import NiceEEGEncoder, NiceEEGEncoderConfig
 from brain_image.model.encoder.eeg_encoder.atms import AtmsEEGEncoder, AtmsEEGEncoderConfig
 from brain_image.model.encoder.eeg_encoder.dummy import DummyEEGEncoder, DummyEEGEncoderConfig
+from brain_image.model.encoder.eeg_encoder.patchattn import PatchAttentionEEGEncoder, PatchAttentionEEGEncoderConfig
+
 
 import torch
 
@@ -27,13 +29,16 @@ def resolve_eeg_encoder_config(config: EEGEncoderConfig | dict) -> EEGEncoderCon
 
         case "dummy":
             return DummyEEGEncoderConfig(**config)
+        
+        case "patchattn":
+            return PatchAttentionEEGEncoderConfig(**config)
 
         case _:
             raise ValueError(f"Unknown EEG encoder: {config['eeg_encoder']}")
 
 
 def create_eeg_encoder(
-    config: EEGEncoderConfig | dict, checkpoint_path: Path | None = None
+    config: EEGEncoderConfig | dict, checkpoint_path: Path | None = None, **kwargs
 ) -> EEGEncoder:
     config = resolve_eeg_encoder_config(config)
 
@@ -44,13 +49,16 @@ def create_eeg_encoder(
     match config.eeg_encoder:
         case "nice":
             model_name = "nice"
-            encoder = NiceEEGEncoder(cast(NiceEEGEncoderConfig, config))
+            encoder = NiceEEGEncoder(cast(NiceEEGEncoderConfig, config), **kwargs)
         case "atms":
             model_name = "atms"
-            encoder = AtmsEEGEncoder(cast(AtmsEEGEncoderConfig, config))
+            encoder = AtmsEEGEncoder(cast(AtmsEEGEncoderConfig, config), **kwargs)
         case "dummy":
             model_name = "dummy"
-            encoder = DummyEEGEncoder(cast(DummyEEGEncoderConfig, config))
+            encoder = DummyEEGEncoder(cast(DummyEEGEncoderConfig, config), **kwargs)
+        case "patchattn":
+            model_name = "patchattn"
+            encoder = PatchAttentionEEGEncoder(cast(PatchAttentionEEGEncoderConfig, config), **kwargs)
         case _:
             raise ValueError(f"Unknown encoder name: {config.eeg_encoder}")
 
@@ -69,6 +77,6 @@ def create_eeg_encoder(
     return encoder
 
 
-EEGEncoderName = Literal["atms", "nice", "dummy"]
-EEGEncoderChoices = ["atms", "nice", "dummy"]
-EEGEncoderConfigType = Annotated[NiceEEGEncoderConfig | AtmsEEGEncoderConfig | DummyEEGEncoderConfig, Field(discriminator="eeg_encoder")]
+EEGEncoderName = Literal["atms", "nice", "dummy", "patchattn"]
+EEGEncoderChoices = ["atms", "nice", "dummy", "patchattn"]
+EEGEncoderConfigType = Annotated[NiceEEGEncoderConfig | AtmsEEGEncoderConfig | DummyEEGEncoderConfig | PatchAttentionEEGEncoderConfig, Field(discriminator="eeg_encoder")]

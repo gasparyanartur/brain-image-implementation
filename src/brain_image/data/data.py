@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Literal, Mapping, Type, TypeVar, TypedDict, Union, cast
 
+import mne
 import numpy as np
 import torch
 from torch import Tensor
@@ -11,8 +12,6 @@ from torch import nn
 from torchvision.transforms import v2 as tv2
 
 from brain_image.data.tensorcache import TensorCache
-from brain_image.model.encoder.eeg_encoder.union import EEGEncoderName
-from brain_image.model.encoder.img_encoder.union import ImageEncoderName
 from brain_image.stats import StatsType
 
 T = TypeVar('T')
@@ -42,31 +41,6 @@ def preprocess_image(image: Tensor, pipe: nn.Module = DEFAULT_IMAGE_PIPE, size: 
     image = pipe(image)
     image = resize_crop_image(image, size=size)
     return image
-
-class LatentTypeMapT(TypedDict):
-    """Maps the role of the latent to the specific encoder used."""
-
-    align_img_latent: ImageEncoderName | None
-    prior_img_latent: ImageEncoderName | None
-    low_level_latent: ImageEncoderName | None
-    eeg_latent: EEGEncoderName | None
-
-
-class LatentGroupT(TypedDict):
-    """A collection of latents."""
-
-    align_img_latent: torch.Tensor | None
-    prior_img_latent: torch.Tensor | None
-    low_level_latent: torch.Tensor | None
-    eeg_latent: EEGEncoderName | None
-
-
-class EEGSampleT(LatentGroupT):
-    img_path: str
-    idx: int
-    sub: int
-    eeg_data: torch.Tensor
-
 
 def preprocess_eeg_data(
     eeg_data: Tensor,
@@ -118,16 +92,16 @@ def load_stats(
 def old_get_embeddings_stats(
     tensorcache: TensorCache,
     img_paths: list[Path],
-    embedding_names: list[ImageEncoderName],
+    embedding_names: list[str],
     split: Literal["train", "test"],
-) -> dict[ImageEncoderName, StatsType]:
+) -> dict[str, StatsType]:
     """Compute a mapping from encoder name to stats.
     E.g. stable_diffusion_v2 -> {mean: 0, std: 1}..."""
 
     logging.info(
         f"Getting embedding stats for {embedding_names} - {len(img_paths)} images"
     )
-    _running_embeddings: dict[ImageEncoderName, Tensor] = {}
+    _running_embeddings: dict[str, Tensor] = {}
 
     for emb_name in embedding_names:
         arg_list = ((str(img_path), emb_name, split) for img_path in img_paths)
@@ -135,7 +109,7 @@ def old_get_embeddings_stats(
 
     logging.info(f"Keys gathered: {_running_embeddings.keys()}")
 
-    embedding_stats: dict[ImageEncoderName, StatsType] = {
+    embedding_stats: dict[str, StatsType] = {
         k: {
             "mean": torch.mean(v, dim=0),
             "std": torch.std(v, dim=0),
@@ -197,7 +171,7 @@ def truncate_data(
 
 def merge_data(
     sub: int, img_paths: list[Path], eeg_data: torch.Tensor, idxs: torch.Tensor
-) -> list[EEGSampleT]:
+) -> list[dict[str, Any]]:
     merged_data = []
 
     for i in range(eeg_data.size(0)):
@@ -216,3 +190,12 @@ def get_from_batch(key: str, batch: Mapping[str, Any], type_: Type[T]) -> T:
     assert (val := batch.get(key)) is not None, f"{key} is not in batch"
     assert isinstance(val, type_), f"{key} is not of type {type_}"
     return cast(T, val)
+
+
+def get_channel_coords_from_names(ch_names: list[str], montage_type: str = "standard_1020") -> Tensor:
+    montage = mne.channels.make_standard_montage(montage_type)
+    montage_positions = montage.get_positions()["ch_pos"]
+    
+    coords = np.stack([montage_positions[ch] for ch in ch_names], axis=0)  # (num_channels, 3)
+    coords = torch.from_numpy(coords).float()  # (num_channels, 3)
+    return coords

@@ -18,6 +18,7 @@ class NiceEEGEncoder(EEGEncoder):
     def __init__(
         self,
         config: NiceEEGEncoderConfig = NiceEEGEncoderConfig(),
+        **kwargs
     ):
         # Adapted from https://github.com/eeyhsong/NICE-EEG
         super(NiceEEGEncoder, self).__init__(config)
@@ -41,7 +42,7 @@ class NiceEEGEncoder(EEGEncoder):
         if not config.flatten:
             raise NotImplementedError("Non-flattened case not implemented yet") 
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         x = self.patch_embedding(x)
         if x.size(1) != self.config.patch_out_size:
             raise ValueError(f"Expected patch_out_size {self.config.patch_out_size}, got {x.size(1)} for output of size {x.size()}.. Please adjust the patch_out_size in the config.")

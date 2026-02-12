@@ -8,15 +8,14 @@ from torch.nn import functional as F
 import tqdm
 from brain_image.configs import BaseConfig
 from torch.utils.data import Dataset
-from typing import Literal, Sequence, cast
+from typing import Any, Literal, Sequence, cast
 
 
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from brain_image.data.data import DSPLIT, EEGSampleT, LatentGroupT, LatentTypeMapT, load_stats, old_get_embeddings_stats
+from brain_image.data.data import load_stats
 from brain_image.data.tensorcache import TensorCache
-from brain_image.model.encoder.encoder import EncoderName, LatentName
 from brain_image.stats import StatsType
 
 
@@ -36,7 +35,6 @@ class DataConfig(BaseConfig, ABC):
     @abstractmethod
     def create_dataset(self, split: Literal["train", "val", "test"], *args, **kwargs) -> Dataset:
         raise NotImplementedError
-
 
     def get_shuffle(self, split: Literal["train", "val", "test"]):
         match split:
@@ -81,13 +79,14 @@ class EEGDatasetConfig(DataConfig, ABC):
     def create_dataset(self, split, *args, **kwargs) -> EEGDataset:
         raise NotImplementedError
 
+
 class EEGDataset(Dataset, ABC):
     def __init__(
         self,
         config: EEGDatasetConfig,
         split: Literal["train", "val", "test"],
         tensor_cache: TensorCache | None = None,
-        embeddings_key_to_name: LatentTypeMapT | None = None,
+        embeddings_key_to_name: dict[str, str] | None = None,
         load_embedding_stats: Sequence[str] = ("prior_img_latent",),
         limit_size: float | None = None,
         limit_shuffle: bool = True,
@@ -116,12 +115,12 @@ class EEGDataset(Dataset, ABC):
         self.eeg_stats = {}
 
         logging.info(f"Loading EEG")
-        self.eeg = torch.stack(
-            [self.load_eeg_from_path(eeg_path) for eeg_path in self.get_eeg_paths()]
-        ).float()  # <sub, image, channel, time>
+        self.eeg = torch.stack([self.load_eeg_from_path(eeg_path) for eeg_path in self.get_eeg_paths()]).float()  # <sub, image, channel, time>
+
+        self.channel_names = self.get_channel_names()
 
         if self.config.norm_over_channels:
-            self.eeg = self.eeg - self.eeg.mean(dim=-1, keepdim=True)  
+            self.eeg = self.eeg - self.eeg.mean(dim=-1, keepdim=True)
             self.eeg = self.eeg / (self.eeg.std(dim=-1, keepdim=True) + 1e-6)
 
         logging.info(f"Reducing dataset size to {limit_size * 100:.2f}%")
@@ -139,13 +138,15 @@ class EEGDataset(Dataset, ABC):
             self.embedding_stats = self._load_embedding_stats("train" if self.split == "train" else "test")
 
     @abstractmethod
+    def get_channel_names(self) -> list[str]:
+        raise NotImplementedError
+
+    @abstractmethod
     def load_eeg_from_path(self, eeg_path: Path) -> torch.Tensor:
         raise NotImplementedError
 
     @abstractmethod
-    def get_eeg_paths(
-        self, split: DSPLIT | None = None, subs: list[int] | None = None
-    ) -> list[Path]:
+    def get_eeg_paths(self, split: str | None = None, subs: list[int] | None = None) -> list[Path]:
         raise NotImplementedError
 
     @abstractmethod
@@ -157,7 +158,7 @@ class EEGDataset(Dataset, ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def __getitem__(self, idx: int) -> EEGSampleT:
+    def __getitem__(self, idx: int) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
@@ -168,23 +169,17 @@ class EEGDataset(Dataset, ABC):
     def limit_data_size(self, limit_size: float, limit_shuffle: bool = True) -> None:
         raise NotImplementedError
 
-    def get_embeddings(self, img_path: Path) -> LatentGroupT:
-        return cast(
-            LatentGroupT,
-            {
-                key: self._get_image_latent_from_cache(
-                    img_path, cast(EncoderName, value), self.split
-                )
-                for key, value in self.embeddings_key_to_name.items()
-                if value is not None
-            },
-        )
+    def get_embeddings(self, img_path: Path) -> dict[str, torch.Tensor]:
+        return {
+            key: self._get_image_latent_from_cache(img_path, value, self.split)
+            for key, value in self.embeddings_key_to_name.items()
+            if value is not None
+        }
 
-    def _load_embedding_stats(self, split: DSPLIT) -> dict[str, StatsType]:
+    def _load_embedding_stats(self, split: str) -> dict[str, StatsType]:
         mapped_stats = {}
 
         for key, embedding_name in self.embeddings_key_to_name.items():
-            embedding_name = cast(str, embedding_name)
             stats = load_stats(self.config.stats_path, self.config.dataset, split, embedding_name)
             mapped_stats[key] = stats
 
@@ -193,7 +188,7 @@ class EEGDataset(Dataset, ABC):
     def _get_image_latent_from_cache(
         self,
         img_path: Path,
-        model_name: EncoderName,
+        model_name: str,
         split: Literal["train", "val", "test"],
     ) -> torch.Tensor:
         return self.tensor_cache.get_latent(img_path, model_name, split)
@@ -202,9 +197,7 @@ class EEGDataset(Dataset, ABC):
         if parallel:
             num_workers = self.config.num_workers or None
             with ThreadPoolExecutor(num_workers) as executor:
-                logging.info(
-                    f"Preloading latents in parallel with {executor._max_workers if num_workers is None else num_workers} workers"
-                )
+                logging.info(f"Preloading latents in parallel with {executor._max_workers if num_workers is None else num_workers} workers")
                 outs = executor.map(self.__getitem__, range(len(self)))
                 num_items = sum(1 for _ in outs)
                 logging.info(f"Preloaded {num_items} latents")
@@ -214,5 +207,3 @@ class EEGDataset(Dataset, ABC):
 
     def get_embedding_stats(self) -> dict[str, StatsType]:
         return self.embedding_stats
-
-

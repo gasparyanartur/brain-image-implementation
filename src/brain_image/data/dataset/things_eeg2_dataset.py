@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Literal, Sequence, cast
+from typing import Any, Literal, Sequence, cast
 
 import numpy as np
 import torch
 from torch import Tensor
-from brain_image.data.data import (
-    DSPLIT,
-    EEGSampleT,
-)
+
 from brain_image.data.dataset.eeg_dataset import EEGDataset, EEGDatasetConfig
 from brain_image.data.io import get_image_paths
 
@@ -21,14 +18,10 @@ ALL_SUBS = list(range(1, 11))
 def _load_eeg_from_path(path: Path) -> torch.Tensor:
     return torch.from_numpy(np.load(path, allow_pickle=True)["preprocessed_eeg_data"]).float()
 
+
 def load_eeg_values(eeg_path: Path, subs: list[int], split: Literal["train", "test"]) -> torch.Tensor:
     file_name = "training.npy" if split == "train" else "test.npy"
-    eeg_paths = [
-            eeg_path
-            / f"sub-{sub:02}"
-            / file_name
-        for sub in subs
-    ] 
+    eeg_paths = [eeg_path / f"sub-{sub:02}" / file_name for sub in subs]
     eeg = torch.stack([_load_eeg_from_path(eeg_path) for eeg_path in eeg_paths])  # <sub, image, channel, space, time>
     return eeg
 
@@ -47,12 +40,7 @@ class ThingsEEG2DatasetConfig(EEGDatasetConfig):
 
 
 class ThingsEEG2Dataset(EEGDataset):
-    def __init__(
-        self,
-        config: ThingsEEG2DatasetConfig,
-        split: Literal["train", "val", "test"],
-        **kwargs
-    ):
+    def __init__(self, config: ThingsEEG2DatasetConfig, split: Literal["train", "val", "test"], **kwargs):
         if config.subs is None:
             config.subs = ALL_SUBS
 
@@ -62,27 +50,22 @@ class ThingsEEG2Dataset(EEGDataset):
             split="train" if split == "train" else "test",
             extensions=(".jpg",),
         )
-         
-        super().__init__(
-            config,
-            split,
-            **kwargs
-        )
+
+        super().__init__(config, split, **kwargs)
         self.config = config
 
-    def prepare(self) -> None:
-        ...
+    def prepare(self) -> None: ...
 
     def get_image_paths(self):
         return self.img_paths
-    
+
     def load_eeg_from_path(self, path: Path) -> Tensor:
         eeg = np.load(path, allow_pickle=True)["preprocessed_eeg_data"]
         eeg = torch.from_numpy(eeg)
         eeg = eeg.mean(dim=1)
         return eeg
 
-    def get_eeg_paths(self, split: DSPLIT | None = None, subs: list[int] | None = None) -> list[Path]:
+    def get_eeg_paths(self, split: str | None = None, subs: list[int] | None = None) -> list[Path]:
         if subs is None:
             subs = self.config.subs
         if subs is None:
@@ -92,25 +75,23 @@ class ThingsEEG2Dataset(EEGDataset):
             split = "train" if self.split == "train" else "test"
 
         eeg_path = self.config.data_path / self.config.preprocessed_eeg_dir
-        
+
         file_name = "training.npy" if split == "train" else "test.npy"
-        eeg_paths = [
-                eeg_path
-                / f"sub-{sub:02}"
-                / file_name
-            for sub in subs
-        ] 
+        eeg_paths = [eeg_path / f"sub-{sub:02}" / file_name for sub in subs]
         return eeg_paths
 
+    def get_channel_names(self) -> list[str]:
+        eeg_paths = self.get_eeg_paths()
+        example_eeg = next(iter(eeg_paths))
+        file = np.load(example_eeg, allow_pickle=True)
+        return file["ch_names"]
 
     def limit_data_size(self, limit_size: float, limit_shuffle: bool = True) -> None:
         if limit_size >= 1.0:
             return
 
         new_size = int(len(self) * self.limit_size)
-        logging.info(
-            f"Limiting dataset size to {self.limit_size * 100:.1f}% - {new_size} samples"
-        )
+        logging.info(f"Limiting dataset size to {self.limit_size * 100:.1f}% - {new_size} samples")
 
         idxs = (
             np.random.choice(
@@ -127,10 +108,10 @@ class ThingsEEG2Dataset(EEGDataset):
     def __len__(self) -> int:
         return self.eeg.shape[0] * self.eeg.shape[1]
 
-    def __getitem__(self, idx: int) -> EEGSampleT:
+    def __getitem__(self, idx: int) -> dict[str, Any]:
         sub, img_idx = divmod(idx, self.eeg.shape[1])
 
-        sub_idx = self.config.subs[sub]     # type: ignore
+        sub_idx = self.config.subs[sub]  # type: ignore
         img_path = self.img_paths[img_idx]
         sample = {
             "img_path": str(img_path),
@@ -140,6 +121,4 @@ class ThingsEEG2Dataset(EEGDataset):
             **self.get_embeddings(img_path),
         }
 
-        return cast(EEGSampleT, sample)
-
-
+        return sample

@@ -3,20 +3,16 @@ import json
 import logging
 from pathlib import Path
 from typing import Literal, cast
-from pytorch_lightning import LightningModule
-import pytorch_lightning as pl
 
 
 from torch.nn import functional as F
 import torch
 from torch import Tensor, nn
 from torchvision.transforms import v2 as tv2
-import itertools as it
 
 import tqdm
 
 from brain_image.augment import EEGAugmentationPipeline, ImageAugmentationPipeline, LatentAugmentationPipeline
-from brain_image.data.data import LatentTypeMapT
 from brain_image.data.io import batch_load_images
 from brain_image.data.datamodule import EEGDataModule
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
@@ -26,25 +22,19 @@ from brain_image.model.comm.comm import CoMM
 from brain_image.model.comm.comm_loss import CoMMLoss
 from brain_image.model.comm.input_adapters import FeaturesInputAdapter
 from brain_image.model.comm.mmfusion import MMFusion
-from brain_image.model.comm.utils import (
-    LinearWarmupCosineAnnealingLR,
-    all_gather_batch_with_grad,
-    set_weight_decay_per_param,
-)
 from brain_image.model.encoder.eeg_encoder.union import (
     EEGEncoderConfigType,
     create_eeg_encoder,
 )
-from brain_image.model.encoder.eeg_encoder.eeg_encoder import EEGEncoderConfig
 from brain_image.model.encoder.encoder import EncoderName
 from brain_image.model.encoder.img_encoder.union import (
     ImageEncoderName,
 )
 from brain_image.model.encoder.img_encoder.union import IMAGE_ENCODER_DIM, load_image_encoder
-from brain_image.model.loss import CLIPLoss, CLIPSimLoss
+from brain_image.model.loss import CLIPSimLoss
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
-from brain_image.utils import gather_dataloader, gather_records, prep_batch_for_logs
+from brain_image.utils import gather_dataloader, prep_batch_for_logs
 
 
 class CommAlignmentConfig(TrainingModuleConfig):

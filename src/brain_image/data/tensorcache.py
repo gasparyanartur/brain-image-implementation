@@ -10,9 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterable, Literal, Sequence, cast
 
-from brain_image.model.encoder.encoder import EncoderName
-
-
 def _encode_tensor_keys(keys: tuple[str, ...]) -> str:
     return "/".join(keys)
 
@@ -79,7 +76,7 @@ class TensorCache:
     def get_latent(
         self,
         source_path: Path,
-        model_name: EncoderName,
+        model_name: str,
         split: Literal["train", "val", "test"],
     ) -> Tensor:
         split = "train" if split == "train" else "test"

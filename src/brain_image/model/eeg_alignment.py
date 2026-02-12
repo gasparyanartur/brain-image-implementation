@@ -307,6 +307,7 @@ class EEGAlignmentModel(TrainingModule):
         self.eeg_encoder = create_eeg_encoder(
             self.config.eeg_encoder,
             checkpoint_path=eeg_encoder_path,
+            channel_names=self.data_module.get_dataset("train").get_channel_names(),
         )
 
         match self.config.align_loss_type:

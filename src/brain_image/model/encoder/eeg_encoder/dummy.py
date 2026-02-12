@@ -14,6 +14,7 @@ class DummyEEGEncoder(EEGEncoder):
     def __init__(
         self,
         config: DummyEEGEncoderConfig = DummyEEGEncoderConfig(),
+        **kwargs
     ):
         super(DummyEEGEncoder, self).__init__(config)
 
@@ -22,5 +23,5 @@ class DummyEEGEncoder(EEGEncoder):
 
         assert config.d_output is not None, "d_output must be specified for NiceEEGEncoder"
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return torch.randn(x.shape[0], self.config.d_output, device=x.device, dtype=torch.float32)

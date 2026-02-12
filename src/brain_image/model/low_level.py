@@ -15,9 +15,7 @@ from brain_image.utils import batchify_operation
 import logging
 import pytorch_lightning as pl
 from brain_image.model.encoder.eeg_encoder.union import create_eeg_encoder
-from brain_image.data.data import (
-    LatentTypeMapT,
-)
+
 from torch import nn
 from torch.nn import functional as F
 from diffusers.models.autoencoders.vae import Decoder
@@ -143,7 +141,7 @@ class LowLevelModule(TrainingModule):
 
         self.config = config
         tensorcache = TensorCache()
-        emb_map: LatentTypeMapT = {
+        emb_map: dict[str, str | None] = {
             "low_level_latent": self.config.vae_encoder,
             "align_img_latent": None,
             "prior_img_latent": None,

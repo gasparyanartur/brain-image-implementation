@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 import logging
 import re
-from typing import Literal, Sequence, cast
+from typing import Any, Literal, Sequence, cast
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -11,8 +11,6 @@ from pathlib import Path
 import torch
 
 from brain_image.data.data import (
-    DSPLIT,
-    EEGSampleT,
     get_eeg_stats,
     rescale_eeg,
     truncate_data,
@@ -237,7 +235,7 @@ class AlljoinedEEG2Dataset(EEGDataset):
             self.eeg[i_sub] = eeg
 
 
-    def __getitem__(self, idx: int) -> EEGSampleT:
+    def __getitem__(self, idx: int) -> dict[str, Any]:
         sub, img_idx = divmod(idx, self.eeg.shape[1])
         assert self.config.subs is not None 
 
@@ -253,7 +251,7 @@ class AlljoinedEEG2Dataset(EEGDataset):
             "sub": sub_idx,
             **self.get_embeddings(img_path),
         }
-        return cast(EEGSampleT, sample)
+        return sample
 
 
 

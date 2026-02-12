@@ -410,6 +410,7 @@ class AtmsEEGEncoder(EEGEncoder):
     def __init__(
         self,
         config: AtmsEEGEncoderConfig = AtmsEEGEncoderConfig(),
+        **kwargs
     ):
         super(AtmsEEGEncoder, self).__init__(config)
         self.config = config

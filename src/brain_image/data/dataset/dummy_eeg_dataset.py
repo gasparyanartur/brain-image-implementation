@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from pathlib import Path
 
 import torch
@@ -8,11 +8,9 @@ import torch
 from brain_image.data.data import (
     DSPLIT,
     SPLIT,
-    EEGSampleT,
-    LatentTypeMapT,
 )
+from brain_image.data.dataset.defaults import DEFAULT_CHANNEL_NAMES
 from brain_image.data.dataset.eeg_dataset import EEGDataset, EEGDatasetConfig
-from brain_image.data.tensorcache import TensorCache
 from brain_image.model.encoder.img_encoder.union import ImageEncoderName
 from brain_image.model.encoder.img_encoder.union import IMAGE_ENCODER_DIM
 
@@ -21,7 +19,7 @@ class DummyEEGDatasetConfig(EEGDatasetConfig):
     dataset: Literal["dummy"] = "dummy"
     data_path: Path = Path("data/dummy")
     subs: list[int] | None = [1]
-    num_channels: int = 32
+    num_channels: int = 25
     time_length: int = 250
     dummy_img_path: Path = Path("dummy/img.png")
     dummy_eeg_path: Path = Path("dummy/eeg.npy")
@@ -74,7 +72,8 @@ class DummyEEGDataset(EEGDataset):
             }
         return stats
     
-
+    def get_channel_names(self):
+        return DEFAULT_CHANNEL_NAMES[:self.config.num_channels]
     
     def get_embeddings(self, img_path):
         embedding_stack = {}
@@ -94,8 +93,8 @@ class DummyEEGDataset(EEGDataset):
     def prepare(self) -> None:
         ...
 
-
-    def __getitem__(self, idx: int) -> EEGSampleT:
+    
+    def __getitem__(self, idx: int) -> dict[str, Any]:
         sub, img_idx = divmod(idx, self.eeg.shape[1])
 
         sub_idx = self.config.subs[sub] if self.config.subs is not None else 1
@@ -109,7 +108,7 @@ class DummyEEGDataset(EEGDataset):
             "sub": sub_idx,
             **self.get_embeddings(img_path),
         }
-        return cast(EEGSampleT, sample)
+        return sample
 
     def _generate_eeg(self):
         return torch.randn(self.config.num_channels, self.config.time_length)
