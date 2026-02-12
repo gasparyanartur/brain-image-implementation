@@ -58,6 +58,11 @@ apptainer exec \
 --pwd /workspace \
 --env PROJECT_WORKSPACE_DIR=/workspace \
 ${export_env_args[*]} \
-${mount_point[*]} \
+${mount_points[*]} \
 $image_path \
 $CLI_ARGS
+
+if [ $? -eq 0 ]; then
+    echo "Command $CLI_ARGS completed at $(date) with exit code 0"
+else
+    echo "Command $CLI_ARGS failed at $(date) with exit code $?"

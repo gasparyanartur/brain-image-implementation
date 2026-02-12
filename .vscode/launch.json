@@ -125,6 +125,35 @@
             "args": [
                 "logs/train/260130195833wxxriq",
             ]
+        },
+        {
+            "name": "Train EEG - patchattn - Debug",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/training/train_eeg.py",
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "",
+            },
+            "args": [
+                "--config-name=train_eeg",
+                "trainer.debug_mode=true",
+                "trainer.wandb.enabled=false",
+                "trainer.compile_model=false",
+                "trainer.enable_barebones=true",
+                "trainer.log_every_n_steps=5",
+
+                "dataset.batch_size=32",
+                "dataset.limit_train_size=0.01",
+                "dataset.limit_val_size=0.1",
+                "dataset.num_workers=0",
+
+                "eeg_encoder@model.eeg_encoder=patchattn",
+                "model.full_eval_every_epochs=5",
+                "model.skip_eval_first_epoch=true",
+                "model.log_gradients=true",
+                "model.max_epochs=5",
+            ]
         }
     ]
 }

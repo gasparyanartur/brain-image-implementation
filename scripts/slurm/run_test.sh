@@ -9,19 +9,6 @@
 #SBATCH --output=logs/slurm/test_eeg/%j.out
 #SBATCH --account=Berzelius-2025-278
 
-
-echo "Job ID: $SLURM_JOB_ID"
-echo "Job Name: $SLURM_JOB_NAME"
-echo "Node: $SLURM_NODELIST"
-echo "Working Directory: $(pwd)"
-echo "Date: $(date)"
-
-image_path=${APPTAINER_IMAGE_PATH}
-# if image_path is not set, use the latest image path
-if [ -z "$image_path" ]; then
-    image_path=$(ls -t images/brain_*.sif | head -n 1)
-fi
-
 test_script=$1
 echo "Test script: $test_script"
 echo "Image path: $image_path"

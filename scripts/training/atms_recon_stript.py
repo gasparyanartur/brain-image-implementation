@@ -1,3 +1,7 @@
+# Reimplementation of https://github.com/dongyangli-del/EEG_Image_decode
+
+# TODO: Fix this script
+
 import itertools as it
 import multiprocessing as mp
 from argparse import ArgumentParser
@@ -10,7 +14,7 @@ import matplotlib.pyplot as plt
 import datetime
 
 from brain_image.data.tensorcache import TensorCache
-from brain_image.model.eeg_encoder import atms
+from brain_image.model.encoder.eeg_encoder import atms
 
 ALIGN_LOSS_SCALE = 1
 REGRESS_LOSS_SCALE = 9

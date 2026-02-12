@@ -29,13 +29,15 @@ declare -A preprocess_member=(
 )
 
 args=("$@")
+modality="eeg"
+has_download_types=0
 
 i=0
 N=${#args[@]}
 
 is_keyword() {
   local k="$1"
-  [[ -v download_member["$k"] || -v preprocess_member["$k"] ]]
+  [[ -v download_member["$k"] || -v preprocess_member["$k"] || "$k" == "--modality" ]]
 }
 
 while (( i < N )); do
@@ -56,6 +58,19 @@ while (( i < N )); do
   done
 
   # dispatch
+  if [[ "$key" == "--modality" ]]; then
+    if (( ${#values[@]} == 0 )); then
+      echo "Missing value for --modality (eeg|img)"
+      exit 2
+    fi
+    modality="${values[0]}"
+    continue
+  fi
+
+  if [[ "$key" == "-t" || "$key" == "--download_types" ]]; then
+    has_download_types=1
+  fi
+
   if [[ -v download_member["$key"] ]]; then
     download_kwargs+=("$key" "${values[@]}")
   fi
@@ -65,6 +80,16 @@ while (( i < N )); do
   fi
 done
 
+if (( has_download_types == 0 )); then
+  case "$modality" in
+    eeg) download_kwargs+=("--download_types" "eeg") ;;
+    img) download_kwargs+=("--download_types" "imgs") ;;
+    *)
+      echo "Invalid --modality: $modality (expected eeg|img)"
+      exit 2
+      ;;
+  esac
+fi
 
 download_cmd_path=$(dirname "$0")/download.py
 echo "Running python ${download_cmd_path} ${download_kwargs[@]}"
