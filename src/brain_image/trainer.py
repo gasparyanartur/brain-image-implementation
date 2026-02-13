@@ -14,7 +14,7 @@ from brain_image.model.comm_alignment import CommAlignmentModel
 from brain_image.model.eeg_alignment import EEGAlignmentModel
 from brain_image.model.low_level import LowLevelModule
 from brain_image.model.model import TrainingModule
-from brain_image.utils import create_model_id, get_dtype, init_wandb
+from brain_image.utils import create_model_id, get_dtype, get_model_parameter_count, init_wandb
 
 class WandbConfig(BaseConfig):
     enabled: bool = True
@@ -49,6 +49,7 @@ class TrainerConfig(BaseConfig):
     enable_model_summary: bool = True
     save_checkpoints: bool = True
     save_top_k: int = 1
+    log_model_summary: bool = True
 
     make_subdir: bool = False
     wandb: WandbConfig = WandbConfig()
@@ -95,6 +96,9 @@ class Trainer:
                 verbose=True,
             )
             callbacks.append(early_stopping_callback)
+
+        if self.config.log_model_summary:
+            callbacks.append(ModelSummary(max_depth=2))
 
         log_path = self.config.log_dir 
         if self.config.make_subdir:
@@ -217,6 +221,13 @@ class Trainer:
         logging.info(
             f"Starting training with Lightning..."
         )
+
+        logging.info(f"Parameters:")
+        for key, value in get_model_parameter_count(self.model).items():
+            if key == "":
+                key = "total"
+            
+            logging.info(f"  {key}: {value / 1e6:.2f}M")
 
         ckpt_path_str = str(ckpt_path) if ckpt_path else None
 

@@ -14,7 +14,10 @@ class ChannelTimeEmbedding(nn.Module):
         self,
         channel_names: list[str],
         max_time_length: int,
-        embed_dim: int = 64,
+        d_time_embed: int = 64,
+        d_space_embed: int = 64,
+        d_input: int = 64,
+        d_embed: int = 192,
         montage_type: str = "standard_1020",
         spatial_fourier_freqs: int = 4,  # 0 to disable Fourier features
     ):
@@ -26,10 +29,17 @@ class ChannelTimeEmbedding(nn.Module):
         self.use_fourier = spatial_fourier_freqs > 0
         self.spatial_fourier_freqs = spatial_fourier_freqs
 
-        self.coord_proj = nn.Linear(3 * (2 * spatial_fourier_freqs) if self.use_fourier else 3, embed_dim)
+        self.coord_proj = nn.Linear(3 * (2 * spatial_fourier_freqs) if self.use_fourier else 3, d_space_embed)
 
-        time_embed = self._build_time_embedding(max_time_length, embed_dim)
+        time_embed = self._build_time_embedding(max_time_length, d_time_embed)
         coord_embed = self._build_coord_embedding(coords)
+
+        self.embed_proj = nn.Sequential(
+            nn.Linear(d_input + d_time_embed + d_space_embed, d_embed),
+            nn.GELU(),
+            nn.LayerNorm(d_embed),
+            nn.Linear(d_embed, d_embed),
+        )
 
         self.register_buffer("time_embedding", time_embed, persistent=False)
         self.register_buffer("coord_embedding", coord_embed, persistent=False)
@@ -64,7 +74,8 @@ class ChannelTimeEmbedding(nn.Module):
         time_emb = self.time_embedding[:T]  # (T, F), # type: ignore
         time_emb = time_emb.unsqueeze(0).unsqueeze(1)  # (1, 1, T, F) #type: ignore
 
-        emb =  x + spatial_emb + time_emb
+        emb = torch.cat([x, spatial_emb.expand(B, -1, T, -1), time_emb.expand(B, C, -1, -1)], dim=-1)  # (B, C, T, F + F + F)
+        emb = self.embed_proj(emb)  # (B, C, T, d_embed)
         return emb
 
 
@@ -109,23 +120,22 @@ class PatchAttentionLayer(nn.Module):
         B, C, T, F = x.shape
 
         # 1) Channel Attention (per timestep)
-        # TODO: Look into dimensions
-        x_c = x.permute(0, 2, 1, 3).reshape(B * T, C, F)
+        x_c = x.permute(0, 2, 1, 3).reshape(B * T, C, F).contiguous()
 
         x_c_norm = self.norm_c(x_c)
         attn_out, _ = self.attn_c(x_c_norm, x_c_norm, x_c_norm)
 
-        x_c = x_c + self.dropout(attn_out)
+        x_c = x_c + attn_out
 
-        x = x_c.reshape(B, T, C, F).permute(0, 2, 1, 3)
+        x = x_c.reshape(B, T, C, F).permute(0, 2, 1, 3)  
 
         # 2) Time Attention (per channel)
-        x_t = x.reshape(B * C, T, F)
+        x_t = x.reshape(B * C, T, F).contiguous()
 
         x_t_norm = self.norm_t(x_t)
         attn_out, _ = self.attn_t(x_t_norm, x_t_norm, x_t_norm)
 
-        x_t = x_t + self.dropout(attn_out)
+        x_t = x_t + attn_out
 
         x = x_t.reshape(B, C, T, F)
 
@@ -162,7 +172,7 @@ class PatchAttentionEncoder(nn.Module):
             ]
         )
 
-        self.conv_upscale = nn.Conv2d(d_token, d_embed, kernel_size=1)
+        self.projection = nn.Linear(d_token, d_embed)
 
     def forward(self, x: Tensor) -> Tensor:
         # x: (B, C, T, F)
@@ -171,10 +181,10 @@ class PatchAttentionEncoder(nn.Module):
             x = layer(x)
 
 
-        x = self.conv_upscale(x.permute(0, 3, 1, 2))  # (B, F, C, T)
+        x = self.projection(x)  # (B, C, T, d_embed)
 
         # Mean pool over channels and time
-        x = x.mean(dim=[2, 3])  # (B, D)
+        x = x.mean(dim=[1, 2])  # (B, d_embed)
 
         return x
 
@@ -183,13 +193,16 @@ class PatchAttentionEEGEncoderConfig(EEGEncoderConfig):
     eeg_encoder: Literal["patchattn"] = "patchattn"
     dropout: float = 0.5
     attn_dropout: float = 0.1
-    d_token: int = 40
-    d_embed: int = 256
+    d_token: int = 128
+    d_embed: int = 512
     time_kernel_size: int = 25
     time_stride: int = 5
-    num_layers: int = 1
-    num_heads: int = 1
-    ff_mult: int = 1
+    num_layers: int = 3
+    num_heads: int = 2
+    ff_mult: int = 2
+    d_time_token: int = 64
+    d_time_embed: int = 64
+    d_space_embed: int = 64
     num_spatial_fourier_freqs: int = 32  # 0 to disable Fourier features
 
     flatten: bool = True
@@ -211,18 +224,21 @@ class PatchAttentionEEGEncoder(EEGEncoder):
         assert config.d_channels is not None, "d_channels must be specified for PatchAttnEncoder"
         assert len(channel_names) == config.d_channels, f"Number of channel names {len(channel_names)} does not match d_channels {config.d_channels} in config."
 
+
+        # 250 -> ~30
+        self.time_conv = torch._dynamo.disable(nn.Sequential(
+            nn.Conv2d(1, config.d_time_token, kernel_size=(1, config.time_kernel_size), stride=(1, 5)),
+        ), recursive=True, reason="Stride fails on the last batch, likely due to size mismatch. Needs further investigation.")
+
+
         self.channel_time_embed = ChannelTimeEmbedding(
             channel_names=channel_names,
             max_time_length=self.config.d_time,
-            embed_dim=config.d_token,
+            d_input=config.d_time_token,
+            d_time_embed=config.d_time_embed,
+            d_embed=config.d_token,
+            d_space_embed=config.d_space_embed,
             spatial_fourier_freqs=config.num_spatial_fourier_freqs,
-        )
-
-        # 250 -> ~30
-        self.time_conv = nn.Sequential(
-            nn.Conv2d(1, config.d_token, kernel_size=(1, config.time_kernel_size), stride=(1, 3)),
-            nn.ELU(),
-            nn.Conv2d(config.d_token, config.d_token, kernel_size=(1, config.time_kernel_size), stride=(1, 2)),
         )
 
         self.patch_attn_encoder = PatchAttentionEncoder(
@@ -235,15 +251,18 @@ class PatchAttentionEEGEncoder(EEGEncoder):
         )
         
         self.proj = nn.Sequential(
+            nn.LayerNorm(config.d_embed),
+            nn.GELU(),
+            nn.Dropout(config.dropout),
             nn.Linear(config.d_embed, config.d_output),
             nn.LayerNorm(config.d_output),
         )
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         # <B, channel, time>
-        x = x.unsqueeze(1)  # <B, 1, channel, time>
+        x = x.unsqueeze(1).contiguous()  # <B, 1, channel, time>
         x = self.time_conv(x)  # <B, d_token, channel, time_reduced>
-        x = x.swapaxes(1, 2).swapaxes(2, 3)  # <B, channel, time_reduced, d_token>
+        x = x.permute(0, 2, 3, 1).contiguous()  # <B, channel, time_reduced, d_token>
         x = self.channel_time_embed(x)  # <B, channel, time, d_token>
 
         x = self.patch_attn_encoder(x)  # <B, d_token>

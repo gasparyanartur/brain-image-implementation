@@ -503,10 +503,7 @@ def z_norm(x: torch.Tensor, dim: int = -1, eps: float = 1e-8) -> torch.Tensor:
 
 
 def get_model_parameter_count(model: nn.Module) -> dict[str, int]:
-    total = 0
     counts = {}
     for model_name, submodel in model.named_modules():
         counts[model_name] = sum(p.numel() for p in submodel.parameters())
-        total += counts[model_name]
-    counts["total"] = total
     return counts
