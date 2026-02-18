@@ -44,7 +44,9 @@ dependencies = [
     "mne",
     "scikit-image",
     "google-genai",
-    "umap-learn"
+    "openai",
+    "umap-learn",
+    "sentence-transformers",
 ]
 
 [project.optional-dependencies]
