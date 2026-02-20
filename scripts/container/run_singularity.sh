@@ -15,11 +15,11 @@ else
 fi
 
 
-if [ -d "/proj" ]; then
+if [ -n "$STORAGE_DIR" ] && [ -d "$STORAGE_DIR" ]; then
     if [ -z "$SILENCE" ]; then
-        echo "Mounting /proj"
+        echo "Mounting $STORAGE_DIR"
     fi
-    mount_points+=("--bind /proj/proj")
+    mount_points+=("--bind $STORAGE_DIR")
 fi
 
 if [ -d "/home" ]; then
@@ -35,16 +35,17 @@ fi
 
 # Set environment variables for the container
 export PROJECT_WORKSPACE_DIR=/workspace
-export PYTHONPATH="/workspace/src:$PYTHONPATH"
+export PYTHONPATH="/workspace/src:${PYTHONPATH:-}"
+export PYTHONUNBUFFERED=1
 
-# Pass through important environment variables
-export_env_args=("--env PYTHONUNBUFFERED=1")
-if [ -n "$WANDB_API_KEY" ]; then
-    export_env_args+=("--env WANDB_API_KEY=$WANDB_API_KEY")
-fi
+# Pass through all current environment variables
+export_env_args=()
+while IFS='=' read -r key value; do
+    export_env_args+=("--env" "${key}=${value}")
+done < <(env)
 
 CLI_ARGS="$@"
-if [ -z "SILENCE" ]; then
+if [ -z "$SILENCE" ]; then
     echo "CLI_ARGS: $CLI_ARGS"
 fi
 
@@ -56,8 +57,7 @@ apptainer exec \
 --home /workspace \
 --workdir /workspace \
 --pwd /workspace \
---env PROJECT_WORKSPACE_DIR=/workspace \
-${export_env_args[*]} \
+"${export_env_args[@]}" \
 ${mount_points[*]} \
 $image_path \
 $CLI_ARGS
