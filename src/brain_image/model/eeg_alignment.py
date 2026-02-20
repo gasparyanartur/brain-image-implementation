@@ -135,18 +135,18 @@ class EEGAlignmentConfig(TrainingModuleConfig):
     debug_metrics: bool = False
     eeg_encoder_path: Path | None = None
 
-    eeg_aug_ampscale_prob: float = 0.75
-    eeg_aug_timeshift_prob: float = 0.75
-    eeg_aug_ampshift_prob: float = 0.75
+    eeg_aug_ampscale_prob: float = 0.2
+    eeg_aug_timeshift_prob: float = 0.2
+    eeg_aug_ampshift_prob: float = 0.2
     eeg_aug_bandstop_prob: float = 0
-    eeg_aug_zeromask_prob: float = 0.5
-    eeg_aug_blur_prob: float = 0.75
-    eeg_aug_blur_std: float = 0.4
-    eeg_aug_ampscale_min: float = 0.2
-    eeg_aug_ampscale_max: float = 2.0
+    eeg_aug_zeromask_prob: float = 0.2
+    eeg_aug_blur_prob: float = 0.2
+    eeg_aug_blur_std: float = 0.1
+    eeg_aug_ampscale_min: float = 0.5
+    eeg_aug_ampscale_max: float = 1.5
     eeg_aug_timeshift_max_scale: float = 0.2
-    eeg_aug_ampshift_max_scale: float = 3
-    eeg_aug_zeromask_max_scale: float = 0.25
+    eeg_aug_ampshift_max_scale: float = 1.5
+    eeg_aug_zeromask_max_scale: float = 0.2
     eeg_aug_bandstop_sample_rate: int = 200
     eeg_aug_bandstop_min_freq: float = 2.8
     eeg_aug_bandstop_max_freq: float = 82.5
@@ -264,7 +264,7 @@ class EEGAlignmentModel(TrainingModule):
 
         if self.config.aug_eeg:
             self.eeg_augmenter = EEGAugmentationPipeline(
-                ampscale_prob=config.eeg_aug_ampshift_prob,
+                ampscale_prob=config.eeg_aug_ampscale_prob,
                 timeshift_prob=config.eeg_aug_timeshift_prob,
                 ampshift_prob=config.eeg_aug_ampshift_prob,
                 bandstop_prob=config.eeg_aug_bandstop_prob,

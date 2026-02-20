@@ -1,0 +1,23 @@
+# EEG augmentation enabled (moderate defaults)
+# These map to fields on EEGAlignmentConfig / CoMM config.
+model:
+  aug_eeg: true
+
+  eeg_aug_ampscale_prob: 0.2
+  eeg_aug_timeshift_prob: 0.2
+  eeg_aug_ampshift_prob: 0.2
+  eeg_aug_bandstop_prob: 0.0
+  eeg_aug_zeromask_prob: 0.2
+  eeg_aug_blur_prob: 0.2
+
+  eeg_aug_blur_std: 0.1
+  eeg_aug_ampscale_min: 0.5
+  eeg_aug_ampscale_max: 1.5
+  eeg_aug_timeshift_max_scale: 0.2
+  eeg_aug_ampshift_max_scale: 1.5
+  eeg_aug_zeromask_max_scale: 0.2
+
+  eeg_aug_bandstop_sample_rate: 200
+  eeg_aug_bandstop_min_freq: 2.8
+  eeg_aug_bandstop_max_freq: 82.5
+  eeg_aug_bandstop_width: 5

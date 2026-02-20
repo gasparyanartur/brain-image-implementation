@@ -1,5 +1,6 @@
 defaults:
   - train_eeg
+  - augmentation: eeg
   - _self_
 
 model:
@@ -18,7 +19,6 @@ model:
 
   max_epochs: 200
   full_eval_every_epochs: 20
-  aug_eeg: true
 
 trainer:
   checkpoint_monitor_early_stop: 20

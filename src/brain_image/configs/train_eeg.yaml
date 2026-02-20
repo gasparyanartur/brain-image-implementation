@@ -3,6 +3,7 @@ defaults:
   - dataset: things-eeg2
   - model: eeg_model
   - trainer: eeg_trainer
+  - augmentation: none
   - _self_
 
 checkpoint_path: null

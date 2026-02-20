@@ -1,5 +1,6 @@
 defaults:
   - train_eeg
+  - augmentation: eeg
   - _self_
 
 model:
@@ -16,7 +17,6 @@ model:
   encoder_delay_epochs: 0
 
   align_img_encoder: "aligned_synclr_vitb16"
-  aug_eeg: true
 
   modules_to_train:
     - eeg_encoder

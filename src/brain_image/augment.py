@@ -19,10 +19,12 @@ class BaseAugment(nn.Module, ABC):
             return x
 
         if self.prob == 1:
-            return self.augment(x)
+            x = x.clone()
+            x = self.augment(x)
+            return x.contiguous()
 
         x = x.clone()
-        mask = torch.rand(x.shape[0], device=x.device) > self.prob
+        mask = torch.rand(x.shape[0], device=x.device) < self.prob
 
         if not mask.any().item():
             return x

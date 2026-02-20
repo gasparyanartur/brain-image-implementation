@@ -95,12 +95,12 @@ class CommAlignmentConfig(TrainingModuleConfig):
     img_enc_noise_prob: float = 0.75
     img_enc_dropout_prob: float = 0.1
 
-    eeg_aug_ampscale_prob: float = 0.75
-    eeg_aug_timeshift_prob: float = 0.75
-    eeg_aug_ampshift_prob: float = 0.75
+    eeg_aug_ampscale_prob: float = 0.2
+    eeg_aug_timeshift_prob: float = 0.2
+    eeg_aug_ampshift_prob: float = 0.2
     eeg_aug_bandstop_prob: float = 0
     eeg_aug_zeromask_prob: float = 0.5
-    eeg_aug_blur_prob: float = 0.75
+    eeg_aug_blur_prob: float = 0.2
     eeg_aug_blur_std: float = 0.4
 
     eeg_aug_ampscale_min: float = 0.2
@@ -218,7 +218,7 @@ class CommAlignmentModel(TrainingModule):
         )
 
         self.eeg_augmenter = EEGAugmentationPipeline(
-            ampscale_prob=config.eeg_aug_ampshift_prob,
+            ampscale_prob=config.eeg_aug_ampscale_prob,
             timeshift_prob=config.eeg_aug_timeshift_prob,
             ampshift_prob=config.eeg_aug_ampshift_prob,
             bandstop_prob=config.eeg_aug_bandstop_prob,

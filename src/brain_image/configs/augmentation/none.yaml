@@ -1,0 +1,3 @@
+# EEG augmentation disabled
+model:
+  aug_eeg: false
