@@ -1,13 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=prepare_data
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=64G
-#SBATCH --partition=berzelius-cpu
-#SBATCH --time=04:00:00
-#SBATCH --output=logs/slurm/prepare_data/%j.out
-#SBATCH --account=Berzelius-2025-278
+# Job body for data preparation. Submit via:
+#   SBATCH_GROUP=cpu ssub.sh prepare_data scripts/data/run_prepare_data.sh <dataset> [--modality eeg|img] [args...]
+# For array jobs (one sub per task):
+#   SBATCH_GROUP=cpu SBATCH_ARRAY=1-8 ssub.sh prepare_data scripts/data/run_prepare_data.sh <dataset>
 
 dataset=$1
 if [[ -z "${dataset:-}" ]]; then
@@ -52,7 +47,7 @@ if (( has_sub == 0 )) && [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]] && [[ "$modality" =
     cli_args+=(-s "$SLURM_ARRAY_TASK_ID")
 fi
 
-cmd="/workspace/scripts/data/${dataset}/prepare.sh --modality ${modality} ${cli_args[@]}"
+cmd="${PROJECT_WORKSPACE_DIR:-/workspace}/scripts/data/${dataset}/prepare.sh --modality ${modality} ${cli_args[@]}"
 echo "Preparing data with command: $cmd"
 
 ./scripts/container/run_singularity.sh $cmd

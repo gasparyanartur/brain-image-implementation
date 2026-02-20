@@ -66,3 +66,5 @@ if [ $? -eq 0 ]; then
     echo "Command $CLI_ARGS completed at $(date) with exit code 0"
 else
     echo "Command $CLI_ARGS failed at $(date) with exit code $?"
+    exit 1
+fi

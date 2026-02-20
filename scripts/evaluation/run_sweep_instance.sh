@@ -1,13 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=sweep
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=128G
-#SBATCH --gpus=1
-#SBATCH --time=2-00:00:00
-#SBATCH --output=logs/slurm/sweep/%A_%a.out
-#SBATCH --account=Berzelius-2025-278
+# Job body for sweep evaluation. Submit via:
+#   SBATCH_ARRAY=0-N ssub.sh sweep scripts/evaluation/run_sweep_instance.sh <param_path> [args...]
 
 echo "Job ID: $SLURM_JOB_ID"
 echo "Array Index: $SLURM_ARRAY_TASK_ID"

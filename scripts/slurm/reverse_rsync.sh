@@ -4,7 +4,7 @@
 src_path=$1
 dst_path=$2
 
-cluster_url=${CLUSTER_URL:-x_artga@berzelius.nsc.liu.se}
+cluster_url=${CLUSTER_URL:?CLUSTER_URL is not set}
 
 if [ -z "$src_path" ]; then
     echo "Missing src_path"

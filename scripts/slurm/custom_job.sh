@@ -1,15 +1,4 @@
-#!/bin/bash
-#SBATCH --job-name=custom
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=64G
-#SBATCH --gpus=1
-#SBATCH --time=08:00:00
-#SBATCH --output=logs/slurm/custom/%A_%a.out
-#SBATCH --account=Berzelius-2025-278
-
-CLI_ARGS="$@"
-
-echo "CLI_ARGS: $CLI_ARGS"
-./scripts/container/run_singularity.sh $CLI_ARGS
+#!/usr/bin/env bash
+# Thin wrapper: submit a GPU wrap job via ssub.sh
+# Usage: custom_job.sh <job_name> <command...>
+exec "$(dirname "$0")/ssub.sh" "${1:?job_name required}" --wrap "${@:2}"

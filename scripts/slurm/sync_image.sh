@@ -10,10 +10,10 @@ if [ -z "$image_path" ]; then
     fi
 fi
 
-dest_dir=${APPTAINER_IMAGE_DEST_DIR:-/home/x_artga/projdir/images}
+dest_dir=${APPTAINER_IMAGE_DEST_DIR:?APPTAINER_IMAGE_DEST_DIR is not set}
 
 image_name=$(basename $image_path)
-cluster_url=${CLUSTER_URL:-x_artga@berzelius.nsc.liu.se}
+cluster_url=${CLUSTER_URL:?CLUSTER_URL is not set}
 final_image_path="${cluster_url}:${dest_dir}/${image_name}"
 
 echo "Syncing image $image_path to $final_image_path"

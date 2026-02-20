@@ -38,11 +38,19 @@ symlink $storage_path/experiments experiments
 If you're on a SLURM cluster, also create the following directories:
 
 ```
-mkdir -p logs/slurm/setup_data
-mkdir -p logs/slurm/generate_embeddings
-mkdir -p logs/slurm/train_eeg
-mkdir -p logs/slurm/test_eeg
-mkdir -p logs/slurm/sweep
+mkdir -p logs/slurm
+```
+
+To submit jobs with centralized Slurm defaults, use `scripts/slurm/ssub.sh`:
+
+```bash
+export SLURM_LOG_DIR=logs/slurm
+export SBATCH_ACCOUNT=Berzelius-2025-278
+export SBATCH_CPU_PARTITION=berzelius-cpu
+export SBATCH_GPU_PARTITION=berzelius-gpu
+
+# Example (CPU)
+SBATCH_GROUP=cpu SBATCH_TIME=04:00:00 scripts/slurm/ssub.sh prepare_data scripts/data/run_prepare_data.sh things-eeg2 --modality eeg
 ```
 
 
