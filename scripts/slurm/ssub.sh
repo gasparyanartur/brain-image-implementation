@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Auto-load .env from the repo root if present.
+_root="$(cd "$(dirname "$0")/../.." && pwd)"
+if [[ -f "$_root/.env" ]]; then
+  set -a; source "$_root/.env"; set +a
+fi
+
 usage() {
   cat <<'EOF'
 Usage:
