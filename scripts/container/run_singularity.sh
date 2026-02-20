@@ -22,6 +22,12 @@ if [ -n "$STORAGE_DIR" ] && [ -d "$STORAGE_DIR" ]; then
     mount_points+=("--bind $STORAGE_DIR")
 fi
 
+# Mount host SSL certs so the container can verify TLS (e.g. wandb, HuggingFace)
+if [ -d "/etc/pki/ca-trust" ]; then
+    mount_points+=("--bind /etc/pki/ca-trust:/etc/pki/ca-trust:ro")
+    mount_points+=("--bind /etc/pki/tls:/etc/pki/tls:ro")
+fi
+
 if [ -d "/home" ]; then
     if [ -z "$SILENCE" ]; then
         echo "Mounting /home"
@@ -33,16 +39,16 @@ if [ -z "$SILENCE" ]; then
     echo "Running singularity image: $image_path"
 fi
 
-# Set environment variables for the container
+# Set environment variables for the container.
+# Apptainer inherits the host environment by default, so just export what we need.
 export PROJECT_WORKSPACE_DIR=/workspace
 export PYTHONPATH="/workspace/src:${PYTHONPATH:-}"
 export PYTHONUNBUFFERED=1
-
-# Pass through all current environment variables
-export_env_args=()
-while IFS='=' read -r key value; do
-    export_env_args+=("--env" "${key}=${value}")
-done < <(env)
+# Point TLS (Python, Go/wandb) to the host cert bundle (RHEL-based cluster)
+export SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+export SSL_CERT_DIR=/etc/pki/tls/certs
+export REQUESTS_CA_BUNDLE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+export CURL_CA_BUNDLE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 
 CLI_ARGS="$@"
 if [ -z "$SILENCE" ]; then
@@ -54,10 +60,8 @@ unset PYTHONSTARTUP
 apptainer exec \
 --nv \
 --bind $PWD:/workspace \
---home /workspace \
 --workdir /workspace \
 --pwd /workspace \
-"${export_env_args[@]}" \
 ${mount_points[*]} \
 $image_path \
 $CLI_ARGS

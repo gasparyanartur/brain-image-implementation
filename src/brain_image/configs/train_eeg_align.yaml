@@ -1,6 +1,6 @@
 defaults:
   - train_eeg
-  - augmentation: eeg
+  - override augmentation: eeg
   - _self_
 
 model:

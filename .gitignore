@@ -46,4 +46,5 @@ test_checkpoint.ckpt
 
 /.triton
 /.config
+/.nv
 /.netrc

@@ -1,182 +1,363 @@
 # Brain Image Implementation
 
-(TODO: Update this)
-
 ## Project Description
 
 (TODO: Update this)
 
+## Setup
 
+### 1. Directory structure
 
-## How to run this
+The project expects several large-data directories to exist at the repo root. If you are working on a cluster, symlink these to your storage volume — they will hold datasets, cached tensors, model weights, and logs that are too large to keep in the repo.
 
-### Step 1. Setup directory
-
-The first step is to make sure the necessary folders exist in the repository. There are two abouts about this:
-
-* Option A (Recommended): Setup the following folders in your repository:
-
-```
-data/
-tensorcache/
-logs/
-model/
-```
-
-If you are working on a cluster, make sure to symlink these to your storage volume, as they will contain large volumes of data.
-
-```
-storage_path=$PATH_TO_VOLUME_STORAGE
-symlink $storage_path/data data
-symlink $storage_path/tensorcache tensorcache
-symlink $storage_path/logs logs
-symlink $storage_path/models models
-symlink $storage_path/.cache .cache
-symlink $storage_path/experiments experiments
-```
-
-If you're on a SLURM cluster, also create the following directories:
-
-```
+```bash
+ln -s /path/to/storage/data        data
+ln -s /path/to/storage/tensorcache tensorcache
+ln -s /path/to/storage/logs        logs
+ln -s /path/to/storage/models      models
+ln -s /path/to/storage/.cache      .cache
+ln -s /path/to/storage/experiments experiments
 mkdir -p logs/slurm
 ```
 
-To submit jobs with centralized Slurm defaults, use `scripts/slurm/ssub.sh`:
+If you are working locally without a separate storage volume, you can just create the directories directly with `mkdir`.
+
+### 2. Environment variables
+
+The project loads credentials and cluster settings from a `.env` file at the repo root. Copy the example file and fill in your values:
 
 ```bash
-export SLURM_LOG_DIR=logs/slurm
-export SBATCH_ACCOUNT=Berzelius-2025-278
-export SBATCH_CPU_PARTITION=berzelius-cpu
-export SBATCH_GPU_PARTITION=berzelius-gpu
-
-# Example (CPU)
-SBATCH_GROUP=cpu SBATCH_TIME=04:00:00 scripts/slurm/ssub.sh prepare_data scripts/data/run_prepare_data.sh things-eeg2 --modality eeg
+cp .env.example .env
 ```
 
+Required keys:
 
-* Option B: Go into src/brain_image/configs/ and update the paths in each configuration file to point to the directories you want to use.
+```bash
+WANDB_API_KEY=...           # from https://wandb.ai/authorize
+HF_API_TOKEN=...            # from https://huggingface.co/settings/tokens
 
-
-### Step 2. Setup Environment
-
-Next, setup the environment. There are two options for this:
-
-* Option A (Local): UV
-
-Setting and install UV.
-
+# Cluster (SLURM + Singularity)
+SBATCH_ACCOUNT=...          # your SLURM allocation
+SBATCH_GPU_PARTITION=...    # GPU partition name
+SBATCH_CPU_PARTITION=...    # CPU partition name
+STORAGE_DIR=...             # path to your storage volume (mounted into container)
 ```
+
+The `.env` file is automatically sourced by `ssub` before job submission, so all keys are available inside the Singularity container at runtime.
+
+### 3. Python environment
+
+**Local (UV):**
+
+UV is the recommended local environment manager. Install it and set up the project:
+
+```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv
-source .venv/bin/activate
+uv venv && source .venv/bin/activate
 uv sync
 ```
 
-Try importing torch in a Python shell to confirm installation.
+Try importing `torch` in a Python shell to confirm the installation.
 
-* Option B (SLURM): Singularity
+**SLURM (Singularity):**
 
-I've setup utility scripts to make installation and configuration of images easier. They can be found under `scripts/container/`.
-The build script `scripts/build_singularity.sh` is a utility script that automatically chooses reasonable defaults. Your images will be build under `images/` unless specified otherwise.
+On the cluster, the project runs inside a Singularity/Apptainer container. Utility scripts for building and running images are in `scripts/container/`.
 
-First, you'll need to setup the base image (takes a while):
+Build the base image first — this installs CUDA, Python 3.12, and PyTorch, and takes a while. It requires `sudo`, so it is best done on a local machine and then rsynced to the cluster:
 
-```
-DEFINITION_FILE=scripts/container/singularity_base.def IMAGE_FILE=images/singularity_base.sif  ./scripts/container/build_singularity.sh
-```
-
-Once that is done, you should see a new image under `images/singularity_base.sif`. Next, you'll setup the main image.
-
-```
+```bash
+DEFINITION_FILE=scripts/container/singularity_base.def \
+IMAGE_FILE=images/singularity_base.sif \
 ./scripts/container/build_singularity.sh
 ```
 
-The output should be an image named something like `images/brain_{datetime}.sif`. This is the image you will use for the slurm jobs. (Note, you might want to build locally and rsync to the cluster since you need sudo access.)
+Once the base image is in place, build the main project image:
 
-
-### Step 3: Setup data
-
-Once everything works, run the data downloading script. For this example we use sub-8, but repeat for any subs you want to include.
-
+```bash
+./scripts/container/build_singularity.sh
 ```
+
+The output will be an image named `images/brain_<datetime>.sif`. This is the image used for all SLURM jobs. The most recently built image is picked up automatically by `run_singularity.sh`.
+
+### 4. Verify setup
+
+Before running any training, verify that the container can access the GPU and connect to external services.
+
+Test CUDA access:
+
+```bash
+SBATCH_GROUP=gpu-light ssub test_cuda python scripts/utils/test_cuda.py
+```
+
+Test wandb connectivity:
+
+```bash
+SBATCH_GROUP=cpu-light ssub test_wandb python scripts/utils/test_wandb.py
+```
+
+Both use the `devel` QOS for fast queue access. Check the logs under `logs/slurm/` for results.
+
+### 5. Data
+
+Download and prepare the dataset. The example below uses subject 8 of Things-EEG2; repeat for any subjects you want to include:
+
+```bash
 python scripts/setup_data.py --subs 8
-```
-or
-```
-sbatch scripts/slurm/run_setup_data.sh --subs 8
+# or on SLURM:
+ssub setup_data python scripts/setup_data.py --subs 8
 ```
 
-### Step 4: Generate embeddings
+### 6. Generate embeddings
 
-The training loop assumes all relevant image latents are precomputed and stored in `tensorcache`. All list of supported image encoder latents can be found in `src/brain_image/model/img_encoder.py`.
+The training loop assumes all image latents are precomputed and cached in `tensorcache/`. This step encodes the stimulus images with the image encoders used during training. A full list of supported encoders is in `src/brain_image/model/img_encoder.py`.
 
-By default, the embeddings generated are found in `src/configs/generate_embeddings.yaml`
-
-```
-python scripts/generate_embeddings.py 
-```
-or
-```
-sbatch scripts/slurm/run_generate_embeddings.sh
-```
-
-Embeddings for specific image encoders can be generated my specifying the `model_names` argument:
-
-```
+```bash
+python scripts/generate_embeddings.py
+# or for specific encoders only:
 python scripts/generate_embeddings.py model_names=[clip_vith14]
 ```
 
-### Step 4: Configs
+The default set of encoders to generate is configured in `src/brain_image/configs/generate_embeddings.yaml`.
 
-Before you start training, you need to configure the hydra configs, found under `src/brain_image/configs/`.
-In particular, make sure the paths are pointing to desired location, as mention in `Step 1`.
+### 7. Train
 
-All configs are found under `src/brain_image/configs/`. They use the hydra framework, which allows for easy configuration of the training process through a hierarchical layout. See [Hydra Docs](https://hydra.cc/docs/intro/) for more details.
+```bash
+python scripts/training/train_eeg.py --config-name=train_eeg_align
+# or on SLURM:
+ssub train_eeg python scripts/training/train_eeg.py --config-name=train_eeg_align
+```
 
-For training, the main config is `train_eeg.yaml`, which is automatically loaded when launching the training script.
-Each training script has a default config file, which can be found in the "@hydra.main" decorator of the training script. This can be overwritten by specifying the config name in the command line with the command: --config-name=[CONFIG_NAME].
+Add `-t` to tail logs immediately after submission:
 
-Every parameter of the config can also be overwritten by specifying it in the command line, or by modifying the config file. For top level parameters, this is done by specifying the parameter name and value in the command line.
+```bash
+SBATCH_GROUP=gpu-light ssub train_eeg -t python scripts/training/train_eeg.py --config-name=train_eeg_align model.max_epochs=50
+```
 
-Each config file belongs to a group, which is specified in the config file. To overwrite a parameter in a config file, you need to specify the group and parameter name in the command line:
+## SLURM job submission (`ssub`)
+
+`scripts/slurm/ssub.sh` is the main entrypoint for submitting jobs to SLURM. It automatically wraps your command in the Singularity container and handles log routing, resource defaults, and environment forwarding.
+
+```
+Usage: ssub <job_name> [-t] [--dry-run] <command...>
+```
+
+- `job_name` is used as the SLURM job name and as the log subdirectory under `logs/slurm/`.
+- `-t` tails the job log immediately after submission.
+- `--dry-run` prints the final `sbatch` command without submitting.
+
+**Resource groups** (`SBATCH_GROUP`):
+
+| Group       | CPUs | Mem   | Time       | GPUs | QOS   |
+|-------------|------|-------|------------|------|-------|
+| `gpu`       | 32   | 128G  | 1-00:00:00 | 1    |       |
+| `gpu-light` | 8    | 32G   | 01:00:00   | 1    | devel |
+| `cpu`       | 32   | 128G  | 1-00:00:00 | —    |       |
+| `cpu-light` | 8    | 32G   | 01:00:00   | —    | devel |
+
+The `*-light` groups use the `devel` QOS for fast queue access and are useful for quick tests. Any resource can be overridden with `SBATCH_*` env vars:
+
+```bash
+SBATCH_GROUP=gpu-light SBATCH_TIME="02:00:00" ssub my_job python my_script.py
+```
+
+For free-form sbatch flag overrides (e.g. constraints, QOS):
+
+```bash
+SBATCH_OVERRIDE="--qos=debug --constraint=foo" ssub my_job python my_script.py
+```
+
+## Configs
+
+Configs live in `src/brain_image/configs/` and use [Hydra](https://hydra.cc/docs/intro/). The hierarchy mirrors the model structure: there are groups for the dataset, model, trainer, encoder, and augmentation, all composed into a top-level training config.
+
+Each training script has a default config file, specified in its `@hydra.main` decorator. Override it on the CLI with `--config-name`:
+
+```bash
+python scripts/training/train_eeg.py --config-name=train_eeg_align
+```
+
+To swap out an entire config group (e.g. use a different encoder), use the group override syntax:
 
 ```bash
 [group]@[target_variable]=[option]
 ```
 
-For example:
+For example, to load the `atms` encoder config into `model.eeg_encoder`:
 
 ```bash
-eeg_encoder@model.eeg_encoder=atms
+python scripts/training/train_eeg.py eeg_encoder@model.eeg_encoder=atms
 ```
 
-This loads the contents of the `atms` file under the group `eeg_encoder` and overwrites the variable `model.eeg_encoder` with it.
-
-You can also overwrite specific parameters in a config file by specifying the parameter name and value in the command line:
+To override a single scalar value:
 
 ```bash
-model.eeg_encoder.num_layers=6
+python scripts/training/train_eeg.py model.eeg_encoder.num_layers=6
 ```
 
-The values of the specific configs can be found by tracing the config files and the corresponding classes. For example, the `eeg_encoder` config is defined in the `eeg_encoder` group, and the corresponding class is `EEGEncoderConfig`. The values of the config can be found in the class definition.
+When a child config inherits from a parent that already sets a config group, use `override` to replace it rather than append:
 
-### Step 5: Environment
-
-The training script loads your API keys from .env by default.
-This is done mainly for two things: `Hugging Face Hub` and `Weights and Biases`
-
-Create a .env file in the root of the project,.
-
-TODO: Talk about wandb, under configs/... Mention setting up WANDB_API_KEY in your environment
-
-
-### Step 6: Train
-
-Train the model using the following command:
+```yaml
+defaults:
+  - train_eeg
+  - override augmentation: eeg
 ```
-python scripts/train_eeg.py --config-name=[CONFIG_NAME] dataset=[DATASET]
-```
-See the corresponding config files in `src/brain_image/configs/` for more details.
 
-For example, to train the EEG alignment on the Things-EEG2 dataset, run:
-python scripts/train_eeg.py --config-name=train_eeg_align dataset=things-eeg2
+The schema for each config group is defined as a dataclass in `src/brain_image/configs.py` (e.g. `EEGEncoderConfig`, `TrainerConfig`). This is the authoritative reference for what parameters are available and what their types and defaults are.
+
+
+### 2. Environment variables
+
+Copy `.env.example` to `.env` and fill in your credentials:
+
+```bash
+cp .env.example .env
+```
+
+Required keys:
+
+```bash
+WANDB_API_KEY=...           # from https://wandb.ai/authorize
+HF_API_TOKEN=...            # from https://huggingface.co/settings/tokens
+
+# Cluster (SLURM + Singularity)
+SBATCH_ACCOUNT=...          # your SLURM allocation
+SBATCH_GPU_PARTITION=...    # GPU partition name
+SBATCH_CPU_PARTITION=...    # CPU partition name
+STORAGE_DIR=...             # path to your storage volume (mounted into container)
+```
+
+### 3. Python environment
+
+**Local (UV):**
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv venv && source .venv/bin/activate
+uv sync
+```
+
+**SLURM (Singularity):**
+
+Build the base image first (requires sudo, best done locally then rsynced):
+
+```bash
+DEFINITION_FILE=scripts/container/singularity_base.def \
+IMAGE_FILE=images/singularity_base.sif \
+./scripts/container/build_singularity.sh
+```
+
+Then build the main image:
+
+```bash
+./scripts/container/build_singularity.sh
+```
+
+Output will be `images/brain_<datetime>.sif`.
+
+### 4. Verify setup
+
+Test CUDA access:
+
+```bash
+SBATCH_GROUP=gpu-light ssub test_cuda python scripts/utils/test_cuda.py
+```
+
+Test wandb connectivity:
+
+```bash
+SBATCH_GROUP=cpu-light ssub test_wandb python scripts/utils/test_wandb.py
+```
+
+### 5. Data
+
+```bash
+python scripts/setup_data.py --subs 8
+# or on SLURM:
+ssub setup_data python scripts/setup_data.py --subs 8
+```
+
+### 6. Generate embeddings
+
+Precompute image latents into `tensorcache/` before training:
+
+```bash
+python scripts/generate_embeddings.py
+# specific encoders:
+python scripts/generate_embeddings.py model_names=[clip_vith14]
+```
+
+### 7. Train
+
+```bash
+python scripts/training/train_eeg.py --config-name=train_eeg_align
+# or on SLURM:
+ssub train_eeg python scripts/training/train_eeg.py --config-name=train_eeg_align
+```
+
+Add `-t` to tail logs immediately after submission:
+
+```bash
+SBATCH_GROUP=gpu-light ssub train_eeg -t python scripts/training/train_eeg.py --config-name=train_eeg_align model.max_epochs=50
+```
+
+## SLURM job submission (`ssub`)
+
+`scripts/slurm/ssub.sh` is the main entrypoint for submitting jobs. It wraps your command in the Singularity container automatically.
+
+```
+Usage: ssub <job_name> [-t] [--dry-run] <command...>
+```
+
+**Resource groups** (`SBATCH_GROUP`):
+
+| Group       | CPUs | Mem   | Time       | GPUs | QOS   |
+|-------------|------|-------|------------|------|-------|
+| `gpu`       | 32   | 128G  | 1-00:00:00 | 1    |       |
+| `gpu-light` | 8    | 32G   | 01:00:00   | 1    | devel |
+| `cpu`       | 32   | 128G  | 1-00:00:00 | —    |       |
+| `cpu-light` | 8    | 32G   | 01:00:00   | —    | devel |
+
+Any resource can be overridden with `SBATCH_*` env vars:
+
+```bash
+SBATCH_GROUP=gpu-light SBATCH_TIME="02:00:00" ssub my_job python my_script.py
+```
+
+## Configs
+
+Configs live in `src/brain_image/configs/` and use [Hydra](https://hydra.cc/docs/intro/).
+
+Each training script has a default config file, found in its `@hydra.main` decorator. Override it with `--config-name`:
+
+```bash
+python scripts/training/train_eeg.py --config-name=train_eeg_align
+```
+
+Every parameter can be overridden on the CLI. To swap a config group, use:
+
+```bash
+[group]@[target_variable]=[option]
+```
+
+For example, to load the `atms` encoder config into `model.eeg_encoder`:
+
+```bash
+python scripts/training/train_eeg.py eeg_encoder@model.eeg_encoder=atms
+```
+
+To override a scalar value:
+
+```bash
+python scripts/training/train_eeg.py model.eeg_encoder.num_layers=6
+```
+
+When a child config inherits from a parent that already sets a config group, use `override` to replace it:
+
+```yaml
+defaults:
+  - train_eeg
+  - override augmentation: eeg
+```
+
+The values of each config can be traced through the YAML files and their corresponding dataclasses (e.g. `EEGEncoderConfig` in `src/brain_image/configs.py`).
+
