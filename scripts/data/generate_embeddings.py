@@ -56,10 +56,10 @@ def run_generation(
 
             latent = encoder.encode(imgs).detach().cpu()
 
-            cache_save_args = [
-                (latent[i_path], str(path), *encoder_configs) for i_path, path in enumerate(paths)
-            ]
-            cache.batch_save(cache_save_args, parallel=False)
+            for i_path, path in enumerate(paths):
+                save_path = cache.get_latent_path(path, *encoder_configs)
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(latent[i_path], save_path)
 
             pbar.update(batch_size)
 

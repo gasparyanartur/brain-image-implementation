@@ -73,11 +73,20 @@ class TensorCache:
 
         return tensor
 
+    def get_latent_path(
+        self,
+        source_path: Path,
+        model_name: str,
+        split: Literal["train", "val", "test"],
+    ) -> Path:
+        split = "train" if split == "train" else "test"
+        return _get_cached_tensor_path(self.cache_path, (model_name, split, str(source_path)))
+
     def get_latent(
         self,
         source_path: Path,
         model_name: str,
         split: Literal["train", "val", "test"],
     ) -> Tensor:
-        split = "train" if split == "train" else "test"
-        return self.get(str(source_path), model_name, split)
+        path = self.get_latent_path(source_path, model_name, split)
+        return _load_cached_tensor_from_path(path)
