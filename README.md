@@ -4,6 +4,23 @@
 
 (TODO: Update this)
 
+## Environments
+
+Scripts in this repo run either locally with `uv` or on a SLURM cluster via `ssub`. Both forms are shown throughout this README where relevant.
+
+**Local:** Activate your venv and run scripts directly (see [Python environment](#3-python-environment)):
+
+```bash
+source .venv/bin/activate
+python scripts/training/train_eeg.py --config-name=train_eeg_align
+```
+
+**Cluster:** Use `ssub` to submit any command as a SLURM job wrapped in the Singularity container (see [SLURM job submission](#slurm-job-submission-ssub)):
+
+```bash
+ssub train_eeg python scripts/training/train_eeg.py --config-name=train_eeg_align
+```
+
 ## Setup
 
 ### 1. Directory structure
@@ -99,13 +116,51 @@ Both use the `devel` QOS for fast queue access. Check the logs under `logs/slurm
 
 ### 5. Data
 
-Download and prepare the dataset. The example below uses subject 8 of Things-EEG2; repeat for any subjects you want to include:
+Each dataset has its own `prepare.sh` under `scripts/data/<dataset>/` that downloads and preprocesses the data. Pass `--modality eeg` (default) for EEG recordings or `--modality img` for stimulus images. Subject-level EEG jobs accept `-s <sub>` and are designed to run in parallel as SLURM array jobs using `$SLURM_ARRAY_TASK_ID`.
+
+**Things-EEG2**
+
+EEG — subs 1–10, one task per subject:
 
 ```bash
-python scripts/setup_data.py --subs 8
-# or on SLURM:
-ssub setup_data python scripts/setup_data.py --subs 8
+# Local
+for s in $(seq 1 10); do bash scripts/data/things-eeg2/prepare.sh -s $s; done
+# SLURM (array job)
+SBATCH_GROUP=cpu SBATCH_ARRAY=1-10 ssub prepare_things_eeg \
+  bash scripts/data/things-eeg2/prepare.sh -s '$SLURM_ARRAY_TASK_ID'
 ```
+
+Images — downloaded once, no subject argument:
+
+```bash
+# Local
+bash scripts/data/things-eeg2/prepare.sh --modality img
+# SLURM
+SBATCH_GROUP=cpu ssub prepare_things_eeg_img bash scripts/data/things-eeg2/prepare.sh --modality img
+```
+
+**AllJoined-16M**
+
+EEG — subs 1–20, one task per subject:
+
+```bash
+# Local
+for s in $(seq 1 20); do bash scripts/data/alljoined-16m/prepare.sh -s $s; done
+# SLURM (array job)
+SBATCH_GROUP=cpu SBATCH_ARRAY=1-20 ssub prepare_alljoined \
+  bash scripts/data/alljoined-16m/prepare.sh -s '$SLURM_ARRAY_TASK_ID'
+```
+
+Stimuli — downloaded once, no subject argument:
+
+```bash
+# Local
+bash scripts/data/alljoined-16m/prepare.sh --modality img
+# SLURM
+SBATCH_GROUP=cpu ssub prepare_alljoined_stim bash scripts/data/alljoined-16m/prepare.sh --modality img
+```
+
+> **Note:** Single-quoting `'$SLURM_ARRAY_TASK_ID'` in the ssub command prevents the variable from being expanded at submission time; SLURM expands it at runtime inside each array task.
 
 ### 6. Generate embeddings
 
@@ -119,7 +174,23 @@ python scripts/generate_embeddings.py model_names=[clip_vith14]
 
 The default set of encoders to generate is configured in `src/brain_image/configs/generate_embeddings.yaml`.
 
-### 7. Train
+### 7. Generate statistics
+
+After embeddings are cached, compute per-split mean and standard deviation statistics for both the EEG signals and the image embeddings. These stats are saved to `statistics/datasets/<dataset>/<split>/` and are used for normalisation during training.
+
+```bash
+python scripts/data/generate_stats.py
+# or for a specific dataset:
+python scripts/data/generate_stats.py dataset=things-eeg2
+# or for specific encoders only:
+python scripts/data/generate_stats.py model_names=[clip_vith14]
+# or on SLURM:
+SBATCH_GROUP=cpu ssub generate_stats python scripts/data/generate_stats.py
+```
+
+The default dataset and encoder list are configured in `src/brain_image/configs/generate_stats.yaml`.
+
+### 8. Train
 
 ```bash
 python scripts/training/train_eeg.py --config-name=train_eeg_align
@@ -147,12 +218,14 @@ Usage: ssub <job_name> [-t] [--dry-run] <command...>
 
 **Resource groups** (`SBATCH_GROUP`):
 
-| Group       | CPUs | Mem   | Time       | GPUs | QOS   |
-|-------------|------|-------|------------|------|-------|
-| `gpu`       | 32   | 128G  | 1-00:00:00 | 1    |       |
-| `gpu-light` | 8    | 32G   | 01:00:00   | 1    | devel |
-| `cpu`       | 32   | 128G  | 1-00:00:00 | —    |       |
-| `cpu-light` | 8    | 32G   | 01:00:00   | —    | devel |
+Defaults are loaded from [`scripts/slurm/ssub_groups.conf`](scripts/slurm/ssub_groups.conf) — edit that file to add or modify groups.
+
+| Group       | CPUs | Mem   | Time       | GPUs | QOS     |
+|-------------|------|-------|------------|------|---------|
+| `gpu`       | 32   | 128G  | 1-00:00:00 | 1    |         |
+| `gpu-light` | 8    | 32G   | 01:00:00   | 1    | `devel` |
+| `cpu`       | 32   | 128G  | 1-00:00:00 | —    |         |
+| `cpu-light` | 8    | 32G   | 01:00:00   | —    | `devel` |
 
 The `*-light` groups use the `devel` QOS for fast queue access and are useful for quick tests. Any resource can be overridden with `SBATCH_*` env vars:
 
@@ -203,161 +276,4 @@ defaults:
 ```
 
 The schema for each config group is defined as a dataclass in `src/brain_image/configs.py` (e.g. `EEGEncoderConfig`, `TrainerConfig`). This is the authoritative reference for what parameters are available and what their types and defaults are.
-
-
-### 2. Environment variables
-
-Copy `.env.example` to `.env` and fill in your credentials:
-
-```bash
-cp .env.example .env
-```
-
-Required keys:
-
-```bash
-WANDB_API_KEY=...           # from https://wandb.ai/authorize
-HF_API_TOKEN=...            # from https://huggingface.co/settings/tokens
-
-# Cluster (SLURM + Singularity)
-SBATCH_ACCOUNT=...          # your SLURM allocation
-SBATCH_GPU_PARTITION=...    # GPU partition name
-SBATCH_CPU_PARTITION=...    # CPU partition name
-STORAGE_DIR=...             # path to your storage volume (mounted into container)
-```
-
-### 3. Python environment
-
-**Local (UV):**
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv && source .venv/bin/activate
-uv sync
-```
-
-**SLURM (Singularity):**
-
-Build the base image first (requires sudo, best done locally then rsynced):
-
-```bash
-DEFINITION_FILE=scripts/container/singularity_base.def \
-IMAGE_FILE=images/singularity_base.sif \
-./scripts/container/build_singularity.sh
-```
-
-Then build the main image:
-
-```bash
-./scripts/container/build_singularity.sh
-```
-
-Output will be `images/brain_<datetime>.sif`.
-
-### 4. Verify setup
-
-Test CUDA access:
-
-```bash
-SBATCH_GROUP=gpu-light ssub test_cuda python scripts/utils/test_cuda.py
-```
-
-Test wandb connectivity:
-
-```bash
-SBATCH_GROUP=cpu-light ssub test_wandb python scripts/utils/test_wandb.py
-```
-
-### 5. Data
-
-```bash
-python scripts/setup_data.py --subs 8
-# or on SLURM:
-ssub setup_data python scripts/setup_data.py --subs 8
-```
-
-### 6. Generate embeddings
-
-Precompute image latents into `tensorcache/` before training:
-
-```bash
-python scripts/generate_embeddings.py
-# specific encoders:
-python scripts/generate_embeddings.py model_names=[clip_vith14]
-```
-
-### 7. Train
-
-```bash
-python scripts/training/train_eeg.py --config-name=train_eeg_align
-# or on SLURM:
-ssub train_eeg python scripts/training/train_eeg.py --config-name=train_eeg_align
-```
-
-Add `-t` to tail logs immediately after submission:
-
-```bash
-SBATCH_GROUP=gpu-light ssub train_eeg -t python scripts/training/train_eeg.py --config-name=train_eeg_align model.max_epochs=50
-```
-
-## SLURM job submission (`ssub`)
-
-`scripts/slurm/ssub.sh` is the main entrypoint for submitting jobs. It wraps your command in the Singularity container automatically.
-
-```
-Usage: ssub <job_name> [-t] [--dry-run] <command...>
-```
-
-**Resource groups** (`SBATCH_GROUP`):
-
-| Group       | CPUs | Mem   | Time       | GPUs | QOS   |
-|-------------|------|-------|------------|------|-------|
-| `gpu`       | 32   | 128G  | 1-00:00:00 | 1    |       |
-| `gpu-light` | 8    | 32G   | 01:00:00   | 1    | devel |
-| `cpu`       | 32   | 128G  | 1-00:00:00 | —    |       |
-| `cpu-light` | 8    | 32G   | 01:00:00   | —    | devel |
-
-Any resource can be overridden with `SBATCH_*` env vars:
-
-```bash
-SBATCH_GROUP=gpu-light SBATCH_TIME="02:00:00" ssub my_job python my_script.py
-```
-
-## Configs
-
-Configs live in `src/brain_image/configs/` and use [Hydra](https://hydra.cc/docs/intro/).
-
-Each training script has a default config file, found in its `@hydra.main` decorator. Override it with `--config-name`:
-
-```bash
-python scripts/training/train_eeg.py --config-name=train_eeg_align
-```
-
-Every parameter can be overridden on the CLI. To swap a config group, use:
-
-```bash
-[group]@[target_variable]=[option]
-```
-
-For example, to load the `atms` encoder config into `model.eeg_encoder`:
-
-```bash
-python scripts/training/train_eeg.py eeg_encoder@model.eeg_encoder=atms
-```
-
-To override a scalar value:
-
-```bash
-python scripts/training/train_eeg.py model.eeg_encoder.num_layers=6
-```
-
-When a child config inherits from a parent that already sets a config group, use `override` to replace it:
-
-```yaml
-defaults:
-  - train_eeg
-  - override augmentation: eeg
-```
-
-The values of each config can be traced through the YAML files and their corresponding dataclasses (e.g. `EEGEncoderConfig` in `src/brain_image/configs.py`).
 

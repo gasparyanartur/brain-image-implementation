@@ -15,11 +15,8 @@ Usage: ssub <job_name> [-t] [--dry-run] <command...>
   -t          Tail the job log after submission (via stalk.sh tail <job_id>)
   command...  Any command to run inside the Singularity container
 
-Resource defaults (SBATCH_GROUP=gpu [default] | gpu-light | cpu | cpu-light):
-  gpu:       --cpus-per-task=32 --mem=128G --time=1-00:00:00 --gpus=1
-  gpu-light: --cpus-per-task=8  --mem=32G  --time=01:00:00   --gpus=1  --qos=devel
-  cpu:       --cpus-per-task=32 --mem=128G --time=1-00:00:00
-  cpu-light: --cpus-per-task=8  --mem=32G  --time=01:00:00   --qos=devel
+Resource defaults are loaded from scripts/slurm/ssub_groups.conf (edit that file
+  to add or modify groups). Set SBATCH_GROUP to select a group (default: gpu).
 
 Environment overrides:
   SBATCH_GROUP, SBATCH_GPU_PARTITION, SBATCH_CPU_PARTITION, SBATCH_PARTITION
@@ -60,43 +57,30 @@ wrap_cmd=("$@")
 # ── Group & resource defaults ─────────────────────────────────────────────────
 
 group="${SBATCH_GROUP:-gpu}"
-[[ "$group" =~ ^(gpu|gpu-light|cpu|cpu-light)$ ]] || { echo "Error: SBATCH_GROUP must be gpu, gpu-light, cpu, or cpu-light" >&2; exit 2; }
 
-case "$group" in
-  gpu)
-    partition="${SBATCH_PARTITION:-${SBATCH_GPU_PARTITION:-}}"
-    gpus="${SBATCH_GPUS:-1}"
-    cpus="${SBATCH_CPUS_PER_TASK:-32}"
-    mem="${SBATCH_MEM:-128G}"
-    time="${SBATCH_TIME:-1-00:00:00}"
-    qos=""
-    ;;
-  gpu-light)
-    partition="${SBATCH_PARTITION:-${SBATCH_GPU_PARTITION:-}}"
-    gpus="${SBATCH_GPUS:-1}"
-    cpus="${SBATCH_CPUS_PER_TASK:-8}"
-    mem="${SBATCH_MEM:-32G}"
-    time="${SBATCH_TIME:-01:00:00}"
-    qos="devel"
-    ;;
-  cpu)
-    partition="${SBATCH_PARTITION:-${SBATCH_CPU_PARTITION:-}}"
-    gpus=""
-    cpus="${SBATCH_CPUS_PER_TASK:-32}"
-    mem="${SBATCH_MEM:-128G}"
-    time="${SBATCH_TIME:-1-00:00:00}"
-    qos=""
-    ;;
-  cpu-light)
-    partition="${SBATCH_PARTITION:-${SBATCH_CPU_PARTITION:-}}"
-    gpus=""
-    cpus="${SBATCH_CPUS_PER_TASK:-8}"
-    mem="${SBATCH_MEM:-32G}"
-    time="${SBATCH_TIME:-01:00:00}"
-    qos="devel"
-    ;;
-esac
-[[ -n "${SBATCH_GPUS:-}" ]] && gpus="$SBATCH_GPUS"
+# Load resource defaults from ssub_groups.conf
+_groups_conf="$_root/scripts/slurm/ssub_groups.conf"
+read -r _cpus_def _mem_def _time_def _gpus_def _qos_def < <(
+  awk -v grp="$group" '!/^[[:space:]]*#/ && $1 == grp { print $2, $3, $4, $5, $6; exit }' "$_groups_conf"
+)
+if [[ -z "${_cpus_def:-}" ]]; then
+  valid_groups=$(awk '!/^[[:space:]]*#/ && NF { print $1 }' "$_groups_conf" | paste -sd ', ')
+  echo "Error: unknown SBATCH_GROUP '$group'. Valid groups: $valid_groups" >&2
+  exit 2
+fi
+
+if [[ "$_gpus_def" == "-" ]]; then
+  partition="${SBATCH_PARTITION:-${SBATCH_CPU_PARTITION:-}}"
+  gpus="${SBATCH_GPUS:-}"
+else
+  partition="${SBATCH_PARTITION:-${SBATCH_GPU_PARTITION:-}}"
+  gpus="${SBATCH_GPUS:-$_gpus_def}"
+fi
+cpus="${SBATCH_CPUS_PER_TASK:-$_cpus_def}"
+mem="${SBATCH_MEM:-$_mem_def}"
+time="${SBATCH_TIME:-$_time_def}"
+qos=""
+[[ "$_qos_def" != "-" ]] && qos="$_qos_def"
 
 nodes="${SBATCH_NODES:-1}"
 ntasks="${SBATCH_NTASKS:-1}"
