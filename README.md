@@ -198,6 +198,95 @@ python scripts/training/train_eeg.py --config-name=train_eeg_align
 ssub train_eeg python scripts/training/train_eeg.py --config-name=train_eeg_align
 ```
 
+### 9. Evaluate a trained run
+
+After training, evaluate a checkpoint with `scripts/evaluation/test_eeg.py`. Pass the run directory (the `logs/train/<run_name>` folder produced by the logger) and it will find the best checkpoint automatically:
+
+```bash
+python scripts/evaluation/test_eeg.py logs/train/my_run
+# or on SLURM:
+ssub test_eeg python scripts/evaluation/test_eeg.py logs/train/my_run
+```
+
+Key options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--checkpoint_selection` | `min` | How to pick checkpoint: `min`, `max`, or `last` |
+| `--checkpoint_metric` | `val-loss` | Metric used to select the checkpoint |
+| `--output_dir` | `<run>/test/` | Where to write metrics and reconstructed images |
+| `--metrics` | all | Subset of metrics to compute |
+
+Results are written as `test_metrics.json` and reconstructed images inside the output directory.
+
+### 10. Sweep experiments
+
+To run many training jobs with different hyperparameters, define a **param file** in `scripts/slurm/params/` and launch the full pipeline with `run_experiment_pipeline.sh`.
+
+**Param file format** — `scripts/slurm/params/<name>.json`:
+
+```json
+{
+    "entries": [
+        {
+            "keys": ["model.align_img_encoder"],
+            "values": [["clip_vitl14", "clip_vith14", "synclr_vitb16"]]
+        },
+        {
+            "keys": ["model.eeg_encoder"],
+            "values": [["nice", "atms"]]
+        }
+    ]
+}
+```
+
+Each entry is one sweep axis. Multiple entries are crossed as a cartesian product — the example above produces `3 × 2 = 6` combinations. To keep keys **paired** (i.e. move together instead of crossing), list them in the same entry:
+
+```json
+{
+    "entries": [
+        {
+            "keys": ["model.lr", "model.eeg_encoder"],
+            "values": [["1e-4", "1e-3"], ["atms", "nice"]]
+        }
+    ]
+}
+```
+
+This produces only `(1e-4, atms)` and `(1e-3, nice)` — not all four combinations.
+
+**Run the pipeline:**
+
+```bash
+./scripts/evaluation/run_experiment_pipeline.sh <experiment_name> <param_path> <config_name> [cli_args...]
+```
+
+For example:
+
+```bash
+TEST_HPARAMS="model.align_img_encoder model.eeg_encoder" \
+  ./scripts/evaluation/run_experiment_pipeline.sh \
+    encoders \
+    scripts/slurm/params/encoders.json \
+    train_eeg_align
+```
+
+This submits three chained SLURM jobs automatically:
+
+1. **Train** — one job per parameter combination, each with `--requeue` so it restarts automatically on node failure or preemption.
+2. **Test** — runs `test_eeg.py` on every run in the experiment directory once all training jobs finish.
+3. **Aggregate** — collects `test_metrics.json` from every run and writes a single `experiments/<name>/aggregated_metrics.csv`.
+
+Set `TEST_HPARAMS` to a space-separated list of dotted config keys (e.g. `"model.lr model.eeg_encoder"`) to include those hyperparameter values as columns in the CSV.
+
+**Aggregate metrics standalone** — if you only need to re-aggregate results from an existing experiment:
+
+```bash
+python scripts/evaluation/aggregate_metrics.py \
+    --experiment_dir experiments/encoders \
+    --hparams model.align_img_encoder model.eeg_encoder
+```
+
 Add `-t` to tail logs immediately after submission:
 
 ```bash

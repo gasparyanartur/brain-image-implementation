@@ -13,10 +13,9 @@ import torch
 from brain_image.eval import find_checkpoint_in_run
 from brain_image.metrics import METRIC_LOOKUP, MetricType
 from brain_image.model.eeg_alignment import EEGAlignmentModel
+from brain_image.model.model import dump_test_output
 from brain_image.utils import flatten_configs, setup_logging
 import os
-
-from torchvision.utils import save_image
 
 
 class Args(BaseModel):
@@ -58,7 +57,7 @@ def main(args: Args):
     logging.info(f"Finished loading model.")
     
     logging.info(f"Running full test...")
-    metrics, imgs, outputs = model.run_full_test(metrics=args.metrics, recon_idxs=args.recon_idxs if args.recon_idxs else None)
+    metrics, imgs = model.run_full_validation(split="test")
     logging.info(f"Finished running full test.")
 
     logging.info(f"Metrics:")
@@ -75,7 +74,7 @@ def main(args: Args):
             args.model_dump_json(indent=4)
         )
 
-    model.dump_test_output(output_dir, metrics, imgs, outputs)
+    dump_test_output(output_dir, metrics, imgs)
 
 
 if __name__ == "__main__":

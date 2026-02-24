@@ -1,0 +1,56 @@
+{
+    "entries": [
+        {
+            "keys": [
+                "dataset.subs",
+                "model.max_epochs",
+                "trainer.wandb.enabled",
+                "trainer.log_every_n_steps",
+                "trainer.compile_model",
+                "trainer.enable_barebones",
+                "trainer.debug_mode",
+                "dataset.limit_train_size",
+                "dataset.limit_val_size"
+            ],
+            "values": [
+                [
+                    "[1]"
+                ],
+                [
+                    "5"
+                ],
+                [
+                    "False"
+                ],
+                [
+                    "1"
+                ],
+                [
+                    "False"
+                ],
+                [
+                    "True"
+                ],
+                [
+                    "True"
+                ],
+                [
+                    "0.01"
+                ],
+                [
+                    "0.1"
+                ]
+            ]
+        },
+        {
+            "keys": [
+                "model.encoder_lr"
+            ],
+            "values": [
+                [
+                    "0.0001", "0.0005", "0.001"
+                ]
+            ]
+        }
+    ]
+}
