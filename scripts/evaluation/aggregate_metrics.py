@@ -21,7 +21,7 @@ def get_single_file(dir: Path, pattern: str) -> Path | None:
     return paths[0]
 
 
-def gather_metrics(experiment_dir: Path, selected_hparams: list[str], metrics_file_pattern: str = "*test/test_metrics.json") -> pd.DataFrame:
+def gather_metrics(experiment_dir: Path, selected_hparams: list[str], metrics_file_pattern: str = "*test_metrics.json") -> pd.DataFrame:
     all_metrics = []
 
     for exp_dir in experiment_dir.iterdir():
@@ -71,7 +71,7 @@ def main():
     parser.add_argument('--experiment_dir', type=str, required=True, help='Directory containing experiment run subdirectories.')
     parser.add_argument('--hparams', type=str, nargs='*', default=[], help='Dotted hparam keys to include from hparams.yaml (e.g. model.lr).')
     parser.add_argument('--output_dir', type=str, default=None, help='Directory to save the aggregated CSV. Defaults to experiment_dir.')
-    parser.add_argument('--metrics_file_pattern', type=str, default="*test/test_metrics.json", help='Glob pattern to find metrics files within each run directory.')
+    parser.add_argument('--metrics_file_pattern', type=str, default="*test_metrics.json", help='Glob pattern to find metrics files within each run directory.')
     parser.add_argument("--output_name", type=str, default="aggregated_metrics.csv", help="Name of the output CSV file.")
 
     args = parser.parse_args()

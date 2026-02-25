@@ -262,7 +262,10 @@ This produces only `(1e-4, atms)` and `(1e-3, nice)` — not all four combinatio
 **Run the pipeline:**
 
 ```bash
-./scripts/evaluation/run_experiment_pipeline.sh <experiment_name> <param_path> <config_name> [cli_args...]
+./scripts/evaluation/run_experiment_pipeline.sh \
+    <experiment_name> <param_path> <config_name> \
+    <train_script> <test_script> \
+    [cli_args...]
 ```
 
 For example:
@@ -272,16 +275,32 @@ TEST_HPARAMS="model.align_img_encoder model.eeg_encoder" \
   ./scripts/evaluation/run_experiment_pipeline.sh \
     encoders \
     scripts/slurm/params/encoders.json \
-    train_eeg_align
+    train_eeg_align \
+    scripts/training/train_eeg.py \
+    scripts/evaluation/test_eeg.py
 ```
 
-This submits three chained SLURM jobs automatically:
+This submits two chained SLURM jobs automatically:
 
-1. **Train** — one job per parameter combination, each with `--requeue` so it restarts automatically on node failure or preemption.
-2. **Test** — runs `test_eeg.py` on every run in the experiment directory once all training jobs finish.
-3. **Aggregate** — collects `test_metrics.json` from every run and writes a single `experiments/<name>/aggregated_metrics.csv`.
+1. **Array (train + test)** — one SLURM array task per parameter combination. Each task trains its configuration then immediately evaluates the resulting run. Tasks use `--requeue` so they restart automatically on node failure or preemption. The train and test scripts are passed explicitly, making the pipeline reusable for different model types.
+2. **Aggregate** — collects `test_metrics.json` from every run in the experiment directory once all array tasks finish, and writes a single `experiments/<name>/aggregated_metrics.csv`.
 
 Set `TEST_HPARAMS` to a space-separated list of dotted config keys (e.g. `"model.lr model.eeg_encoder"`) to include those hyperparameter values as columns in the CSV.
+
+**Run a single experiment (no sweep):**
+
+To train and test one configuration without SLURM, use `run_experiment.sh` directly:
+
+```bash
+bash scripts/evaluation/run_experiment.sh \
+    train_eeg_align \
+    scripts/training/train_eeg.py \
+    scripts/evaluation/test_eeg.py \
+    --experiment_dir experiments/my_run \
+    model.eeg_encoder=atms
+```
+
+The experiment directory defaults to `logs/experiments` if `--experiment_dir` is omitted.
 
 **Aggregate metrics standalone** — if you only need to re-aggregate results from an existing experiment:
 

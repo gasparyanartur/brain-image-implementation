@@ -7,7 +7,6 @@
                 "trainer.wandb.enabled",
                 "trainer.log_every_n_steps",
                 "trainer.compile_model",
-                "trainer.enable_barebones",
                 "trainer.debug_mode",
                 "dataset.limit_train_size",
                 "dataset.limit_val_size"
@@ -27,9 +26,6 @@
                 ],
                 [
                     "False"
-                ],
-                [
-                    "True"
                 ],
                 [
                     "True"
