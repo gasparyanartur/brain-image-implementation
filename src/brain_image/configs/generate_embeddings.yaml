@@ -21,4 +21,4 @@ cache_dir: tensorcache
 compile: true
 
 dataset:
-  subs: null
+  subs: [1]

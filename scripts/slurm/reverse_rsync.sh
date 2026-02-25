@@ -1,5 +1,5 @@
 #!/bin/bash
-
+[ ! -f .env ] || export $(grep -v '^#' .env | xargs)
 
 src_path=$1
 dst_path=$2
