@@ -167,9 +167,13 @@ SBATCH_GROUP=cpu ssub prepare_alljoined_stim bash scripts/data/alljoined-16m/pre
 The training loop assumes all image latents are precomputed and cached in `tensorcache/`. This step encodes the stimulus images with the image encoders used during training. A full list of supported encoders is in `src/brain_image/model/img_encoder.py`.
 
 ```bash
-python scripts/generate_embeddings.py
+# Local (all encoders):
+python scripts/data/generate_embeddings.py
 # or for specific encoders only:
-python scripts/generate_embeddings.py model_names=[clip_vith14]
+python scripts/data/generate_embeddings.py model_names=[clip_vith14]
+
+# SLURM (all encoders):
+SBATCH_GROUP=gpu ssub generate_embeddings python scripts/data/generate_embeddings.py
 ```
 
 The default set of encoders to generate is configured in `src/brain_image/configs/generate_embeddings.yaml`.

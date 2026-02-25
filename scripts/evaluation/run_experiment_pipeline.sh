@@ -83,7 +83,7 @@ for (( i=0; i<param_count; i++ )); do
 
     job_out=$(
         SBATCH_OVERRIDE="--requeue --open-mode=append ${SBATCH_OVERRIDE:-}" \
-        ./scripts/slurm/ssub.sh "${experiment_name}-${i}" \
+        ./scripts/slurm/ssub.sh "${experiment_name}" \
             python scripts/training/train_eeg.py \
                 --config-name="$config_name" \
                 trainer.log_dir="$experiment_dir" \
@@ -107,7 +107,7 @@ echo ""
 echo "--- Submitting test job (depends on all training jobs) ---"
 test_out=$(
     SBATCH_OVERRIDE="--dependency=${train_dep} ${SBATCH_OVERRIDE:-}" \
-    ./scripts/slurm/ssub.sh "${experiment_name}-test" \
+    ./scripts/slurm/ssub.sh "${experiment_name}" \
         bash scripts/evaluation/test_all_experiments.sh \
             scripts/evaluation/test_eeg.py \
             "$experiment_dir"
@@ -128,7 +128,7 @@ echo "--- Submitting aggregate job (depends on test job) ---"
 agg_out=$(
     SBATCH_OVERRIDE="--dependency=afterany:${test_job_id} ${SBATCH_OVERRIDE:-}" \
     SBATCH_GROUP="${SBATCH_GROUP_AGGREGATE:-cpu}" \
-    ./scripts/slurm/ssub.sh "${experiment_name}-aggregate" \
+    ./scripts/slurm/ssub.sh "${experiment_name}" \
         python scripts/evaluation/aggregate_metrics.py \
             --experiment_dir "$experiment_dir" \
             $hparams_args

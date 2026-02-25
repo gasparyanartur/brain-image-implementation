@@ -1,112 +1,111 @@
+"""param_parser.py.
+
+This script is used to parse a JSON configuration file that defines a list of parameters for a Slurm array job. The configuration file should have the following format: 
+{
+    "separator": "=",  # Optional, default is "="
+    "entries": [
+        {
+            "keys": ["x", "y"],
+            "values": [
+                ["a1", "a2", "a3"],
+                ["b1", "b2", "b3"]
+            ]
+        },
+        {
+            "keys": ["z"],
+            "values": [
+                ["c1", "c2"]
+            ]
+        }  
+    ]
+}
+This will generate the following parameter combinations:
+(
+ "x=a1 y=b1 z=c1",
+ "x=a1 y=b1 z=c2",
+ "x=a2 y=b2 z=c1",
+ "x=a2 y=b2 z=c2",
+ "x=a3 y=b3 z=c1",
+ "x=a3 y=b3 z=c2",
+)
+Those under the same entry are joined together, and the different entries are combined with a Cartesian product. The script can be used to either print the total number of parameter combinations or to print a specific combination based on a task ID.
+
+Arguments:
+- config_path: The path to the JSON configuration file.
+- --task_id (-i): The index of the parameter combination to print (0-based).
+- --size (-s): If set, the script will print the total number of parameter combinations instead of a specific combination.
+- --prefix (-p): An optional prefix to add to each argument (default is an empty string).
+"""
+
+
 import itertools as it
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict, List
-
-from pydantic import BaseModel, ConfigDict
-
-
-class SlurmArrayEntry(BaseModel):
-    model_config = ConfigDict(coerce_numbers_to_str=True)
-
-    keys: List[str]
-    values: List[List[str]]
-
-
-class SlurmArrayConfig(BaseModel):
-    separator: str = "="
-    entries: List[SlurmArrayEntry]
-
-
-def verify_entry(entry: SlurmArrayEntry):
-    if len(entry.keys) != len(entry.values):
-        raise ValueError("The number of keys and values in an entry must be the same")
-
-    if len(entry.values) == 0:
-        raise ValueError("An entry must have at least one value")
-
-    if not all(len(value) == len(entry.values[0]) for value in entry.values):
-        raise ValueError("All values in an entry must have the same length")
+from typing import List
 
 
 def combine_joined_parameters(
-    arg_names: List[str], arg_values: List[List[str]], arg_prefix: str = "", sep: str = "="
+    keys: List[str], values: List[List[str]], arg_prefix: str = "", sep: str = "="
 ) -> List[str]:
     joined_params = []
-
-    for i_arg in range(len(arg_values[0])):
+    for i_arg in range(len(values[0])):
         params: List[str] = []
-
-        for arg_name, arg_value in zip(arg_names, arg_values):
-            params.append(f"{arg_prefix}{arg_name}{sep}{arg_value[i_arg]}")
-
+        for key, val_list in zip(keys, values):
+            params.append(f"{arg_prefix}{key}{sep}{str(val_list[i_arg])}")
         joined_params.append(" ".join(params))
-
     return joined_params
 
 
-def parse_param_list(config: SlurmArrayConfig, arg_prefix: str = "") -> List[str]:
+def parse_param_list(config: dict, arg_prefix: str = "") -> List[str]:
+    sep = config.get("separator", "=")
     all_params = []
+    for entry in config["entries"]:
+        keys = entry["keys"]
+        values = entry["values"]
 
-    for entry in config.entries:
-        verify_entry(entry)
+        if len(keys) != len(values):
+            raise ValueError("The number of keys and values in an entry must be the same")
+        if len(values) == 0:
+            raise ValueError("An entry must have at least one value")
+        if not all(len(v) == len(values[0]) for v in values):
+            raise ValueError("All value lists in an entry must have the same length")
 
-        joined_params = combine_joined_parameters(entry.keys, entry.values, arg_prefix, sep=config.separator)
-        all_params.append(joined_params)
+        joined = combine_joined_parameters(keys, values, arg_prefix, sep)
+        all_params.append(joined)
 
-    combined_parameters = list(it.product(*all_params))
-    joined_parameters = [" ".join(combined) for combined in combined_parameters]
+    combined = list(it.product(*all_params))
+    return [" ".join(c) for c in combined]
 
-    return joined_parameters
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "config_path",
-        help="The path to the configs file",
-        type=Path,
-    )
-    parser.add_argument(
-        "-i", "--task_id", help="The id to index", type=int, required=False
-    )
-    parser.add_argument(
-        "-s",
-        "--size",
-        help="The number of entries in configs",
-        action="store_true",
-        required=False,
-    )
-    parser.add_argument(
-        "-p",
-        "--prefix",
-        help="The prefix to add to the arguments",
-        required=False,
-        default="",
-    )
-
+    parser.add_argument("config_path", type=Path)
+    parser.add_argument("-i", "--task_id", type=int, required=False)
+    parser.add_argument("-s", "--size", action="store_true")
+    parser.add_argument("-p", "--prefix", default="")
+    parser.add_argument("-l", "--list", action="store_true", help="Print all parameter combinations")
+    parser.add_argument("--separator", default=None, help="The separator to use between keys and values (default is '=')")
     args = parser.parse_args()
-    with open(args.config_path, "r") as f:
-        file_content = f.read()
 
-    config = SlurmArrayConfig.model_validate_json(file_content)
+    with open(args.config_path) as f:
+        config = json.load(f)
+
+    if args.separator is not None:
+        config["separator"] = args.separator
+
     param_list = parse_param_list(config, args.prefix)
 
-    arg_size = len(param_list)
-
     if args.size:
-        print(arg_size)
-
+        print(len(param_list))
     elif args.task_id is not None:
-        if args.task_id >= arg_size:
-            pass
-
-        else:
+        if args.task_id < len(param_list):
             print(param_list[args.task_id])
-
+    elif args.list:
+        for params in param_list:
+            print(params)
     else:
-        raise ValueError("You need to pass either task_id or size")
-
+        raise ValueError("Pass either --task_id (-i), --size (-s), or --list (-l)")
 
 if __name__ == "__main__":
     main()
