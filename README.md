@@ -34,6 +34,7 @@ ln -s /path/to/storage/logs        logs
 ln -s /path/to/storage/models      models
 ln -s /path/to/storage/.cache      .cache
 ln -s /path/to/storage/experiments experiments
+ln -s /path/to/storage/.cache/huggingface/hub ~/.cache/huggingface/
 mkdir -p logs/slurm
 ```
 
