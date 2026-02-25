@@ -142,6 +142,7 @@ def generate_local_captions(config: LocalCaptionConfig) -> None:
     )
     model.eval()
     processor = AutoProcessor.from_pretrained(config.model_name)
+    processor.tokenizer.padding_side = "left"  # Required for correct batch inference with decoder-only models
 
     for split in tqdm.tqdm(config.splits, desc="Splits", unit="split"):
         logging.info(f"Processing split: {split}")
