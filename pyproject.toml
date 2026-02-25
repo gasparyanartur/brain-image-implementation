@@ -47,6 +47,8 @@ dependencies = [
     "openai",
     "umap-learn",
     "sentence-transformers",
+
+    "qwen_vl_utils"
 ]
 
 [project.optional-dependencies]
