@@ -1,0 +1,30 @@
+defaults:
+  - train_eeg
+  - override augmentation: eeg
+  - _self_
+
+model:
+  do_align: true
+  do_recon: false
+  do_recon_low: false
+
+  encoder_lr: 3e-4
+  encoder_min_lr: 1e-5
+  encoder_warmup_epochs: 1
+
+  align_img_encoder: "t5_base"
+
+  modules_to_train:
+    - eeg_encoder
+
+  max_epochs: 200
+  full_eval_every_epochs: 20
+
+trainer:
+  checkpoint_monitor_early_stop: 20
+  check_val_every_n_epochs: 5
+
+dataset:
+  batch_size: 512
+  val_batch_size: 256
+  test_batch_size: 256

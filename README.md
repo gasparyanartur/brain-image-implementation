@@ -163,9 +163,9 @@ SBATCH_GROUP=cpu ssub prepare_alljoined_stim bash scripts/data/alljoined-16m/pre
 
 > **Note:** Single-quoting `'$SLURM_ARRAY_TASK_ID'` in the ssub command prevents the variable from being expanded at submission time; SLURM expands it at runtime inside each array task.
 
-### 6. Generate embeddings
+### 6. Generate image embeddings
 
-The training loop assumes all image latents are precomputed and cached in `tensorcache/`. This step encodes the stimulus images with the image encoders used during training. A full list of supported encoders is in `src/brain_image/model/img_encoder.py`.
+The training loop assumes all image latents are precomputed and cached in `tensorcache/`. This step encodes the stimulus images with the image encoders used during training. A full list of supported encoders is in `src/brain_image/model/encoder/img_encoder/union.py`.
 
 ```bash
 # Local (all encoders):
@@ -177,25 +177,63 @@ python scripts/data/generate_embeddings.py model_names=[clip_vith14]
 SBATCH_GROUP=gpu ssub generate_embeddings python scripts/data/generate_embeddings.py
 ```
 
-The default set of encoders to generate is configured in `src/brain_image/configs/generate_embeddings.yaml`.
+The default set of encoders is configured in `src/brain_image/configs/generate_embeddings.yaml`.
 
-### 7. Generate statistics
+### 7. Generate text captions
 
-After embeddings are cached, compute per-split mean and standard deviation statistics for both the EEG signals and the image embeddings. These stats are saved to `statistics/datasets/<dataset>/<split>/` and are used for normalisation during training.
+Text captions are generated locally using a Qwen VL model. Run this before generating text embeddings:
+
+```bash
+# Local:
+python scripts/data/generate_text_captions_local.py --config-name=generate_text_captions_local
+
+# SLURM:
+SBATCH_GROUP=gpu ssub generate_captions python scripts/data/generate_text_captions_local.py --config-name=generate_text_captions_local
+```
+
+Captions are written to `data/things-eeg2/captions/local.jsonl` (one JSON line per image with `path` and `caption` fields). Already-captioned images are skipped on re-runs. The model name and other settings are in `src/brain_image/configs/generate_text_captions_local.yaml`.
+
+### 8. Generate text embeddings
+
+Once captions exist, encode them with one or more text encoders and cache the results in `tensorcache/`. Supported encoders: `t5_base`, `t5_large`, `clip_vitl14_text`, `clip_vitb32_text`, `llama3_8b`, `gemma_embedding_300m`.
+
+```bash
+# Local (all encoders in the config):
+python scripts/data/generate_text_embeddings.py --config-name=generate_text_embeddings
+# or for specific encoders only:
+python scripts/data/generate_text_embeddings.py model_names=[t5_base]
+
+# SLURM:
+SBATCH_GROUP=gpu ssub generate_text_embeddings python scripts/data/generate_text_embeddings.py --config-name=generate_text_embeddings
+```
+
+The default encoder list and caption path are in `src/brain_image/configs/generate_text_embeddings.yaml`.
+
+### 9. Generate statistics
+
+After embeddings are cached, compute per-split mean and standard deviation statistics for both the EEG signals and all embeddings (image and/or text). These stats are saved to `statistics/datasets/<dataset>/<split>/` and are used for normalisation during training.
+
+**Image embedding stats:**
 
 ```bash
 python scripts/data/generate_stats.py
-# or for a specific dataset:
-python scripts/data/generate_stats.py dataset=things-eeg2
-# or for specific encoders only:
+# or for specific encoders:
 python scripts/data/generate_stats.py model_names=[clip_vith14]
 # or on SLURM:
 SBATCH_GROUP=cpu ssub generate_stats python scripts/data/generate_stats.py
 ```
 
-The default dataset and encoder list are configured in `src/brain_image/configs/generate_stats.yaml`.
+**Text embedding stats:**
 
-### 8. Train
+```bash
+python scripts/data/generate_stats.py --config-name=generate_text_stats
+# or for specific encoders:
+python scripts/data/generate_stats.py --config-name=generate_text_stats model_names=[t5_base]
+```
+
+The default dataset and encoder list for each are configured in `src/brain_image/configs/generate_stats.yaml` and `src/brain_image/configs/generate_text_stats.yaml` respectively.
+
+### 10. Train
 
 ```bash
 python scripts/training/train_eeg.py --config-name=train_eeg_align
@@ -203,7 +241,13 @@ python scripts/training/train_eeg.py --config-name=train_eeg_align
 ssub train_eeg python scripts/training/train_eeg.py --config-name=train_eeg_align
 ```
 
-### 9. Evaluate a trained run
+For text-encoder alignment, use the `train_eeg_align_text` config:
+
+```bash
+python scripts/training/train_eeg.py --config-name=train_eeg_align_text
+```
+
+### 11. Evaluate a trained run
 
 After training, evaluate a checkpoint with `scripts/evaluation/test_eeg.py`. Pass the run directory (the `logs/train/<run_name>` folder produced by the logger) and it will find the best checkpoint automatically:
 
@@ -224,7 +268,35 @@ Key options:
 
 Results are written as `test_metrics.json` and reconstructed images inside the output directory.
 
-### 10. Sweep experiments
+### 12. Run a single experiment locally
+
+To train and immediately evaluate one parameter combination from a param file without SLURM, use `launch_local.sh`:
+
+```bash
+./scripts/evaluation/launch_local.sh <task_id> <param_path> <config_name> <train_script> <test_script>
+```
+
+For example, to run the third configuration (0-based) from the text-vs-image encoder sweep:
+
+```bash
+./scripts/evaluation/launch_local.sh 2 \
+    scripts/params/text_vs_img_encoders.json \
+    train_eeg_align_text \
+    scripts/training/train_eeg.py \
+    scripts/evaluation/test_eeg.py
+```
+
+To list all parameter combinations in a file and their indices:
+
+```bash
+for i in $(seq 0 $(( $(python scripts/slurm/param_parser.py scripts/params/text_vs_img_encoders.json -s) - 1 ))); do
+    echo "$i: $(python scripts/slurm/param_parser.py scripts/params/text_vs_img_encoders.json -i $i)"
+done
+```
+
+Results land in `experiments/local/<timestamp>_task<id>/`.
+
+### 13. Sweep experiments
 
 To run many training jobs with different hyperparameters, define a **param file** in `scripts/slurm/params/` and launch the full pipeline with `run_experiment_pipeline.sh`.
 
@@ -287,21 +359,6 @@ This submits two chained SLURM jobs automatically:
 2. **Aggregate** — collects `test_metrics.json` from every run in the experiment directory once all array tasks finish, and writes a single `experiments/<name>/aggregated_metrics.csv`.
 
 Set `TEST_HPARAMS` to a space-separated list of dotted config keys (e.g. `"model.lr model.eeg_encoder"`) to include those hyperparameter values as columns in the CSV.
-
-**Run a single experiment (no sweep):**
-
-To train and test one configuration without SLURM, use `run_experiment.sh` directly:
-
-```bash
-bash scripts/evaluation/run_experiment.sh \
-    train_eeg_align \
-    scripts/training/train_eeg.py \
-    scripts/evaluation/test_eeg.py \
-    --experiment_dir experiments/my_run \
-    model.eeg_encoder=atms
-```
-
-The experiment directory defaults to `logs/experiments` if `--experiment_dir` is omitted.
 
 **Aggregate metrics standalone** — if you only need to re-aggregate results from an existing experiment:
 

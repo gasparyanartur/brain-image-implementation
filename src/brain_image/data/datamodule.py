@@ -16,6 +16,7 @@ from brain_image.data.dataset.eeg_dataset import DataConfig, EEGDataset, EEGData
 from brain_image.data.tensorcache import TensorCache
 from brain_image.model.encoder.encoder import EncoderName
 from brain_image.model.encoder.img_encoder.union import ImageEncoderName
+from brain_image.model.encoder.text_encoder.union import TextEncoderName
 
 
 class DataModule(LightningDataModule, ABC):
@@ -98,7 +99,7 @@ class EEGDataModule(DataModule):
         config: EEGDatasetConfig,
         tensor_cache: TensorCache | None = None,
         embeddings_key_to_name: dict[str, EncoderName | None] | None = None,
-        load_embedding_stats: list[ImageEncoderName] | None = None,
+        load_embedding_stats: list[ImageEncoderName | TextEncoderName] | None = None,
     ):
         super().__init__(config)
 
@@ -127,6 +128,8 @@ class EEGDataModule(DataModule):
             tensor_cache=self.tensor_cache,
             embeddings_key_to_name=self.embeddings_key_to_name,
             load_embedding_stats=self.load_embedding_stats,
+            *args,
+            **kwargs,
         )
 
     def create_dataloader(

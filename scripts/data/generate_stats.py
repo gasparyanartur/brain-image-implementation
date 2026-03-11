@@ -17,7 +17,7 @@ from brain_image.data.datamodule import EEGDataModule
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
 from brain_image.data.dataset.union import EEGDatasetConfigType
 from brain_image.data.tensorcache import TensorCache
-from brain_image.model.encoder.img_encoder.union import IMAGE_ENCODER_DIM, ImageEncoderName
+from brain_image.model.encoder.encoder import ALIGN_ENCODER_DIM, AlignEncoderName
 from brain_image.stats import IterativeStats
 from brain_image.utils import setup
 
@@ -26,7 +26,7 @@ from torch import Tensor
 
 class GetDataInformationConfig(BaseConfig):
     dataset: EEGDatasetConfigType
-    model_names: list[ImageEncoderName] = ["clip_vith14", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
+    model_names: list[AlignEncoderName] = ["clip_vith14", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
     batch_size: int = 512
     splits: list[Literal["train", "test"]] = ["train", "test"]
     cache_dir: Path = Path("tensorcache")
@@ -35,14 +35,31 @@ class GetDataInformationConfig(BaseConfig):
 
 def get_data_information(config: GetDataInformationConfig):
     cache = TensorCache(config.cache_dir)
-    data = EEGDataModule(config.dataset, embeddings_key_to_name={model_name: model_name for model_name in config.model_names}, tensor_cache=cache)
+
+    # Initialise without embeddings so the module doesn't try to load stats
+    # that don't exist yet (we are the ones generating them).
+    data = EEGDataModule(config.dataset, tensor_cache=cache)
 
     for split in config.splits:
-        dataloader = data.get_dataloader(split)
+        # Bypass EEGDataModule.create_dataset to avoid the duplicate-kwarg issue
+        # and to pass compute_stats=False (stats don't exist yet).
+        dataset = config.dataset.create_dataset(
+            split,
+            tensor_cache=cache,
+            embeddings_key_to_name={model_name: model_name for model_name in config.model_names},
+            compute_stats=False,
+            preload_cache=False,
+        )
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=config.batch_size,
+            shuffle=False,
+            num_workers=min(8, __import__("multiprocessing").cpu_count()),
+        )
         eeg_shape = (data.config.num_channels, data.config.time_length)
 
         eeg_stats = IterativeStats(eeg_shape)
-        embeddings_stats = {model_name: IterativeStats((IMAGE_ENCODER_DIM[model_name])) for model_name in config.model_names}
+        embeddings_stats = {model_name: IterativeStats((ALIGN_ENCODER_DIM[model_name])) for model_name in config.model_names}
 
         for batch in tqdm.tqdm(dataloader, desc=f"Processing {split} split"):
             eeg = get_from_batch("eeg_data", batch, Tensor)

@@ -1,0 +1,24 @@
+defaults:
+  - base
+  - dataset: things-eeg2
+  - _self_
+
+model_names:
+  - t5_base
+  - clip_vitl14_text
+  - gemma_embedding_300m
+
+caption_path: data/things-eeg2/captions/local.jsonl
+
+splits:
+  - train
+  - test
+
+batch_size: 256
+dtype: float32
+device: null
+compile: false
+cache_dir: tensorcache
+
+dataset:
+  subs: [1]

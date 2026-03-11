@@ -16,7 +16,9 @@ def get_single_file(dir: Path, pattern: str) -> Path | None:
         return None
 
     if num_results > 1:
-        raise ValueError(f"Expected to find one result matching pattern {pattern} in dir {dir} - Found {num_results}: {tuple(paths)}")
+        # Prefer the deepest path (e.g. version_0/test/test_metrics.json over version_0/test_metrics.json)
+        paths = sorted(paths, key=lambda p: len(p.parts), reverse=True)
+        logging.debug(f"Found {num_results} matches for {pattern} in {dir}, using deepest: {paths[0]}")
 
     return paths[0]
 
