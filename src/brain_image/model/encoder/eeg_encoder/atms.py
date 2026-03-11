@@ -452,3 +452,7 @@ class AtmsEEGEncoder(EEGEncoder):
         # TODO: Handle non-flattened case
 
         return x
+    
+    def get_attention_maps(self, x, sub: torch.Tensor | None = None) -> list[torch.Tensor]:
+        _, attn = self.encoder(x, None, sub)
+        return attn  # Return attention maps from the encoder
