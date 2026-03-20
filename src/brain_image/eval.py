@@ -16,8 +16,12 @@ def find_checkpoint_in_run(
     if len(cp_candidates) == 0:
         raise ValueError(f"No checkpoints found in {checkpoint_dir}")
 
+    # The trainer writes metrics as e.g. "val_loss" (slashes and hyphens → underscores).
+    # Normalise the caller-supplied metric so both sides agree.
+    metric_in_filename = checkpoint_metric.replace("/", "_").replace("-", "_")
+
     name_pattern = re.compile(
-        rf".+epoch_(\d+)-{checkpoint_metric}_([0-9]*\.?[0-9]+)\.ckpt"
+        rf".*epoch_(\d+)-{re.escape(metric_in_filename)}_([0-9]*\.?[0-9]+)\.ckpt"
     )
 
     parsed_infos = []

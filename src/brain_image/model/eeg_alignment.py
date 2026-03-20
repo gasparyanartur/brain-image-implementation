@@ -13,6 +13,7 @@ from brain_image.augment import EEGAugmentationPipeline
 from brain_image.configs import get_device
 from brain_image.data.datamodule import EEGDataModule
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
+from brain_image.data.dataset.union import resolve_dataset_config
 from brain_image.data.io import batch_load_images
 from brain_image.data.tensorcache import TensorCache
 from brain_image.data.data import (
@@ -35,7 +36,7 @@ from brain_image.model.encoder.eeg_encoder.union import (
     EEGEncoderConfigType,
     create_eeg_encoder,
 )
-from brain_image.model.encoder.encoder import EncoderName
+from brain_image.model.encoder.encoder import AlignEncoderName, EncoderName, get_align_encoder_dim
 from brain_image.model.encoder.img_encoder.union import (
     VAE_ENCODER,
 )
@@ -43,6 +44,7 @@ from brain_image.model.encoder.img_encoder.union import (
     IMAGE_ENCODER_DIM,
     ImageEncoderName,
 )
+from brain_image.model.encoder.text_encoder.union import TextEncoderName
 from brain_image.model.loss import CLIPLoss, InfoNCELoss, SigLipLoss
 
 from brain_image.model.model import (
@@ -80,7 +82,7 @@ T = TypeVar("T")
 
 
 class EEGAlignmentConfig(TrainingModuleConfig):
-    align_img_encoder: ImageEncoderName = "unaligned_synclr_vitb16"
+    align_img_encoder: AlignEncoderName = "unaligned_synclr_vitb16"
     low_level_encoder: VAE_ENCODER = "ip_sdxl_turbo"
     prior_img_encoder: ImageEncoderName = "clip_vitl14"
 
@@ -233,11 +235,13 @@ class EEGAlignmentModel(TrainingModule):
     ):
         if isinstance(config, dict):
             config = EEGAlignmentConfig.model_validate(config)
+        if isinstance(dataset_config, dict):
+            dataset_config = resolve_dataset_config(dataset_config)
 
         # Update interdependent config values
         config.eeg_encoder.d_channels = dataset_config.num_channels
         config.eeg_encoder.d_time = dataset_config.time_length
-        config.eeg_encoder.d_output = IMAGE_ENCODER_DIM[config.align_img_encoder]
+        config.eeg_encoder.d_output = get_align_encoder_dim(config.align_img_encoder)
         if config.do_recon:
             assert config.prior is not None
             config.prior.d_cond = config.eeg_encoder.d_output

@@ -1,0 +1,38 @@
+{
+    "entries": [
+        {
+            "keys": [
+                "model.align_img_encoder",
+                "model.max_epochs"
+            ],
+            "values": [
+                [
+                    "t5_base",
+                    "clip_vitl14_text",
+                    "clip_vitl14",
+                    "unaligned_synclr_vitb16",
+                    "aligned_synclr_vitb16",
+                    "gemma_embedding_300m"
+                ],
+                [
+                    "100",
+                    "100",
+                    "100",
+                    "100",
+                    "100",
+                    "100"
+                ]
+            ]
+        },
+        {
+            "keys": [
+                "dataset.subs"
+            ],
+            "values": [
+                [
+                    "[8]"
+                ]
+            ]
+        }
+    ]
+}

@@ -30,7 +30,7 @@ fi
 echo -e "${GREEN}Building ${PROGRAM} image: ${IMAGE_FILE} from definition: ${DEFINITION_FILE}...${NC}"
 
 # Build the Singularity/Apptainer image
-sudo -E ${PROGRAM} build --tmpdir ${TMP_DIR} \
+${PROGRAM} build --fakeroot --tmpdir ${TMP_DIR} \
     "${IMAGE_FILE}" \
     "${DEFINITION_FILE}"
 
