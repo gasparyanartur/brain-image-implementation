@@ -2,9 +2,35 @@
 
 ## Project Description
 
-(TODO: Update this)
+Collection of code for training and evaluation of EEG-image models. The primary workflow investigates alignment of EEG signals to image latents, and reconstruction of images from EEG using a diffusion prior. 
 
-## Environments
+
+# Project Structure
+
+We use Pytorch Lightning for training, and Hydra for configuration. Evaluation code is separate from training, and is designed to be run on trained checkpoints after the fact. There are also various utility scripts for data processing, embedding generation, and SLURM job submission.
+
+In this project, there have been multiple sub-projects:
+
+**EEG-Image Alignment**: Our main track, which builds on Nona's work, [Human-Aligned Image Models Improve Visual Decoding from the Brain](https://github.com/NonaRjb/AlignVis). Here, we take the processed EEG signals, embed them using an EEG encoder, and align the latents to an image-embedding using contrastive loss. The code for this part can be found in `src/brain_image/model/eeg_alignment.py`. Notably, the `do_align` flag controls whether the contrastive loss is applied during training. See `src/brain_image/configs/train_eeg_align.yaml` for sensible default settings for this track.
+
+**Image Reconstruction from EEG**: Here, we implement and train a diffusion prior to map EEG latents to CLIP image space, and then use a pretrained diffusion model to recreate images from them. The `do_recon` flag determines whether we do this part or not. See `src/brain_image/configs/train_eeg_prior.yaml` for default settings for this track. You can also combine both the alignment and reconstruction by setting both flags to true, and using `train_eeg_alignprior.yaml` for default settings.
+
+We have two pipelines: The one from [Reconstructing the Mind's Eye](https://github.com/MedARC-AI/fMRI-reconstruction-NSD) (*Dalle-2 Diffusion Prior paried with SD2.1 + Image Variation*), and the one from [Visual Decoding and Reconstruction via EEG Embeddings with Guided Diffusion](https://github.com/dongyangli-del/eeg_image_decode) (*A simple Diffusion Prior paired with SDXL + IP-adapter*). The Guided EEG pipeline is the one that we have been maintaining. The Mind's Eye pipeline is also there, but is currently broken and needs to be fixed prior to usage. Ideally, there would be a shared interface for them, so that we can easily switch between them and compare results. 
+
+**CoMM Model**: We tried generating a CLIP-latent using our diffusion prior, and jointly encoding that with EEG to get a multimodal representation. We then tried to decode the images using this representation, but it didn't work better than just using the EEG latents, so we have not focused on this track. This part of the code should mostly be working. See `src/brain_image/model/comm_alignment.py` for the model code, and `src/brain_image/configs/train_comm.yaml` for the training config. 
+
+**Text Alignment**: We tried generating text from the dataset using QWEN and aligning the EEG latents to that instead of the image latents. This didn't work much better than the image alignment. The code currently works as a simple plug-in to the alignment pipeline. See `src/brain_image/configs/train_eeg_align_text.yaml` for the training config.
+
+**Low Level Pipeline**: We implement a low-level pipeline which takes the EEG latent and trues to directly reconstruct a blurry image. This is then passed through the frozen Stable Diffusion VAE-decoder to get an initial image for the img-to-img. This code is currently out of date, and needs to be fixed and cleaned up. Especially the training script is completely incompatible with the current codebase, and needs to be rewritten. See `src/brain_image/model/low_level.py` for the model code, and `src/brain_image/configs/train_low_level.yaml` for the training config.
+
+We also tried to use Dreamsim to train the low-level pipeline instead, but it didn't help. This part probably still works if the low-level pipeline is working, but currently it is not. See `src/brain_image/configs/train_low_level_dreamsim.yaml` for the training config.
+
+**Second-Prior Alignment**: We tried outputting a second EEG aligning with our diffusion prior, and aligning the EEG latents after the prior, rather than before. The idea was to see if EEG alignment was interfering with training the diffusion prior, and if removing this interference would help. Eventually, we abandoned this track, and deleted the code. However, if this is something you want to look at in the future, you can find the code in [this commit](https://github.com/gasparyanartur/brain-image-implementation/blob/6d1cb137caf99b5459b87630a823bdbd6732fd25/src/brain_image/model/eeg_alignment.py).
+
+
+## Setup
+
+### Environments
 
 Scripts in this repo run either locally with `uv` or on a SLURM cluster via `ssub`. Both forms are shown throughout this README where relevant.
 
@@ -21,7 +47,7 @@ python scripts/training/train_eeg.py --config-name=train_eeg_align
 ssub train_eeg python scripts/training/train_eeg.py --config-name=train_eeg_align
 ```
 
-## Setup
+**Note**: The training workflow is designed to work with WANDB for logging and experiment tracking. If you want to run without WANDB, set `enabled=false` in `src/brain_image/configs/wandb/wandb.yaml`. If you do use WANDB, make sure to set your API key in the `.env` file (see [Environment variables](#2-environment-variables)), and to log in with `wandb login` before running any scripts.
 
 ### 1. Directory structure
 
@@ -81,7 +107,7 @@ Try importing `torch` in a Python shell to confirm the installation.
 
 On the cluster, the project runs inside a Singularity/Apptainer container. Utility scripts for building and running images are in `scripts/container/`.
 
-Build the base image first — this installs CUDA, Python 3.12, and PyTorch, and takes a while. It requires `sudo`, so it is best done on a local machine and then rsynced to the cluster:
+Build the base image first — this installs CUDA, Python 3.12, and PyTorch, and takes a while. 
 
 ```bash
 DEFINITION_FILE=scripts/container/singularity_base.def \
@@ -142,6 +168,9 @@ SBATCH_GROUP=cpu ssub prepare_things_eeg_img bash scripts/data/things-eeg2/prepa
 
 **AllJoined-16M**
 
+*Note on AllJoined-16M:* Currently there is an issue in the code, causing the model to not learn anything when training on this dataset. We are investigating the issue, but in the meantime, we recommend using the Things-EEG2 dataset for training and evaluation. The AllJoined-16M dataset is still available in the codebase, but it might not work as expected until the issue is resolved. 
+Also, we currently fetch the stim-order for this dataset in a hacky way, because it was not included in the original release. The dataset has since been updated to include the stim-order, but we have not yet updated our code to reflect that. 
+
 EEG — subs 1–20, one task per subject:
 
 ```bash
@@ -181,7 +210,10 @@ The default set of encoders is configured in `src/brain_image/configs/generate_e
 
 ### 7. Generate text captions
 
-Text captions are generated locally using a Qwen VL model. Run this before generating text embeddings:
+**Note on text captions:** This step is optional and only needed if you want to train with text alignment instead of image alignment. The text captions are generated from the stimulus images using a pretrained vision-language model.
+
+There are two options for text captions: using a local VL model, or fetching from the HuggingFace API. Currently, only the local option works, because the HuggingFace API does not support processing this number of images in a reasonable time. 
+
 
 ```bash
 # Local:
