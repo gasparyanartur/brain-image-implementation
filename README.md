@@ -208,11 +208,11 @@ SBATCH_GROUP=gpu ssub generate_embeddings python scripts/data/generate_embedding
 
 The default set of encoders is configured in `src/brain_image/configs/generate_embeddings.yaml`.
 
-### 7. Generate text captions
+### 7. Generate text captions (optional)
 
 **Note on text captions:** This step is optional and only needed if you want to train with text alignment instead of image alignment. The text captions are generated from the stimulus images using a pretrained vision-language model.
 
-There are two options for text captions: using a local VL model, or fetching from the HuggingFace API. Currently, only the local option works, because the HuggingFace API does not support processing this number of images in a reasonable time. 
+There are two options for text captions: using a local VL model (which uses Qwen by default), or fetching from the HuggingFace API. Currently, only the local option works, because the HuggingFace API does not support processing this number of images in a reasonable time. 
 
 
 ```bash
@@ -225,7 +225,7 @@ SBATCH_GROUP=gpu ssub generate_captions python scripts/data/generate_text_captio
 
 Captions are written to `data/things-eeg2/captions/local.jsonl` (one JSON line per image with `path` and `caption` fields). Already-captioned images are skipped on re-runs. The model name and other settings are in `src/brain_image/configs/generate_text_captions_local.yaml`.
 
-### 8. Generate text embeddings
+### 8. Generate text embeddings (optional)
 
 Once captions exist, encode them with one or more text encoders and cache the results in `tensorcache/`. Supported encoders: `t5_base`, `t5_large`, `clip_vitl14_text`, `clip_vitb32_text`, `llama3_8b`, `gemma_embedding_300m`.
 
