@@ -47,7 +47,7 @@ python scripts/training/train_eeg.py --config-name=train_eeg_align
 ssub train_eeg python scripts/training/train_eeg.py --config-name=train_eeg_align
 ```
 
-**Note**: The training workflow is designed to work with WANDB for logging and experiment tracking. If you want to run without WANDB, set `enabled=false` in `src/brain_image/configs/wandb/wandb.yaml`. If you do use WANDB, make sure to set your API key in the `.env` file (see [Environment variables](#2-environment-variables)), and to log in with `wandb login` before running any scripts.
+**Note**: The training workflow is designed to work with WANDB for logging and experiment tracking. If you want to run without WANDB, set `enabled=false` in `src/brain_image/configs/wandb/wandb.yaml`. If you do use WANDB, make sure to set your API key in the `.env` file, and to log in with `wandb login` before running any scripts. See [Environment variables](#2-environment-variables) and [Verify Setup](#4-verify-setup) for more details.
 
 ### 1. Directory structure
 
@@ -198,15 +198,15 @@ The training loop assumes all image latents are precomputed and cached in `tenso
 
 ```bash
 # Local (all encoders):
-python scripts/data/generate_embeddings.py
+python scripts/data/generate_image_embeddings.py
 # or for specific encoders only:
-python scripts/data/generate_embeddings.py model_names=[clip_vith14]
+python scripts/data/generate_image_embeddings.py model_names=[clip_vith14]
 
 # SLURM (all encoders):
-SBATCH_GROUP=gpu ssub generate_embeddings python scripts/data/generate_embeddings.py
+SBATCH_GROUP=gpu ssub generate_image_embeddings python scripts/data/generate_image_embeddings.py
 ```
 
-The default set of encoders is configured in `src/brain_image/configs/generate_embeddings.yaml`.
+The default set of encoders is configured in `src/brain_image/configs/generate_image_embeddings.yaml`.
 
 ### 7. Generate text captions (optional)
 

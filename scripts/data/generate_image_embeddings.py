@@ -102,7 +102,7 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
 
 @hydra.main(
     config_path=str(GlobalConfig.CONFIGS_DIR),
-    config_name="generate_embeddings",
+    config_name="generate_image_embeddings",
     version_base=None,
 )
 def main(cfg: DictConfig):

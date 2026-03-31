@@ -1,0 +1,26 @@
+{
+    "entries": [
+        {
+            "keys": [
+                "model.align_img_encoder"
+            ],
+            "values": [
+                [
+                    "t5_base"
+                ]
+            ]
+        },
+        {
+            "keys": [
+                "model.seed"
+            ],
+            "values": [
+                [
+                    "41",
+                    "42",
+                    "43"
+                ]
+            ]
+        }
+    ]
+}

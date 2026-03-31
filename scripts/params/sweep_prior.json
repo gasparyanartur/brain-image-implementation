@@ -1,0 +1,37 @@
+{
+    "entries": [
+        {
+            "keys": [
+                "model.do_align",
+                "model.align_img_encoder",
+                "model.prior_img_encoder"
+            ],
+            "values": [
+                [
+                    "false",
+                    "true"
+                ],
+                [
+                    "aligned_synclr_vitb16",
+                    "aligned_synclr_vitb16"
+                ],
+                [
+                    "clip_vith14",
+                    "clip_vith14"
+                ]
+            ]
+        },
+        {
+            "keys": [
+                "model.seed"
+            ],
+            "values": [
+                [
+                    "41",
+                    "42",
+                    "43"
+                ]
+            ]
+        }
+    ]
+}
