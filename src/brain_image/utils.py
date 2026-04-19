@@ -227,16 +227,14 @@ def show_image(
 
 
 def setup_huggingface():
-    from huggingface_hub import login
-
-    logging.info(f"Logging in to Hugging Face Hub...")
-
     tok = os.environ.get("HF_API_TOKEN")
     if not tok:
         raise ValueError("HF_API_TOKEN is not set. Please set it in the .env file")
-    login(token=tok)
 
-    logging.info(f"Logged in to Hugging Face Hub")
+    os.environ["HF_TOKEN"] = tok
+    os.environ["HUGGING_FACE_HUB_TOKEN"] = tok
+
+    logging.info("Configured Hugging Face Hub auth via HF_TOKEN env var")
 
 
 def setup():

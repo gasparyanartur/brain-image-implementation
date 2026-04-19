@@ -55,7 +55,16 @@ def main(args: Args):
     model = EEGAlignmentModel.load_from_checkpoint(args.checkpoint_path, hparams_file=args.hyperparameters_path)
     model.eval()
     logging.info(f"Finished loading model.")
-    
+
+    # Force full image-reconstruction evaluation at test time, regardless of
+    # whether training skipped it to save epoch-level validation cost.
+    model.config.skip_reconstruction = False
+    if args.metrics:
+        model.config.test_recon_metrics = list(args.metrics)  # type: ignore[assignment]
+    if args.recon_idxs is not None:
+        model.config.highlighted_test_recons = list(args.recon_idxs)
+    logging.info(f"Test-time recon enabled. Metrics: {model.config.test_recon_metrics}")
+
     logging.info(f"Running full test...")
     metrics, imgs = model.run_full_validation(split="test")
     logging.info(f"Finished running full test.")

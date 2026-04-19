@@ -296,7 +296,10 @@ Key options:
 | `--checkpoint_selection` | `min` | How to pick checkpoint: `min`, `max`, or `last` |
 | `--checkpoint_metric` | `val-loss` | Metric used to select the checkpoint |
 | `--output_dir` | `<run>/test/` | Where to write metrics and reconstructed images |
-| `--metrics` | all | Subset of metrics to compute |
+| `--metrics` | `pixcorr ssim alex2 alex5 inceptionv3 clip efficientnet swav` | Image-reconstruction metrics to compute |
+| `--recon_idxs` | from checkpoint hparams | Dataset indices to reconstruct and score |
+
+The test script always runs full image reconstruction, even if the checkpoint was trained with `model.skip_reconstruction=true` (which is the default for `train_eeg_prior` to keep validation cheap). Reconstruction metrics (`pixcorr`, `ssim`, `alex2`, `alex5`, `inceptionv3`, `clip`, `efficientnet`, `swav`) only appear in the output when `model.do_recon=true` was set during training.
 
 Results are written as `test_metrics.json` and reconstructed images inside the output directory.
 

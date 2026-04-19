@@ -40,6 +40,8 @@ dependencies = [
     "python-dotenv",
     "reformer_pytorch",
 
+    "setuptools",
+    "setuptools",
     "gdown",
     "mne",
     "scikit-image",
