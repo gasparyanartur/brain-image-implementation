@@ -58,7 +58,7 @@ class DummyEEGDataset(EEGDataset):
     def get_eeg_paths(self, split: DSPLIT | None = None, subs: list[int] | None = None) -> list[Path]:
         return [self.config.dummy_eeg_path]
 
-    def _load_embedding_stats(self):
+    def _load_embedding_stats(self, split: str | None = None):
         stats = {}
         for emb_type, emb_name in self.embeddings_key_to_name.items():
             emb_name = cast(ImageEncoderName, emb_name) 
@@ -112,5 +112,4 @@ class DummyEEGDataset(EEGDataset):
 
     def _generate_eeg(self):
         return torch.randn(self.config.num_channels, self.config.time_length)
-
 

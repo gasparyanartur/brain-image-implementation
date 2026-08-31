@@ -1,0 +1,22 @@
+[2026-08-30] EEG alignment local workflow
+- Added `scripts/run_eeg_alignment.sh` for local train-then-evaluate execution using `train_eeg_align`.
+- Separated EEG training from test execution in `scripts/training/train_eeg.py`.
+- Changed EEG evaluation to write `test_metrics.csv` and `evaluation_config.yaml`; retained image output and removed the EEG JSON metrics artifact.
+- Fixed dummy dataset `_load_embedding_stats` split compatibility.
+- Verified a one-epoch CUDA dummy run completed and produced three alignment metrics, checkpoints, training TensorBoard events, and CSV artifacts.
+- Existing sweep/SLURM experiment scripts were inspected and retained.
+- README and project/architecture docs remain for the next iteration.
+- Set `train_eeg_align` to explicitly override `eeg_encoder@model.eeg_encoder: nice`; confirmed the composed config has `do_align=true`, `do_recon=false`, and `do_recon_low=false`.
+- Completed full local Things-EEG2 subject-8 training for 200 epochs with the NICE encoder.
+- Selected checkpoint: `epoch_0114-val_loss_0.1938.ckpt`.
+- Final test metrics: brain_acc=0.53499997, image_acc=0.47, sim=0.40845275.
+- Verified training TensorBoard events, CSV evaluation output, YAML evaluation config, and absence of EEG JSON metrics output.
+- Corrected alignment config to explicit pure symmetric InfoNCE: no projector, no augmentation, `align_loss_factor=1.0`, `align_mse_loss_factor=0.0`; stopped the pre-correction run before restarting.
+- Alignment checkpoint selection now monitors `val/align/top1` in max mode; evaluator default matches the trainer filename metric. The in-progress pre-change ATMS run is not a valid comparison and will be restarted.
+- Alignment sweep wiring updated: `sweep_align.json` now produces 12 combinations (aligned/unaligned SynCLR x NICE/ATMS x seeds 41/42/43); local and renamed SLURM sweep launchers aggregate CSV metrics with effective hparams.
+- Reduced `train_eeg_align` train, validation, and test batch sizes to 128 after the initial sweep stopped during task 0 under the higher-memory settings; composed config verified.
+- Stopped the sweep after observing 16 inherited DataLoader workers and high host memory use; alignment config now limits `dataset.num_workers` to 4.
+- Bounded the tensor-cache LRU with `BRAIN_IMAGE_TENSORCACHE_MAXSIZE`, default 1024, and documented the lower-memory override.
+- Updated README with the 12-run alignment sweep command, fixed protocol, sequential behavior, batch/worker settings, cache bound, and aggregate output; launched the sweep in tmux with the environment activated.
+- Completed the 12-run alignment sweep under `experiments/eeg_alignment_sweep`; all 12 intended CSV results aggregated successfully. One earlier failed task-0 directory remains and was skipped by the aggregator.
+- Kept sweep launchers environment-agnostic; tmux launch command explicitly sources `.venv/bin/activate` before starting the sequential sweep.

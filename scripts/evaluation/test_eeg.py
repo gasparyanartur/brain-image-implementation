@@ -1,21 +1,19 @@
-import datetime
-import re
-import argparse 
+import argparse
+import csv
 import logging
 from pathlib import Path
 
 from typing import Literal
 from pydantic import BaseModel
-import json
 
 import torch
+import yaml
 
 from brain_image.eval import find_checkpoint_in_run
-from brain_image.metrics import METRIC_LOOKUP, MetricType
+from brain_image.metrics import METRIC_LOOKUP
 from brain_image.model.eeg_alignment import EEGAlignmentModel
 from brain_image.model.model import dump_test_output
 from brain_image.utils import flatten_configs, setup_logging
-import os
 
 
 class Args(BaseModel):
@@ -23,7 +21,7 @@ class Args(BaseModel):
     checkpoint_path: Path | None = None
     hyperparameters_path: Path | None = None
     checkpoint_selection: Literal["last", "max", "min"] = "min"
-    checkpoint_metric: str = "val-loss"
+    checkpoint_metric: str = "val/align/top1"
     output_dir: Path | None = None
     metrics: list[str] = ['pixcorr', 'ssim', 'alex2', 'alex5', 'inceptionv3', 'clip', 'efficientnet', 'swav']
     recon_idxs: list[int] | None = None
@@ -78,12 +76,18 @@ def main(args: Args):
     output_dir = (args.output_dir / name) if (args.output_dir is not None) else (args.run_path / "test")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(output_dir / "config.json", "w") as f:
-        json.dumps(
-            args.model_dump_json(indent=4)
-        )
+    with open(output_dir / "test_metrics.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(("metric", "value"))
+        for metric_name, metric_value in metrics.items():
+            if isinstance(metric_value, torch.Tensor):
+                metric_value = metric_value.detach().cpu().item()
+            writer.writerow((metric_name, metric_value))
 
-    dump_test_output(output_dir, metrics, imgs)
+    with open(output_dir / "evaluation_config.yaml", "w") as f:
+        yaml.safe_dump(args.model_dump(mode="json"), f, sort_keys=False)
+
+    dump_test_output(output_dir, metrics, imgs, metrics_file_name=None)
 
 
 if __name__ == "__main__":
@@ -92,7 +96,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_path", "-c", type=Path, help="Path to the checkpoint, overrides checkpoints found in the run path")
     parser.add_argument("--hyperparameters_path", "-hp", type=Path, help="Path to the hyperparameters")
     parser.add_argument("--checkpoint_selection", choices=["last", "max", "min"], default="min", help="How to select the checkpoint")
-    parser.add_argument("--checkpoint_metric", default="val-loss", help="Metric used to find best checkpoint")
+    parser.add_argument("--checkpoint_metric", default="val/align/top1", help="Metric used to find best checkpoint")
     parser.add_argument("--output_dir", "-o", type=Path, help="Experiment directory. if None, results are written to run_path/outputs", default=None)
     parser.add_argument("--metrics", "-m", type=str, nargs="+", default=list(METRIC_LOOKUP.keys()), choices=list(METRIC_LOOKUP.keys()), help="Metrics to compute")
     parser.add_argument("--recon_idxs", "-i", type=int, nargs="*", default=None)
@@ -100,5 +104,3 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(Args(**vars(args)))
-
-

@@ -181,13 +181,14 @@ def dump_test_output(
     output_dir: Path,
     metrics: dict[str, Any],
     imgs: dict[str, dict[str, Any]],
-    metrics_file_name: str = "test_metrics.json"
+    metrics_file_name: str | None = "test_metrics.json"
 ):
     logging.info(f"Saving test output to {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)  # create output dir if it doesn't exist
 
-    with open(output_dir / metrics_file_name, "w") as f:
-        json.dump(metrics, f, indent=4)
+    if metrics_file_name is not None:
+        with open(output_dir / metrics_file_name, "w") as f:
+            json.dump(metrics, f, indent=4)
 
     for img_type, img_dict in imgs.items():
         logging.info(f"Saving {img_type} images")

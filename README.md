@@ -34,18 +34,14 @@ We also tried to use Dreamsim to train the low-level pipeline instead, but it di
 
 Scripts in this repo run either locally with `uv` or on a SLURM cluster via `ssub`. Both forms are shown throughout this README where relevant.
 
-**Local:** Activate your venv and run scripts directly (see [Python environment](#3-python-environment)):
+**Local:** Activate your venv and use the EEG alignment launcher (see [Python environment](#3-python-environment)):
 
 ```bash
 source .venv/bin/activate
-python scripts/training/train_eeg.py --config-name=train_eeg_align
+./scripts/run_eeg_alignment.sh
 ```
 
-**Cluster:** Use `ssub` to submit any command as a SLURM job wrapped in the Singularity container (see [SLURM job submission](#slurm-job-submission-ssub)):
-
-```bash
-ssub train_eeg python scripts/training/train_eeg.py --config-name=train_eeg_align
-```
+The launcher uses the alignment-specific config, trains only the EEG encoder, and then runs the separate evaluator. Reconstruction and the diffusion prior are disabled.
 
 **Note**: The training workflow is designed to work with WANDB for logging and experiment tracking. If you want to run without WANDB, set `enabled=false` in `src/brain_image/configs/wandb/wandb.yaml`. If you do use WANDB, make sure to set your API key in the `.env` file, and to log in with `wandb login` before running any scripts. See [Environment variables](#2-environment-variables) and [Verify Setup](#4-verify-setup) for more details.
 
@@ -265,28 +261,38 @@ python scripts/data/generate_stats.py --config-name=generate_text_stats model_na
 
 The default dataset and encoder list for each are configured in `src/brain_image/configs/generate_stats.yaml` and `src/brain_image/configs/generate_text_stats.yaml` respectively.
 
-### 10. Train
+### 10. Run EEG alignment locally
+
+The maintained local EEG alignment workflow is a single train-then-evaluate command:
 
 ```bash
-python scripts/training/train_eeg.py --config-name=train_eeg_align
-# or on SLURM:
-ssub train_eeg python scripts/training/train_eeg.py --config-name=train_eeg_align
+./scripts/run_eeg_alignment.sh
 ```
 
-For text-encoder alignment, use the `train_eeg_align_text` config:
+The launcher uses `train_eeg_align` with these defaults:
+
+- Dataset: Things-EEG2, subject 8
+- EEG encoder: NICE
+- Image target: `aligned_synclr_vitb16`
+- Alignment: enabled
+- Diffusion prior and reconstruction: disabled
+- Training TensorBoard: written by Lightning inside the run directory
+- WANDB: disabled by the local launcher
+
+Hydra overrides can be appended for controlled experiments:
 
 ```bash
-python scripts/training/train_eeg.py --config-name=train_eeg_align_text
+./scripts/run_eeg_alignment.sh model.max_epochs=1 dataset.limit_train_size=0.01
 ```
 
-### 11. Evaluate a trained run
+The underlying training entry point is `scripts/training/train_eeg.py`. It performs training only; evaluation is intentionally separate.
 
-After training, evaluate a checkpoint with `scripts/evaluation/test_eeg.py`. Pass the run directory (the `logs/train/<run_name>` folder produced by the logger) and it will find the best checkpoint automatically:
+### 11. Evaluate a trained EEG alignment run
+
+The launcher invokes `scripts/evaluation/test_eeg.py` after training. To evaluate an existing run manually, pass its run directory:
 
 ```bash
-python scripts/evaluation/test_eeg.py logs/train/my_run
-# or on SLURM:
-ssub test_eeg python scripts/evaluation/test_eeg.py logs/train/my_run
+python scripts/evaluation/test_eeg.py experiments/eeg_alignment/<timestamp>/<run_name>
 ```
 
 Key options:
@@ -301,20 +307,41 @@ Key options:
 
 The test script always runs full image reconstruction, even if the checkpoint was trained with `model.skip_reconstruction=true` (which is the default for `train_eeg_prior` to keep validation cheap). Reconstruction metrics (`pixcorr`, `ssim`, `alex2`, `alex5`, `inceptionv3`, `clip`, `efficientnet`, `swav`) only appear in the output when `model.do_recon=true` was set during training.
 
-Results are written as `test_metrics.json` and reconstructed images inside the output directory.
+Results are written inside `<run_name>/version_0/test/` as:
 
-### 12. Run a single experiment locally
+- `test_metrics.csv` — one `metric,value` row per test metric
+- `evaluation_config.yaml` — the effective evaluator arguments
+- reconstructed PNG images when the evaluated track produces images
 
-To train and immediately evaluate one parameter combination from a param file without SLURM, use `launch_local.sh`:
+Training metrics remain in the Lightning TensorBoard files under `<run_name>/version_0/`:
 
 ```bash
-./scripts/evaluation/launch_local.sh <task_id> <param_path> <config_name> <train_script> <test_script>
+tensorboard --logdir experiments/eeg_alignment/<timestamp>/<run_name>/version_0
+```
+
+The tensor cache keeps up to 1024 loaded tensors in memory by default. Override this per process with `BRAIN_IMAGE_TENSORCACHE_MAXSIZE`, for example `BRAIN_IMAGE_TENSORCACHE_MAXSIZE=256` for lower host-memory use.
+
+### 12. Existing experiment and sweep scripts
+
+The generic experiment and sweep launchers are retained for existing experiments but are not required for the primary EEG alignment handover workflow:
+
+- `scripts/evaluation/run_experiment.sh` runs a generic train-then-evaluate flow through the container wrapper.
+- `scripts/evaluation/run_experiment_task_local.sh` runs one parameter-file combination locally.
+- `scripts/evaluation/run_experiment_sweep.sh` runs and aggregates a complete local sweep.
+- `scripts/evaluation/run_experiment_sweep_slurm.sh` and `run_sweep_instance.sh` orchestrate the same sweep through SLURM.
+
+For the primary local EEG alignment workflow, use `scripts/run_eeg_alignment.sh`.
+
+For the existing parameter-file workflow, use:
+
+```bash
+./scripts/evaluation/run_experiment_task_local.sh <experiment_name> <task_id> <param_path> <config_name> <train_script> <test_script>
 ```
 
 For example, to run the third configuration (0-based) from the text-vs-image encoder sweep:
 
 ```bash
-./scripts/evaluation/launch_local.sh 2 \
+./scripts/evaluation/run_experiment_task_local.sh text_vs_img 2 \
     scripts/params/text_vs_img_encoders.json \
     train_eeg_align_text \
     scripts/training/train_eeg.py \
@@ -329,13 +356,15 @@ for i in $(seq 0 $(( $(python scripts/slurm/param_parser.py scripts/params/text_
 done
 ```
 
-Results land in `experiments/local/<timestamp>_task<id>/`.
+Results land in `experiments/<experiment_name>/<timestamp>_task<id>/`.
 
 ### 13. Sweep experiments
 
-To run many training jobs with different hyperparameters, define a **param file** in `scripts/slurm/params/` and launch the full pipeline with `run_experiment_pipeline.sh`.
+To run many training jobs with different settings, define a **param file** in `scripts/params/` and launch the local sweep with `run_experiment_sweep.sh`.
 
-**Param file format** — `scripts/slurm/params/<name>.json`:
+The maintained alignment sweep is `scripts/params/sweep_align.json`. It runs 12 fixed-protocol experiments: aligned and unaligned SynCLR targets, NICE and ATMS EEG encoders, and seeds 41, 42, and 43. The alignment config uses batch sizes of 128, four DataLoader workers, no augmentation, no MSE alignment term, and accuracy-based checkpoint selection.
+
+**Param file format** — `scripts/params/<name>.json`:
 
 ```json
 {
@@ -345,7 +374,7 @@ To run many training jobs with different hyperparameters, define a **param file*
             "values": [["clip_vitl14", "clip_vith14", "synclr_vitb16"]]
         },
         {
-            "keys": ["model.eeg_encoder"],
+            "keys": ["eeg_encoder@model.eeg_encoder"],
             "values": [["nice", "atms"]]
         }
     ]
@@ -367,31 +396,58 @@ Each entry is one sweep axis. Multiple entries are crossed as a cartesian produc
 
 This produces only `(1e-4, atms)` and `(1e-3, nice)` — not all four combinations.
 
-**Run the pipeline:**
+**Run locally:**
 
 ```bash
-./scripts/evaluation/run_experiment_pipeline.sh \
+./scripts/evaluation/run_experiment_sweep.sh \
     <experiment_name> <param_path> <config_name> \
     <train_script> <test_script> \
     [cli_args...]
 ```
 
+For the alignment sweep, activate the project environment before launching it and set the tensor-cache bound explicitly:
+
+```bash
+source .venv/bin/activate
+BRAIN_IMAGE_TENSORCACHE_MAXSIZE=1024 \
+  ./scripts/evaluation/run_experiment_sweep.sh \
+    eeg_alignment_sweep \
+    scripts/params/sweep_align.json \
+    train_eeg_align \
+    scripts/training/train_eeg.py \
+    scripts/evaluation/test_eeg.py \
+    trainer.wandb.enabled=false
+```
+
+The local launcher runs combinations sequentially. Each run writes its own checkpoint, TensorBoard event file, and `test/test_metrics.csv`; the final aggregate is `experiments/eeg_alignment_sweep/aggregated_metrics.csv`.
+
 For example:
 
 ```bash
 TEST_HPARAMS="model.align_img_encoder model.eeg_encoder" \
-  ./scripts/evaluation/run_experiment_pipeline.sh \
+  ./scripts/evaluation/run_experiment_sweep.sh \
     encoders \
-    scripts/slurm/params/encoders.json \
+    scripts/params/encoders.json \
     train_eeg_align \
     scripts/training/train_eeg.py \
     scripts/evaluation/test_eeg.py
 ```
 
+The local command runs all parameter combinations sequentially, evaluates each run, and writes `experiments/<name>/aggregated_metrics.csv` from the CSV evaluation artifacts.
+
+For SLURM, use the equivalent wrapper:
+
+```bash
+./scripts/evaluation/run_experiment_sweep_slurm.sh \
+    <experiment_name> <param_path> <config_name> \
+    <train_script> <test_script> \
+    [cli_args...]
+```
+
 This submits two chained SLURM jobs automatically:
 
 1. **Array (train + test)** — one SLURM array task per parameter combination. Each task trains its configuration then immediately evaluates the resulting run. Tasks use `--requeue` so they restart automatically on node failure or preemption. The train and test scripts are passed explicitly, making the pipeline reusable for different model types.
-2. **Aggregate** — collects `test_metrics.json` from every run in the experiment directory once all array tasks finish, and writes a single `experiments/<name>/aggregated_metrics.csv`.
+2. **Aggregate** — collects `test_metrics.csv` files from every run in the experiment directory once all array tasks finish, and writes a single `experiments/<name>/aggregated_metrics.csv`.
 
 Set `TEST_HPARAMS` to a space-separated list of dotted config keys (e.g. `"model.lr model.eeg_encoder"`) to include those hyperparameter values as columns in the CSV.
 
@@ -481,4 +537,3 @@ defaults:
 ```
 
 The schema for each config group is defined as a dataclass in `src/brain_image/configs.py` (e.g. `EEGEncoderConfig`, `TrainerConfig`). This is the authoritative reference for what parameters are available and what their types and defaults are.
-

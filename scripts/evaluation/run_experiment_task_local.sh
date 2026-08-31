@@ -1,14 +1,13 @@
 #!/bin/bash
-# Run a single parameter configuration locally (no SLURM, no Singularity),
-# or aggregate results from a completed experiment.
+# Run a single parameter configuration locally (no SLURM, no Singularity).
 #
 # Usage:
-#   ./scripts/evaluation/launch_local.sh <experiment_name> <task_id|AGG> <param_path> <config_name> <train_script> <test_script> [cli_args...]
+#   ./scripts/evaluation/run_experiment_task_local.sh <experiment_name> <task_id> <param_path> <config_name> <train_script> <test_script> [cli_args...]
 #
 # Arguments:
 #   experiment_name Name for the experiment (results go to experiments/<name>/<timestamp>_task<id>).
 #   task_id         0-based index into the parameter combinations defined in param_path.
-#                   Pass AGG to skip training and run aggregation on the experiment dir instead.
+#                   The all-task launcher handles aggregation after the sweep.
 #   param_path      Path to a param_parser JSON file defining the sweep.
 #   config_name     Hydra config name passed to the training script.
 #   train_script    Python training script (e.g. scripts/training/train_eeg.py).
@@ -17,12 +16,9 @@
 #
 # Examples:
 #   # Run the 3rd (0-based) encoder configuration from the text_vs_img sweep:
-#   ./scripts/evaluation/launch_local.sh text_vs_img 2 scripts/params/text_vs_img_encoders.json \
+#   ./scripts/evaluation/run_experiment_task_local.sh text_vs_img 2 scripts/params/text_vs_img_encoders.json \
 #       train_eeg_align_text scripts/training/train_eeg.py scripts/evaluation/test_eeg.py
 #
-#   # Aggregate all completed runs in an experiment:
-#   ./scripts/evaluation/launch_local.sh text_vs_img AGG scripts/params/text_vs_img_encoders.json \
-#       train_eeg_align_text scripts/training/train_eeg.py scripts/evaluation/test_eeg.py
 #
 #   # List all parameter combinations to find the right index:
 #   python scripts/slurm/param_parser.py scripts/params/text_vs_img_encoders.json -s
@@ -39,11 +35,11 @@ fi
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 
-if [[ $# -lt 3 ]]; then
-    echo "Usage: $0 <experiment_name> <task_id|AGG> <param_path> [<config_name> <train_script> <test_script>] [cli_args...]"
+if [[ $# -lt 6 ]]; then
+    echo "Usage: $0 <experiment_name> <task_id> <param_path> <config_name> <train_script> <test_script> [cli_args...]"
     echo ""
     echo "  experiment_name  Name for the experiment (results go to experiments/<name>/...)"
-    echo "  task_id|AGG      0-based index of the parameter combination, or AGG to aggregate"
+    echo "  task_id          0-based index of the parameter combination"
     echo "  param_path       Path to the param_parser JSON file"
     echo "  config_name      Hydra config name (not needed for AGG)"
     echo "  train_script     Python training script (not needed for AGG)"
@@ -54,32 +50,11 @@ fi
 experiment_name="$1"
 task_id="$2"
 param_path="$3"
-config_name="${4:-}"
-train_script="${5:-}"
-test_script="${6:-}"
-[[ $# -ge 6 ]] && shift 6 || shift $#
+config_name="$4"
+train_script="$5"
+test_script="$6"
+shift 6
 extra_cli_args="${*:-}"
-
-# ── AGG mode ──────────────────────────────────────────────────────────────────
-
-if [[ "$task_id" == "AGG" ]]; then
-    agg_dir="experiments/${experiment_name}"
-    if [[ ! -d "$agg_dir" ]]; then
-        echo "Error: experiment directory not found: $agg_dir"
-        exit 1
-    fi
-    echo "=== Aggregating results in: $agg_dir ==="
-    hparams_args=""
-    if [[ -n "${TEST_HPARAMS:-}" ]]; then
-        hparams_args="--hparams ${TEST_HPARAMS}"
-    fi
-    # shellcheck disable=SC2086
-    python scripts/evaluation/aggregate_metrics.py \
-        --experiment_dir "$agg_dir" \
-        $hparams_args
-    echo "Done. Results in: ${agg_dir}/aggregated_metrics.csv"
-    exit 0
-fi
 
 if [[ ! -f "$param_path" ]]; then
     echo "Error: param file not found: $param_path"

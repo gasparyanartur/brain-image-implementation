@@ -30,9 +30,9 @@ class InfoNCELoss(nn.Module):
             logits_scaled = logits_scaled[keep_mask][:, keep_mask]
 
         labels = torch.arange(logits_scaled.size(0), device=device)
-        loss = self.loss_func(
-            logits_scaled, target=labels
-        )
+        loss_eeg_to_image = self.loss_func(logits_scaled, target=labels)
+        loss_image_to_eeg = self.loss_func(logits_scaled.T, target=labels)
+        loss = (loss_eeg_to_image + loss_image_to_eeg) * 0.5
 
         return loss, logits
 

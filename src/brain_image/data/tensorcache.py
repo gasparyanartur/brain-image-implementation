@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 
 
 import torch
@@ -9,6 +10,20 @@ import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterable, Literal, Sequence, cast
+
+def _get_tensor_cache_maxsize() -> int:
+    value = os.environ.get("BRAIN_IMAGE_TENSORCACHE_MAXSIZE", "1024")
+    try:
+        maxsize = int(value)
+    except ValueError as exc:
+        raise ValueError("BRAIN_IMAGE_TENSORCACHE_MAXSIZE must be an integer") from exc
+    if maxsize < 1:
+        raise ValueError("BRAIN_IMAGE_TENSORCACHE_MAXSIZE must be positive")
+    return maxsize
+
+
+_TENSOR_CACHE_MAXSIZE = _get_tensor_cache_maxsize()
+
 
 def _encode_tensor_keys(keys: tuple[str, ...]) -> str:
     return "/".join(keys)
@@ -22,7 +37,7 @@ def _get_cached_tensor_path(cache_path: Path, keys: tuple[str, ...]) -> Path:
     return full_path
 
 
-@lru_cache(maxsize=1024 * 1024)
+@lru_cache(maxsize=_TENSOR_CACHE_MAXSIZE)
 def _load_cached_tensor_from_path(path: Path) -> Tensor:
     tensor = torch.load(path)
     return tensor

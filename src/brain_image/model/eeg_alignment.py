@@ -588,14 +588,10 @@ class EEGAlignmentModel(TrainingModule):
         align_clip_loss, align_logits = self.align_loss(eeg_latent_normed, align_img_latent_normed)
 
         align_clip_loss = align_clip_loss * self.config.align_loss_factor * (self.current_epoch >= self.config.align_loss_epoch)
-        align_mse_loss = torch.nn.functional.mse_loss(eeg_latent_normed, align_img_latent_normed) * self.config.align_mse_loss_factor
-
-        losses.update(
-            {
-                f"{prefix}/mse_loss": align_mse_loss,
-                f"{prefix}/clip_loss": align_clip_loss,
-            }
-        )
+        losses[f"{prefix}/clip_loss"] = align_clip_loss
+        if self.config.align_mse_loss_factor > 0:
+            align_mse_loss = torch.nn.functional.mse_loss(eeg_latent_normed, align_img_latent_normed) * self.config.align_mse_loss_factor
+            losses[f"{prefix}/mse_loss"] = align_mse_loss
 
         if split == "val":
             align_logits = align_logits.detach()

@@ -2,7 +2,7 @@
 # SLURM array job body for a sweep. Loads the sweep params for this task from a
 # param_parser JSON file, then delegates to run_experiment.sh.
 #
-# Submit via run_experiment_pipeline.sh, or manually:
+# Submit via run_experiment_sweep_slurm.sh, or manually:
 #   SBATCH_ARRAY=0-N SSUB_NO_SINGULARITY=1 \
 #     ./scripts/slurm/ssub.sh <name> \
 #       bash scripts/evaluation/run_sweep_instance.sh \

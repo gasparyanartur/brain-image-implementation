@@ -5,7 +5,7 @@
 # via run_sweep_instance.sh. When all tasks finish, an aggregate job collects results.
 #
 # Usage:
-#   ./scripts/evaluation/run_experiment_pipeline.sh <experiment_name> <param_path> <config_name> <train_script> <test_script> [cli_args...]
+#   ./scripts/evaluation/run_experiment_sweep_slurm.sh <experiment_name> <param_path> <config_name> <train_script> <test_script> [cli_args...]
 #
 # Arguments:
 #   experiment_name   Name for the experiment (used for the directory and SLURM job names).
@@ -22,10 +22,10 @@
 #   SBATCH_GROUP_AGGREGATE  SBATCH_GROUP override for the aggregate job (default: cpu).
 #
 # Examples:
-#   ./scripts/evaluation/run_experiment_pipeline.sh encoders scripts/slurm/params/encoders.json train_eeg \
+#   ./scripts/evaluation/run_experiment_sweep_slurm.sh encoders scripts/params/encoders.json train_eeg \
 #     scripts/training/train_eeg.py scripts/evaluation/test_eeg.py
 #   TEST_HPARAMS="model.align_img_encoder model.eeg_encoder" \
-#     ./scripts/evaluation/run_experiment_pipeline.sh encoders scripts/slurm/params/encoders.json train_eeg \
+#     ./scripts/evaluation/run_experiment_sweep_slurm.sh encoders scripts/params/encoders.json train_eeg \
 #       scripts/training/train_eeg.py scripts/evaluation/test_eeg.py
 
 set -euo pipefail
@@ -124,6 +124,7 @@ agg_out=$(
     ./scripts/slurm/ssub.sh "${experiment_name}" \
         python scripts/evaluation/aggregate_metrics.py \
             --experiment_dir "$experiment_dir" \
+            --metrics_file_pattern '*test_metrics.csv' \
             $hparams_args
 )
 echo "$agg_out"

@@ -23,7 +23,25 @@ def get_single_file(dir: Path, pattern: str) -> Path | None:
     return paths[0]
 
 
-def gather_metrics(experiment_dir: Path, selected_hparams: list[str], metrics_file_pattern: str = "*test_metrics.json") -> pd.DataFrame:
+def get_hparam(hparams: dict, key: str):
+    candidates = [key]
+    if key.startswith("model."):
+        candidates.append("config." + key.removeprefix("model."))
+    if key.startswith("dataset."):
+        candidates.append("dataset_config." + key.removeprefix("dataset."))
+
+    for candidate in candidates:
+        value = hparams
+        for part in candidate.split("."):
+            if not isinstance(value, dict) or part not in value:
+                break
+            value = value[part]
+        else:
+            return value
+    return None
+
+
+def gather_metrics(experiment_dir: Path, selected_hparams: list[str], metrics_file_pattern: str = "*test_metrics.csv") -> pd.DataFrame:
     all_metrics = []
 
     for exp_dir in experiment_dir.iterdir():
@@ -37,8 +55,13 @@ def gather_metrics(experiment_dir: Path, selected_hparams: list[str], metrics_fi
 
         logging.info(f"Loading metrics from {metrics_path}")
 
-        with open(metrics_path, "r") as f:
-            metrics = json.load(f)
+        if metrics_path.suffix == ".csv":
+            metrics = {}
+            for row in pd.read_csv(metrics_path).to_dict(orient="records"):
+                metrics[row["metric"]] = row["value"]
+        else:
+            with open(metrics_path, "r") as f:
+                metrics = json.load(f)
 
         metrics["run"] = exp_dir.name
 
@@ -52,14 +75,7 @@ def gather_metrics(experiment_dir: Path, selected_hparams: list[str], metrics_fi
                 hparams = yaml.safe_load(f)
 
             for hparam_key in selected_hparams:
-                hparam_parts = hparam_key.split(".")
-                curr_hparam = hparams
-                for part in hparam_parts:
-                    curr_hparam = curr_hparam.get(part, None)
-                    if curr_hparam is None:
-                        break
-
-                metrics[hparam_key] = curr_hparam
+                metrics[hparam_key] = get_hparam(hparams, hparam_key)
 
         all_metrics.append(metrics)
 
@@ -73,7 +89,7 @@ def main():
     parser.add_argument('--experiment_dir', type=str, required=True, help='Directory containing experiment run subdirectories.')
     parser.add_argument('--hparams', type=str, nargs='*', default=[], help='Dotted hparam keys to include from hparams.yaml (e.g. model.lr).')
     parser.add_argument('--output_dir', type=str, default=None, help='Directory to save the aggregated CSV. Defaults to experiment_dir.')
-    parser.add_argument('--metrics_file_pattern', type=str, default="*test_metrics.json", help='Glob pattern to find metrics files within each run directory.')
+    parser.add_argument('--metrics_file_pattern', type=str, default="*test_metrics.csv", help='Glob pattern to find metrics files within each run directory.')
     parser.add_argument("--output_name", type=str, default="aggregated_metrics.csv", help="Name of the output CSV file.")
 
     args = parser.parse_args()

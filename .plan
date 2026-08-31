@@ -1,0 +1,102 @@
+[2026-08-30 00:00] Handover-ready experiment and evaluation workflow
+
+Request summary:
+- Audit and update the README for handover.
+- Maintain every experiment track eventually, but begin with the EEG alignment experiment defined by the existing alignment configs.
+- Make the EEG alignment experiment work end-to-end from a simple local shell launcher that trains one experiment and then invokes a separate evaluation script.
+- Remove SLURM-specific launch complexity from the supported workflow; revisit a minimal wrapper only after the local workflow works.
+- Keep TensorBoard training-specific. Evaluation must produce reproducible tabular results (CSV, with machine-readable JSON if useful), saved alongside the selected checkpoint and evaluation metadata.
+- Remove deprecated notebooks and scripts after inventorying their functionality and migrating or explicitly recording anything still needed.
+- Break the work into verifiable subtasks and document how reported metrics can be recreated.
+
+Implementation steps:
+1. Establish the EEG alignment handover surface from the existing `train_eeg_align.yaml`, `train_eeg.py`, and `test_eeg.py` path. Verify prerequisites, output locations, checkpoint selection, and the smallest runnable dataset/model configuration. Completed: the config explicitly selects NICE with alignment enabled and both reconstruction flags disabled.
+2. Audit the existing experiment launch scripts before changing or removing them. `scripts/evaluation/run_experiment.sh` already implements train-then-evaluate, while `launch_local.sh` implements local execution around a parameter-file task. Retain reusable behavior and separate the useful single-run flow from sweep/SLURM orchestration instead of deleting these scripts speculatively.
+3. Add a minimal EEG alignment experiment config and one local launcher, reusing the existing `run_experiment.sh` behavior where practical. Remove its mandatory Singularity dependency, generic script positional arguments, environment-specific run naming, and fragile argument expansion from the handover path. The launcher must locate the exact produced run, invoke the separate evaluator, and print paths to the checkpoint, training TensorBoard directory, evaluation CSV/YAML, and reconstructions. Completed with `scripts/run_eeg_alignment.sh`.
+4. Remove SLURM-specific launch complexity from the supported README and local path. Keep existing sweep scripts available until their dependencies and usefulness are understood; do not delete shared data/container utilities or unknown-purpose files without recording the decision.
+5. Make EEG alignment evaluation produce stable CSV/YAML artifacts and correct effective-config serialization while keeping TensorBoard training-only. Completed with `test_metrics.csv` and `evaluation_config.yaml`.
+6. Add the minimum tests/checks for launcher input validation, checkpoint/run discovery, evaluation serialization, and metric artifact contents.
+7. Execute the local EEG alignment smoke experiment with the repository environment and available dummy data where possible. If the full Things-EEG2 run is too large or prerequisites are missing, run the smallest faithful smoke configuration and record the exact blocker for a real-data run. Completed on 2026-08-30 with the dummy dataset and a full 200-epoch Things-EEG2 subject-8 run.
+8. Update README plus the missing `docs/project.md` and `docs/architecture.md` only with verified EEG alignment instructions and the forward-looking migration status. Update `.log`; retain `.plan` until this milestone is approved complete.
+9. After EEG alignment is working, continue the remaining tracks incrementally rather than front-loading a large migration.
+10. Controlled metric-reproduction iteration: run the canonical local launcher with the historical NICE/InfoNCE recipe as explicit overrides (`model.align_loss_type=infonce`, `model.encoder_lr=8e-3`, `model.encoder_min_lr=1e-4`, `model.max_epochs=100`). Compare the resulting CSV against the historical ~0.65 top-1 result before changing metric naming or evaluator direction.
+11. Follow-up controlled recipe: the first InfoNCE comparison still retained the current `10 x MSE + 0.1 x InfoNCE` objective and EEG augmentation, so run pure InfoNCE with augmentation disabled (`model.align_mse_loss_factor=0`, `model.align_loss_factor=1`, `model.aug_eeg=false`) before concluding that the refactored implementation cannot reproduce the historical score.
+12. Align the maintained EEG alignment contract with the requested experiment: keep the NICE encoder output directly in the 768-dimensional aligned SynCLR space with no projector, disable EEG augmentation in `train_eeg_align.yaml`, compute symmetric InfoNCE in both directions, and preserve both evaluator retrieval metrics (`brain_acc` and `image_acc`). Add focused tests for the loss directionality and metric naming, then run the full local experiment.
+13. Clarification: alignment must use no MSE loss. Set the dedicated alignment config to pure symmetric InfoNCE (`align_mse_loss_factor=0`, `align_loss_factor=1`) and omit the zero-weight MSE term from the alignment loss dictionary, while preserving MSE support for other tracks/configurations.
+14. Run an ATMS comparison with the same corrected alignment contract by overriding `eeg_encoder@model.eeg_encoder: atms`; verify the effective config and compare `brain_acc`, `image_acc`, and `sim` against the NICE run.
+15. Select alignment checkpoints by the per-validation EEG-to-image top-1 metric (`trainer.checkpoint_monitor=val/align/top1`, mode `max`) and align the evaluator default checkpoint metric with the trainer filename. Keep both full-test `brain_acc` and `image_acc` outputs unchanged.
+16. Sweep design/audit: do not use the stale W&B `scripts/tuning/sweep.py`, legacy NICE parameter files, or JSON-only aggregator as the primary alignment sweep. Define a local-first sweep manifest that fixes the alignment contract (no projector, no augmentation, symmetric InfoNCE, no MSE, aligned SynCLR, accuracy-based checkpointing), enumerates explicit encoder/seed/hyperparameter combinations, launches each run through the canonical train/evaluate path, and aggregates the CSV outputs with both `brain_acc` and `image_acc` plus effective hparams. Add a minimal SLURM array wrapper only after local sweep verification.
+17. Implement the alignment sweep using the existing parameter-parser mechanism: update `scripts/params/sweep_align.json` to 2 image targets x 2 EEG encoders x 3 seeds (12 combinations), provide `scripts/evaluation/run_experiment_sweep.sh` as the local all-tasks launcher/aggregator, rename the SLURM pipeline to `run_experiment_sweep_slurm.sh`, and update aggregation to consume `test_metrics.csv` with alignment hparams.
+   Completed: parser reports 12 combinations; local and SLURM launchers, CSV aggregation, README commands, and shell syntax checks are verified. The full 12-run sweep remains ready to launch but has not been started.
+18. Reduce memory pressure for the alignment sweep by setting train, validation, and test batch sizes to 128 in `train_eeg_align.yaml`; verify the composed config before resuming or launching sweep jobs.
+19. Limit alignment DataLoader parallelism to 4 workers (`dataset.num_workers: 4`) as a memory/speed compromise; verify the effective configuration before restarting the sweep.
+20. Bound the process-wide tensor-cache LRU with `BRAIN_IMAGE_TENSORCACHE_MAXSIZE` (default 1024), document the setting, and verify invalid/valid environment overrides before restarting the sweep.
+21. Completed the sequential 12-run alignment sweep with batch sizes 128, four workers, cache maxsize 1024, and CSV aggregation. Compare grouped NICE/ATMS and aligned/unaligned results in the handover report.
+
+Feature list:
+- Canonical EEG alignment single-experiment config and local train-then-evaluate shell workflow.
+- Local-first launcher built by reusing the existing train-then-evaluate experiment behavior.
+- Training TensorBoard output remains owned by training.
+- Stable EEG alignment evaluation CSV/config/image artifacts.
+- Explicit maintained/deprecated workflow table and removal inventory.
+- README and architecture/project handover documentation.
+- Automated checks for the new contracts.
+
+Function/interface contracts:
+- Proposed first launcher: a local wrapper around the existing `scripts/evaluation/run_experiment.sh` behavior, with the exact interface finalized after the script audit.
+- SLURM wrapper is deferred until the local contract is verified.
+- Proposed config: track, training config/script, evaluation script, output root, checkpoint selection/metric, evaluation metrics, and optional Hydra overrides.
+- Evaluation input: run directory or explicit checkpoint.
+- Evaluation output for EEG alignment: stable CSV rows, `evaluation_config.yaml`, selected-checkpoint metadata in the run structure, and reconstructed images where applicable. Evaluation does not write TensorBoard events or JSON metrics.
+- Existing metric names remain unchanged unless a compatibility issue is found and approved.
+
+Edge cases:
+- Missing data, tensor caches, pretrained weights, or `.env` credentials.
+- No checkpoint, malformed checkpoint filename, multiple `version_*` directories, or explicit checkpoint override.
+- Evaluation metrics requiring optional models or GPU memory.
+- Training configs that disable reconstruction while post-hoc evaluation forces it.
+- Empty/partial experiment output after interruption.
+- Local versus SLURM paths and shell argument quoting.
+- Tracks that are preserved but temporarily blocked by missing external dependencies.
+
+Side effects:
+- New experiment/evaluation artifacts under the configured output root.
+- No experiment launcher is deleted in the first milestone. Any later removal requires an explicit usage/dependency check and a `.log` entry.
+- Evaluation may load pretrained metric networks and can be substantially more expensive than training validation.
+- Existing sweep behavior may be removed from the handover interface after dependency checks.
+
+Tests to add:
+- Unit tests for canonical config parsing and required-field validation.
+- Unit tests for checkpoint selection and deterministic output paths.
+- Unit checks that EEG alignment evaluation metrics/config are valid CSV/YAML with expected columns and values.
+- Shell-level tests for usage, missing-file, and dry-run failures.
+- Dummy end-to-end smoke test where current dummy data/model dependencies permit it; otherwise record the exact prerequisite and defer it.
+
+Possible refactors or suggestions:
+- Centralize evaluation artifact writing instead of duplicating it in `test_eeg.py` and `test_comm.py`.
+- Prefer one canonical launcher over the current generic five-positional-argument interface.
+- Keep parameter sweeps out of the primary handover path; migrate or remove them after checking track dependencies.
+
+TODOs:
+- Define the EEG alignment CSV columns first; extend the schema per track later.
+- Simplify the evaluator CLI's reconstruction metric options for alignment-only runs in a later cleanup.
+- Decide whether to preserve, simplify, or archive each sweep/SLURM script after the local launcher is verified.
+- Inventory broader track readiness after the first milestone.
+
+Notes / risks / suggestions:
+- The checkout has no `docs/project.md` or `docs/architecture.md`, despite AGENTS.md requiring them; create them during documentation work.
+- README and sweep interfaces now use `scripts/params`, `run_experiment_sweep.sh`, and `run_experiment_sweep_slurm.sh`; retain the task-local helper as an implementation detail.
+- `test_eeg.py` and `test_comm.py` currently write a JSON-encoded string instead of a JSON object for their config artifact; verify consumers before changing the schema.
+- The existing training path already creates TensorBoard logs through Lightning. EEG evaluation writes separate CSV/YAML artifacts and must not be presented as a TensorBoard workflow.
+- “Maintained” means each track has a documented config, launcher path, evaluator, artifact contract, and smoke/regression verification path; it does not imply every track is immediately runnable on every machine.
+- Metrics must be documented as measured values from the current checkout, not inferred from notebook history.
+- The first full current-config run reached `brain_acc=0.535` and `image_acc=0.470`; it used CLIP loss, so it is not a reproduction of the historical InfoNCE result.
+- The first InfoNCE comparison reached `brain_acc=0.105` and `image_acc=0.430` at the selected epoch-9 checkpoint; it was not yet apples-to-apples because current MSE and augmentation remained enabled.
+- User clarified the intended maintained alignment protocol: no projector, no augmentation, symmetric InfoNCE, and final metric named/reported as EEG-to-image top-1 accuracy.
+- User further clarified that the alignment objective must contain no MSE loss; the current full run must be discarded/restarted after this change.
+
+README updates:
+- Replace the top-level workflow with a concise EEG alignment quick start.
+- Add prerequisites, canonical local config/launcher examples, artifact layout, training TensorBoard commands, evaluation CSV inspection, and exact metric recreation commands.
+- Remove the multi-step SLURM pipeline from the primary README; document existing sweep launchers separately only if they remain supported after the audit.
+- Correct command paths and argument signatures.
