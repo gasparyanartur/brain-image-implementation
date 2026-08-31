@@ -8,8 +8,11 @@ model:
   do_recon: true
   do_recon_low: false
   skip_reconstruction: true
+  skip_eval_first_epoch: false
 
-  eeg_encoder_path: null
+  # Initialize the EEG encoder from the completed best alignment run. The
+  # checkpoint loader extracts only the `eeg_encoder.*` weights.
+  eeg_encoder_path: experiments/eeg_alignment_sweep/20260830_231325_task4/train_eeg-20260830_231357/version_0/checkpoints/epoch_0089-val_align_top1_0.7650.ckpt
 
   encoder_lr: 1e-3
   encoder_min_lr: 1e-7
@@ -31,13 +34,16 @@ model:
   max_epochs: 500
   #max_epochs: 150
 
-  full_eval_every_epochs: 20
+  full_eval_every_epochs: 5
 
 trainer:
+  checkpoint_monitor: "eval/val/prior/pred_cos"
+  checkpoint_monitor_mode: "max"
   checkpoint_monitor_early_stop: 150
   check_val_every_n_epochs: 5
 
 dataset:
-  batch_size: 1024
-  val_batch_size: 256
-  test_batch_size: 256
+  batch_size: 32
+  val_batch_size: 32
+  test_batch_size: 32
+  num_workers: 4

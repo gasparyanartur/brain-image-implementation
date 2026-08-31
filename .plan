@@ -90,6 +90,7 @@ Notes / risks / suggestions:
 - The existing training path already creates TensorBoard logs through Lightning. EEG evaluation writes separate CSV/YAML artifacts and must not be presented as a TensorBoard workflow.
 - “Maintained” means each track has a documented config, launcher path, evaluator, artifact contract, and smoke/regression verification path; it does not imply every track is immediately runnable on every machine.
 - Metrics must be documented as measured values from the current checkout, not inferred from notebook history.
+- The sweep report notebook ranks runs by `image_acc` (EEG-to-image top-1), retains the reverse-direction `brain_acc`, and labels all per-run and top-three visualizations with the model, target, and seed.
 - The first full current-config run reached `brain_acc=0.535` and `image_acc=0.470`; it used CLIP loss, so it is not a reproduction of the historical InfoNCE result.
 - The first InfoNCE comparison reached `brain_acc=0.105` and `image_acc=0.430` at the selected epoch-9 checkpoint; it was not yet apples-to-apples because current MSE and augmentation remained enabled.
 - User clarified the intended maintained alignment protocol: no projector, no augmentation, symmetric InfoNCE, and final metric named/reported as EEG-to-image top-1 accuracy.
@@ -100,3 +101,101 @@ README updates:
 - Add prerequisites, canonical local config/launcher examples, artifact layout, training TensorBoard commands, evaluation CSV inspection, and exact metric recreation commands.
 - Remove the multi-step SLURM pipeline from the primary README; document existing sweep launchers separately only if they remain supported after the audit.
 - Correct command paths and argument signatures.
+- Link the executed `notebooks/eeg_alignment_sweep_report.ipynb` and describe its per-seed table, across-seed summary, and top-three match visualization.
+
+22. Add a clean executed report notebook for the completed 12-run alignment sweep. Load `experiments/eeg_alignment_sweep/aggregated_metrics.csv`, validate the expected 12-run schema, present per-run metrics and grouped seed summaries, identify the best runs by `image_acc`, and visualize target/chosen pairs for the top three runs with encoder, target, and seed labels. Validate notebook execution against the existing artifacts.
+   Completed: `notebooks/eeg_alignment_sweep_report.ipynb` executes successfully and README links to it.
+
+[2026-08-31 00:00] Prior/reconstruction handover path audit
+
+Request summary:
+- Move from EEG alignment to the prior/reconstruction track.
+- Trace the current code path and understand which existing configuration values affect alignment, prior training, validation, sampling, image reconstruction, and reported metrics.
+- After review, add a separate prior/reconstruction training entrypoint with sensible defaults; do not implement it before this plan is reviewed.
+
+Implementation steps:
+- Audit `train_eeg_prior.yaml` and `train_eeg_alignprior.yaml` against `train_eeg.py`, `EEGAlignmentModel`, `SimpleDiffusionPrior`, `test_eeg.py`, and `reconstruction.py`.
+- Decide and document the canonical scope: prior-only (`do_align=false`) versus joint alignment+prior (`do_align=true`), with prior-only as the likely first reproducible baseline because it isolates reconstruction learning.
+- Add a dedicated training entrypoint/config only after approval, reusing the existing model/trainer and train-then-evaluate conventions.
+- Define conservative local defaults for batch size, worker count, cache bound, epoch/evaluation cadence, checkpoint metric, prior target encoder/stats, augmentation, and reconstruction validation cost.
+- Add a local shell launcher that trains sequentially and invokes evaluation separately; keep environment activation outside the launcher.
+- Verify composed configuration, one-epoch dummy execution, checkpoint selection, CSV metrics, reconstruction image artifacts, and TensorBoard training artifacts.
+- Update README, project/architecture docs if present or create the currently missing docs, `.plan`, and `.log` after implementation.
+
+Feature list:
+- Maintained prior/reconstruction training command.
+- Explicit separation between prior training loss/validation and expensive image reconstruction evaluation.
+- Stable CSV/YAML evaluation artifacts plus reconstruction image pairs.
+- Documented relationship between EEG latent, prior image latent, diffusion prior, and reconstruction pipeline.
+
+Function/interface contracts:
+- Proposed training CLI: dedicated script with Hydra `train_eeg_prior` config and normal Hydra overrides.
+- Proposed local CLI: `scripts/run_eeg_prior.sh`, train first and then call the separate evaluator on the produced run.
+- Training output: checkpoint, Lightning TensorBoard events, and serialized hyperparameters under one run directory.
+- Evaluation output: `test_metrics.csv`, `evaluation_config.yaml`, and selected reconstruction/ground-truth image artifacts; no evaluation TensorBoard stream.
+- Primary checkpoint metric: validation prior cosine (`eval/val/prior/pred_cos`) in max mode. It is emitted by full validation and is available before expensive image reconstruction metrics.
+
+Edge cases:
+- `train_eeg_prior.yaml` currently overrides augmentation to EEG, disables alignment, enables the prior, and sets `skip_reconstruction=true`; this means training validation does not generate image reconstructions, while `test_eeg.py` forcibly enables them.
+- The prior target is `prior_img_latent`, while its stats are loaded for `prior_img_encoder`; changing `prior_img_encoder` requires matching cached embeddings and stats.
+- `prior.norm_scheme=z_scale` requires compatible embedding statistics.
+- Prior conditioning dimension is derived from the EEG encoder output, while prior input dimension is derived from the selected image encoder.
+- `prior_delay_epochs` controls whether prior loss runs during training, but prior validation runs regardless of the delay.
+- Reconstruction metrics are expensive and may require optional pretrained networks/GPU memory; avoid running them every epoch by default.
+- Full reconstruction sampling is stochastic and must use the configured seed for comparable evaluation.
+- Existing generic `test_eeg.py` defaults to alignment checkpoint selection; a prior-specific evaluator override or script is required.
+
+Tests to add:
+- Config composition assertions for prior-only mode, selected encoder/stat keys, no accidental alignment loss, and checkpoint monitor.
+- Minimal model/path test that verifies prior dimensions and required stats are derived from the selected image encoder.
+- Dummy one-epoch train/evaluate smoke test covering checkpoint, CSV/YAML, TensorBoard, and reconstruction outputs.
+- Regression check that evaluator selects the intended prior/reconstruction checkpoint metric.
+
+TODOs:
+- Choose the checkpoint metric after auditing trainer logging and reconstruction metric availability.
+- Decide whether the first maintained run should use NICE or ATMS and which `prior_img_encoder` is the canonical target.
+- Decide whether EEG augmentation remains enabled for the prior-only baseline.
+- Determine whether a prior-specific evaluator wrapper is needed or whether `test_eeg.py` can be safely parameterized.
+
+Notes / risks / suggestions:
+- Existing `train_eeg_prior.yaml` is the closest starting point; `train_eeg_alignprior.yaml` is a joint-training variant and should remain a comparison rather than silently becoming the default.
+- The current model always creates `align_loss`, but `do_align=false` prevents it from contributing to the loss; this should be verified rather than treated as a separate architectural path.
+- The current prior objective is weighted cosine loss plus Huber loss plus a CLIP-style prior alignment loss; the commented MSE is not active.
+- The current full-test metric set includes image metrics such as pixcorr, SSIM, AlexNet, Inception, CLIP, EfficientNet, and SwAV. The first smoke run should use a small explicit subset if optional models make the full set impractical.
+
+README updates:
+- Add a prior/reconstruction quick start only after the dedicated path is implemented and verified.
+- Document the prior target encoder, checkpoint metric, training TensorBoard location, evaluation CSV, and reconstruction image outputs.
+
+Decisions for the first implementation iteration:
+- Use prior-only training (`do_align=false`, `do_recon=true`).
+- Set train/validation/test batch sizes to 32 and keep the established four workers and bounded tensor cache defaults.
+- Initialize the EEG encoder from the completed best alignment checkpoint: `experiments/eeg_alignment_sweep/20260830_231325_task4/train_eeg-20260830_231357/version_0/checkpoints/epoch_0089-val_align_top1_0.7650.ckpt` (ATMS, aligned SynCLR, seed 42).
+- Keep the prior target as `clip_vith14` for the first run, because this is the existing prior-only default and its `prior_img_latent` statistics are available through the matching encoder name.
+- Preserve `skip_reconstruction=true` during training to avoid expensive image sampling each validation cycle; evaluate reconstructions separately.
+- Implement the first iteration as the dedicated prior training entrypoint/config and checkpoint initialization wiring. Defer launcher/evaluator specialization until the composed configuration and checkpoint load are verified.
+
+Iteration 1 status:
+- Completed `src/brain_image/configs/train_eeg_prior.yaml` updates: prior-only mode, batch sizes 32, four workers, and the finished ATMS alignment checkpoint as `model.eeg_encoder_path`.
+- Added `scripts/training/train_eeg_prior.py` with a dedicated Hydra entrypoint and full-checkpoint resume support through the existing trainer contract.
+
+Iteration 2 status:
+- Set prior checkpoint monitoring to `eval/val/prior/pred_cos` with max mode and five-epoch full validation cadence.
+- Added `scripts/run_eeg_prior.sh` to train and then evaluate sequentially, explicitly selecting the best prior cosine checkpoint.
+- Updated README with the prior-only local workflow and artifact/checkpoint behavior.
+- Verified shell syntax, Hydra composition, and extraction of 45 `eeg_encoder.*` tensors from the configured alignment checkpoint. No full or dummy training run has been launched yet.
+
+Smoke-test finding:
+- A one-epoch prior smoke run loaded the configured alignment checkpoint and completed, but inherited `skip_eval_first_epoch=true` prevented the prior cosine metric from being emitted and therefore prevented a monitored top-k checkpoint. Set `skip_eval_first_epoch=false` for the prior config so short runs and checkpoint selection are observable.
+- The first launcher smoke showed the exact logged key is `eval/val/prior/pred_cos` because full-validation metrics receive an `eval/` prefix; the trainer monitor and evaluator argument now use this key.
+- Corrected launcher smoke passed end to end on a 1% subset: selected `epoch_0000-eval_val_prior_pred_cos_0.6243.ckpt`, wrote `test_metrics.csv` and `evaluation_config.yaml`, and completed separate evaluation. The reduced test subset did not include highlighted reconstruction indices, so no reconstruction image pairs were expected.
+
+Full-run status:
+- Launched the full prior-only experiment sequentially in tmux session `eeg_prior_full` with `BRAIN_IMAGE_TENSORCACHE_MAXSIZE=1024`.
+- Output root: `experiments/eeg_prior/20260831_134809`.
+- Startup confirms the intended prior target (`clip_vith14`), max checkpoint monitor (`eval/val/prior/pred_cos`), batch size 32, four workers, and the finished alignment EEG checkpoint initialization.
+- Completed training and separate reconstruction evaluation. Best checkpoint was epoch 289 with validation prior cosine 0.6340; test prior cosine was 0.6340 and all nine highlighted reconstruction pairs were saved.
+
+23. Document the prior-only baseline separately from the EEG-Guided Diffusion paper comparison. Add a notebook that loads the measured CSV, shows the exact protocol and metrics, and visualizes the nine reconstruction/ground-truth pairs. State clearly that the current implementation omits paper-specific reconstruction components, so the paper's reported scores are not direct acceptance targets.
+   Completed: README updated with the baseline interpretation and measured values; `notebooks/eeg_prior_reconstruction_report.ipynb` added and executed against the full-run artifacts.
+- Verified Python compilation, composed Hydra config, and existence of the configured alignment checkpoint. No training run has been launched yet.

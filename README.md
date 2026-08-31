@@ -332,6 +332,22 @@ The generic experiment and sweep launchers are retained for existing experiments
 
 For the primary local EEG alignment workflow, use `scripts/run_eeg_alignment.sh`.
 
+For prior/reconstruction, use the dedicated prior-only training path:
+
+```bash
+source .venv/bin/activate
+BRAIN_IMAGE_TENSORCACHE_MAXSIZE=1024 \
+  ./scripts/run_eeg_prior.sh \
+    model.max_epochs=1 \
+    trainer.wandb.enabled=false
+```
+
+`train_eeg_prior.yaml` initializes the EEG encoder from the finished ATMS alignment model, trains the diffusion prior with batch sizes of 32 and four DataLoader workers, and selects checkpoints by maximum `eval/val/prior/pred_cos`. Training validation skips expensive image sampling; the launcher evaluates the selected checkpoint separately and writes reconstruction metrics and image artifacts.
+
+The completed baseline run is reported in [`notebooks/eeg_prior_reconstruction_report.ipynb`](notebooks/eeg_prior_reconstruction_report.ipynb). Its reconstruction scores must be interpreted as a simplified prior-only baseline, not as a direct reproduction of the EEG-Guided Diffusion paper: this checkout does not include all of the paper's reconstruction components and uses its own current reconstruction path and evaluation protocol.
+
+Measured baseline results from the full run (`experiments/eeg_prior/20260831_134809`) are: prior cosine `0.63396`, PixCorr `0.09722`, SSIM `0.30855`, AlexNet-2 `0.72222`, AlexNet-5 `0.88889`, Inception `0.63889`, CLIP `0.79167`, EfficientNet `0.90044`, and SwAV `0.58795`. These values are a baseline for this implementation and should not be judged against the paper's reported numbers until the missing paper-specific components are implemented.
+
 For the existing parameter-file workflow, use:
 
 ```bash
@@ -420,6 +436,8 @@ BRAIN_IMAGE_TENSORCACHE_MAXSIZE=1024 \
 ```
 
 The local launcher runs combinations sequentially. Each run writes its own checkpoint, TensorBoard event file, and `test/test_metrics.csv`; the final aggregate is `experiments/eeg_alignment_sweep/aggregated_metrics.csv`.
+
+The generated sweep report is [`notebooks/eeg_alignment_sweep_report.ipynb`](notebooks/eeg_alignment_sweep_report.ipynb). It loads the aggregate CSV, shows every run with its encoder, target, seed, `brain_acc`, and primary EEG-to-image `image_acc`, summarizes mean and standard deviation across seeds, and visualizes target/chosen image pairs for the three highest-`image_acc` runs.
 
 For example:
 
