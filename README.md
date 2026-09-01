@@ -369,7 +369,7 @@ Hydra overrides can be appended, for example:
 ./scripts/run_comm.sh model.max_epochs=1 dataset.limit_train_size=0.01
 ```
 
-The cached-training/post-prior-evaluation split has been smoke-tested with the real prior and alignment checkpoints on the dummy dataset. Its historical reports remain in [`notebooks/comm.ipynb`](notebooks/comm.ipynb) and [`notebooks/comm_prior.ipynb`](notebooks/comm_prior.ipynb); it is not currently the primary maintained experiment track.
+The primary CoMM comparison is against the ground-truth target image latent, not against the generated prior latent. In `test_metrics.csv`, `acc_eeg_to_target_img` is the EEG-only baseline, `acc_generated_img_to_target_img` is the prior-only baseline, and `acc_proto_to_target_img` is the fused CoMM result. The reverse-direction metrics are also reported. The older `acc_eeg_to_img`, `acc_proto_to_img`, and related rows remain as generated-branch diagnostics for compatibility. The cached-training/post-prior-evaluation split has been smoke-tested with the real prior and alignment checkpoints on the dummy dataset. Its historical reports remain in [`notebooks/comm.ipynb`](notebooks/comm.ipynb) and [`notebooks/comm_prior.ipynb`](notebooks/comm_prior.ipynb).
 
 For the existing parameter-file workflow, use:
 

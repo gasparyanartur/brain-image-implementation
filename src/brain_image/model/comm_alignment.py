@@ -61,6 +61,35 @@ def generate_prior_latents(
     return torch.cat(generated_chunks, dim=0)
 
 
+@torch.no_grad()
+def get_target_retrieval_metrics(
+    z_eeg: Tensor,
+    z_generated_img: Tensor,
+    z_proto: Tensor,
+    z_target_img: Tensor,
+) -> dict[str, Tensor]:
+    """Compare all CoMM representations against the ground-truth image target."""
+    z_eeg = F.normalize(z_eeg, p=2, dim=-1)
+    z_generated_img = F.normalize(z_generated_img, p=2, dim=-1)
+    z_proto = F.normalize(z_proto, p=2, dim=-1)
+    z_target_img = F.normalize(z_target_img, p=2, dim=-1)
+
+    eeg_to_target, target_to_eeg = get_retrieval_accuracy(z_eeg, z_target_img, norm=False)
+    generated_to_target, target_to_generated = get_retrieval_accuracy(
+        z_generated_img, z_target_img, norm=False
+    )
+    proto_to_target, target_to_proto = get_retrieval_accuracy(z_proto, z_target_img, norm=False)
+
+    return {
+        "acc_eeg_to_target_img": eeg_to_target,
+        "acc_target_img_to_eeg": target_to_eeg,
+        "acc_generated_img_to_target_img": generated_to_target,
+        "acc_target_img_to_generated_img": target_to_generated,
+        "acc_proto_to_target_img": proto_to_target,
+        "acc_target_img_to_proto": target_to_proto,
+    }
+
+
 class CommAlignmentConfig(TrainingModuleConfig):
     img_encoder: ImageEncoderName = "unaligned_synclr_vitb16"
     eeg_encoder: EEGEncoderConfigType
@@ -415,9 +444,14 @@ class CommAlignmentModel(TrainingModule):
         eeg_aug1 = self.eeg_augmenter(eeg)
         eeg_aug2 = self.eeg_augmenter(eeg)
 
+        target_img = batch.get("align_img_latent")
+        if target_img is not None:
+            target_img = target_img.to(device)
+
         return {
             "eeg": eeg,
             "img": imgs,
+            "target_img": target_img,
             "eeg_aug1": eeg_aug1,
             "eeg_aug2": eeg_aug2,
             "img_aug1": img_aug1,
@@ -617,7 +651,7 @@ class CommAlignmentModel(TrainingModule):
         acc_img_to_proto, acc_proto_to_img = get_retrieval_accuracy(z_img, z_proto, norm=False)
         acc_eeg_to_img, acc_img_to_eeg = get_retrieval_accuracy(z_eeg, z_img, norm=False)
 
-        return {
+        metrics = {
             "acc_eeg_to_proto": acc_eeg_to_proto,
             "acc_img_to_proto": acc_img_to_proto,
             "acc_eeg_to_img": acc_eeg_to_img,
@@ -625,6 +659,13 @@ class CommAlignmentModel(TrainingModule):
             "acc_proto_to_img": acc_proto_to_img,
             "acc_img_to_eeg": acc_img_to_eeg,
         }
+
+        target_img = batch.get("target_img")
+        if target_img is not None:
+            z_target_img = self.comm.encode_feature([target_img], [self.config.img_idx])
+            metrics.update(get_target_retrieval_metrics(z_eeg, z_img, z_proto, z_target_img))
+
+        return metrics
 
     @torch.no_grad()
     def get_set_retrieval(self, batch: dict) -> dict[str, Tensor]:

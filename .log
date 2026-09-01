@@ -42,3 +42,6 @@
 - Implemented the historical train/evaluation split: CoMM trains on cached `clip_vith14` target latents, then `test_comm.py` switches to generated prior latents using the frozen finished prior.
 - Corrected split smoke passed at `experiments/comm_split_smoke/20260901_084656`; evaluation used generated prior latents and wrote CSV/YAML artifacts.
 - Launched the full historical-faithful CoMM run sequentially in tmux session `comm_full_correct` at `experiments/comm/20260901_084821`.
+- Corrected CoMM evaluation to retain the ground-truth target image latent separately from the generated prior latent. Added target-reference EEG-only, prior-only, and fused-prototype top-1 metrics while preserving legacy generated-branch diagnostics.
+- Re-evaluated the selected CoMM checkpoint `epoch_0024-val_acc_eeg_to_img_0.5400.ckpt`: EEG-to-target `0.25`, generated-prior-to-target `0.095`, fused-prototype-to-target `0.19`; reverse directions were `0.235`, `0.05`, and `0.145`.
+- Added target metric unit coverage; `tests/test_comm_evaluation.py` passes all 3 tests. Updated README and plan to identify target-reference metrics as primary.

@@ -318,3 +318,53 @@ Implementation iteration 3 status:
 Follow-up decision required:
 - Preferred historical-faithful option: train CoMM on cached `clip_vith14` latents, then evaluate the trained CoMM with generated post-prior `clip_vith14` latents and record both protocols explicitly. Approved and implemented.
 - Alternative: precompute and cache generated prior latents before CoMM training, which is a new data-generation step and must be benchmarked separately.
+
+[2026-09-01 00:00] Correct CoMM ground-truth retrieval metrics
+
+Request summary:
+- Measure the actual research question: whether the fused EEG plus diffusion-prior(EEG) representation retrieves the ground-truth image better than EEG alone.
+- Preserve existing generated-branch diagnostics, but add explicit retrieval metrics against the cached target `clip_vith14` latent.
+
+Feature list:
+- Ground-truth target image latent retained during evaluation.
+- EEG-to-target, generated-prior-to-target, and fused-prototype-to-target top-1 metrics.
+- CSV/YAML artifact documentation for the new metric names and evaluation protocol.
+
+Implementation steps:
+1. Extend `CommAlignmentModel.get_retrieval_accuracies` to accept the target latent separately from the generated image latent.
+2. Keep the current generated-branch metrics unchanged and add target-reference metrics with unambiguous names.
+3. Update `test_comm.py`, tests, and README metric descriptions.
+4. Re-evaluate the finished CoMM checkpoint without retraining; compare fused prototype-to-target against EEG-to-target on the same test examples.
+
+Function/interface contracts:
+- `prepare_batch` continues to use cached targets for training and generated prior latents for test-time CoMM input.
+- Test metrics must distinguish `generated_img` from `target_img`; no metric may call a generated latent “ground truth.”
+
+Edge cases:
+- Target and generated latents must have matching dimensionality and normalization (`clip_vith14`, 1024 dimensions).
+- Existing metric names must remain available for backward compatibility.
+- Checkpoint selection remains based on validation metrics, while final comparison uses target-reference test metrics.
+
+Tests to add:
+- Unit test for target-reference retrieval metric keys and directionality.
+- Evaluation smoke check that the new target-reference rows are written to CSV.
+
+TODOs:
+- Re-evaluate the completed run after implementation and record the three-way comparison in the CoMM report.
+
+Notes / risks / suggestions:
+- The current `acc_eeg_to_proto=0.61` is a generated-branch diagnostic, not the primary target-reference result.
+- This is an evaluator-only correction; no CoMM retraining is required.
+
+README updates:
+- Document target-reference metrics as the primary comparison for the CoMM fusion hypothesis.
+
+Implementation iteration 4 status:
+- Added explicit target-reference top-1 retrieval metrics while preserving the existing generated-branch diagnostics.
+- Re-evaluated the selected checkpoint `epoch_0024-val_acc_eeg_to_img_0.5400.ckpt` from the completed historical-faithful run.
+- Corrected test CSV results: EEG to target image `0.25`, generated prior image to target image `0.095`, and fused prototype to target image `0.19`; reverse-direction values are `0.235`, `0.05`, and `0.145` respectively.
+- Added a unit test covering metric keys and directionality; all three CoMM evaluator tests pass.
+- The fused target-reference score is below the EEG-only baseline on this run, so the fusion hypothesis is not supported by this checkpoint.
+
+Next step:
+- Keep the evaluator correction and protocol documentation; any improvement attempt should be planned as a separate training experiment rather than changing metric definitions again.
