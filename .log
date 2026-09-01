@@ -45,3 +45,8 @@
 - Corrected CoMM evaluation to retain the ground-truth target image latent separately from the generated prior latent. Added target-reference EEG-only, prior-only, and fused-prototype top-1 metrics while preserving legacy generated-branch diagnostics.
 - Re-evaluated the selected CoMM checkpoint `epoch_0024-val_acc_eeg_to_img_0.5400.ckpt`: EEG-to-target `0.25`, generated-prior-to-target `0.095`, fused-prototype-to-target `0.19`; reverse directions were `0.235`, `0.05`, and `0.145`.
 - Added target metric unit coverage; `tests/test_comm_evaluation.py` passes all 3 tests. Updated README and plan to identify target-reference metrics as primary.
+- Added `notebooks/comm_report.ipynb`, an artifact-backed report of the CoMM motivation, pipeline, checkpoint protocol, target-reference retrieval results, visualization, and conclusion. Linked it from README.
+- Audited Qwen/text artifacts: 16,740 unique non-empty captions with all image paths present; complete 16,540-train/200-test caches for T5, CLIP text, and Gemma, all 768-dimensional float32 with matching statistics.
+- Clarified that Qwen generates captions while `train_eeg_align_text.yaml` aligns to `t5_base` embeddings. Added `scripts/data/validate_text_artifacts.py`, parser tests, and `notebooks/qwen_text_embedding_report.ipynb`; linked the report and validator from README.
+- Corrected the validator to use the repository's suffix-replacement cache paths. Full validation passed with tensor-shape checks; the two focused tests passed and the Qwen report notebook executed successfully. No artifact regeneration was needed.
+- Added Qwen caption provenance sidecar support, but paused before any GPU-dependent generation at the user's request. Existing artifacts remain untouched.

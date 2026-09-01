@@ -221,6 +221,8 @@ SBATCH_GROUP=gpu ssub generate_captions python scripts/data/generate_text_captio
 
 Captions are written to `data/things-eeg2/captions/local.jsonl` (one JSON line per image with `path` and `caption` fields). Already-captioned images are skipped on re-runs. The model name and other settings are in `src/brain_image/configs/generate_text_captions_local.yaml`.
 
+Qwen is only the caption generator. The caption file does not contain Qwen model/prompt provenance per record, so the current config is the source of truth for those settings. The verified artifact audit is in [`notebooks/qwen_text_embedding_report.ipynb`](notebooks/qwen_text_embedding_report.ipynb).
+
 ### 8. Generate text embeddings (optional)
 
 Once captions exist, encode them with one or more text encoders and cache the results in `tensorcache/`. Supported encoders: `t5_base`, `t5_large`, `clip_vitl14_text`, `clip_vitb32_text`, `llama3_8b`, `gemma_embedding_300m`.
@@ -236,6 +238,15 @@ SBATCH_GROUP=gpu ssub generate_text_embeddings python scripts/data/generate_text
 ```
 
 The default encoder list and caption path are in `src/brain_image/configs/generate_text_embeddings.yaml`.
+
+For the maintained Text Alignment config, `t5_base` is the actual target embedding (`768` dimensions), not a Qwen embedding. Validate the complete caption/cache/statistics contract with:
+
+```bash
+source .venv/bin/activate
+python scripts/data/validate_text_artifacts.py --check-tensor-shapes
+```
+
+The current verified artifacts contain 16,540 train and 200 test records for each of `t5_base`, `clip_vitl14_text`, and `gemma_embedding_300m`. The Qwen/text-embedding artifact report is [`notebooks/qwen_text_embedding_report.ipynb`](notebooks/qwen_text_embedding_report.ipynb).
 
 ### 9. Generate statistics
 
@@ -370,6 +381,8 @@ Hydra overrides can be appended, for example:
 ```
 
 The primary CoMM comparison is against the ground-truth target image latent, not against the generated prior latent. In `test_metrics.csv`, `acc_eeg_to_target_img` is the EEG-only baseline, `acc_generated_img_to_target_img` is the prior-only baseline, and `acc_proto_to_target_img` is the fused CoMM result. The reverse-direction metrics are also reported. The older `acc_eeg_to_img`, `acc_proto_to_img`, and related rows remain as generated-branch diagnostics for compatibility. The cached-training/post-prior-evaluation split has been smoke-tested with the real prior and alignment checkpoints on the dummy dataset. Its historical reports remain in [`notebooks/comm.ipynb`](notebooks/comm.ipynb) and [`notebooks/comm_prior.ipynb`](notebooks/comm_prior.ipynb).
+
+The corrected full-run analysis is in [`notebooks/comm_report.ipynb`](notebooks/comm_report.ipynb). It loads the saved CSV/YAML artifacts, compares all three representations in both retrieval directions, and documents why the current fused result does not improve over EEG alone.
 
 For the existing parameter-file workflow, use:
 

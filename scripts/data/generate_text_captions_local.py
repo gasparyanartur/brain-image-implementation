@@ -8,6 +8,7 @@ from typing import Literal
 import hydra
 import torch
 import tqdm
+import yaml
 from omegaconf import DictConfig
 from PIL import Image
 
@@ -39,6 +40,7 @@ class LocalCaptionConfig(BaseConfig):
     dataset: EEGDatasetConfigType
     splits: list[Literal["train", "test"]] = ["train", "test"]
     caption_path: Path = Path("data/things-eeg2/captions/local.jsonl")
+    provenance_path: Path | None = None
     model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct"
     batch_size: int = 8
     dtype: str = "bfloat16"
@@ -131,6 +133,21 @@ def generate_local_captions(config: LocalCaptionConfig) -> None:
     from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
     device = config.device or get_device_str()
+    provenance_path = config.provenance_path or config.caption_path.with_suffix(".yaml")
+    provenance_path.parent.mkdir(parents=True, exist_ok=True)
+    provenance = {
+        "model_name": config.model_name,
+        "system_prompt": config.system_prompt,
+        "max_new_tokens": config.max_new_tokens,
+        "batch_size": config.batch_size,
+        "dtype": config.dtype,
+        "device": device,
+        "splits": config.splits,
+        "caption_path": str(config.caption_path),
+    }
+    provenance_path.write_text(yaml.safe_dump(provenance, sort_keys=False))
+    logging.info(f"Saved caption provenance to {provenance_path}")
+
     dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
     dtype = dtype_map[config.dtype]
 

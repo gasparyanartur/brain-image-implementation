@@ -368,3 +368,170 @@ Implementation iteration 4 status:
 
 Next step:
 - Keep the evaluator correction and protocol documentation; any improvement attempt should be planned as a separate training experiment rather than changing metric definitions again.
+
+[2026-09-01 15:45] CoMM experiment report notebook
+
+Request summary:
+- Create a maintained notebook report for the CoMM experiment, consistent with the existing alignment and prior reports.
+- Explain why the experiment was performed: test whether a diffusion-prior image latent adds useful information to an EEG representation for image retrieval.
+- Report the exact pipeline, evaluation protocol, metrics, checkpoint, and measured result.
+
+Implementation steps:
+1. Inspect the existing CoMM report notebooks and current CSV/YAML artifacts for reusable style and verified values.
+2. Create `notebooks/comm_report.ipynb` with markdown explaining the hypothesis and pipeline, plus executable cells loading the final `test_metrics.csv` and `evaluation_config.yaml`.
+3. Add tables comparing EEG-only, generated-prior-only, and fused-prototype retrieval in both directions.
+4. Add a compact visualization of the primary top-1 results and a conclusion grounded in the measured numbers.
+5. Execute the notebook if the local environment supports it and verify that all displayed metrics are read from the saved artifacts.
+6. Link the notebook from README and update `.plan` and `.log`.
+
+Feature list:
+- Reproducible CoMM experiment report notebook.
+- Explicit distinction between ground-truth target-reference metrics and legacy generated-branch diagnostics.
+- Scientific motivation, pipeline diagram/table, configuration provenance, results, and conclusion.
+
+Function/interface contracts:
+- The notebook reads, rather than re-derives, final values from `test_metrics.csv`.
+- The primary comparison uses `acc_eeg_to_target_img`, `acc_generated_img_to_target_img`, and `acc_proto_to_target_img`.
+- The notebook records the selected checkpoint and prior-generation settings from `evaluation_config.yaml`.
+
+Edge cases:
+- The invalid pre-correction CoMM run must not be reported.
+- Missing artifacts or unavailable notebook execution dependencies must be recorded rather than silently substituted.
+- Legacy generated-branch metrics must not be presented as ground-truth retrieval.
+
+Tests to add:
+- Notebook execution or equivalent cell-level validation.
+- Assert that the expected CSV metric names and values are present in the report data.
+
+TODOs:
+- None beyond implementation and verification of this report.
+
+Notes / risks / suggestions:
+- The selected checkpoint was chosen using validation `acc_eeg_to_img`, while the final scientific comparison uses target-reference metrics; this distinction must be stated explicitly.
+- Current measured primary results are EEG-only `0.25`, generated prior `0.095`, and fused prototype `0.19`.
+
+README updates:
+- Link the new CoMM report notebook from the CoMM section.
+
+[2026-09-01 16:00] Verify and document Qwen text embeddings
+
+Request summary:
+- Audit and document the text-conditioning assets needed for the next Text Alignment experiment.
+- Verify what Qwen does, which text encoder produces the actual alignment target, where captions/embeddings/statistics are stored, and how the training config consumes them.
+- Resolve naming ambiguity so “Qwen embeddings” is not incorrectly used for the downstream T5 or CLIP text embeddings.
+
+Verified initial facts:
+- `scripts/data/generate_text_captions_local.py` uses `Qwen/Qwen2.5-VL-7B-Instruct` to generate captions from stimulus images.
+- Captions are appended as JSONL records with `path` and `caption` fields under `data/things-eeg2/captions/local.jsonl` by default.
+- `scripts/data/generate_text_embeddings.py` encodes those captions using configured downstream text encoders; the default list is `t5_base`, `clip_vitl14_text`, and `gemma_embedding_300m`.
+- `train_eeg_align_text.yaml` currently selects `align_img_encoder: t5_base`; Qwen is therefore a caption generator, not the alignment embedding model.
+- `generate_text_stats.yaml` computes normalization statistics for the selected cached text embeddings.
+
+Implementation steps:
+1. Trace caption generation, embedding generation, statistics, dataset lookup, and text-alignment consumption end to end, including dimensions and normalization.
+2. Inspect available cached captions, text embeddings, and statistics and verify path/key/shape consistency without launching a large model job.
+3. Add focused tests or a lightweight validation command for JSONL uniqueness, embedding-cache lookup, dimensions, and statistics availability.
+4. Document the verified Qwen caption-generation and downstream text-embedding workflow in README and a short notebook/report under `notebooks/`.
+5. Only after the assets are verified, decide whether to run the Text Alignment experiment and define its local launcher/config defaults.
+
+Feature list:
+- Explicit Qwen caption-generation contract.
+- Explicit downstream text-encoder contract for Text Alignment.
+- Reproducible artifact validation and documentation.
+
+Function/interface contracts:
+- Caption records must contain a stable image path and non-empty caption.
+- Each selected text encoder must have matching cached embeddings and per-split statistics.
+- `train_eeg_align_text.yaml` must reference an encoder whose cache and statistics exist for the configured dataset/splits.
+
+Edge cases:
+- Qwen caption generation may be unavailable locally due to model weights or GPU memory.
+- Existing JSONL files may be partial, duplicated, or generated with a different prompt/model.
+- The config’s `sub=1` scope and split coverage must match the available caches.
+- Text encoder output dimensions and normalization statistics must agree with the EEG alignment target.
+
+Tests to add:
+- Lightweight artifact validation for caption schema, cache coverage, dimensions, and statistics.
+- Config-level assertion that the selected `align_img_encoder` is supported and available.
+
+TODOs:
+- Confirm whether the existing `local.jsonl` was generated with the current Qwen model/prompt or must be regenerated.
+- Decide whether the maintained text-alignment default should remain `t5_base` or use another verified encoder.
+
+Notes / risks / suggestions:
+- Call the artifacts “Qwen-generated captions” and “T5/CLIP/Gemma text embeddings” separately in all documentation.
+- Do not run Qwen generation or Text Alignment until the artifact audit identifies a complete, internally consistent input set.
+
+README updates:
+- Clarify the two-stage caption/embedding workflow and identify `t5_base` as the current Text Alignment target.
+- Document validation commands and any verified artifact paths.
+
+Implementation iteration status:
+- Audited the live artifacts: 16,740 unique non-empty captions, all referenced images present, and complete train/test caches for all three configured text encoders.
+- Verified 768-dimensional float32 statistics for `t5_base`, `clip_vitl14_text`, and `gemma_embedding_300m`.
+- Added `scripts/data/validate_text_artifacts.py` and focused parser tests.
+- Added `notebooks/qwen_text_embedding_report.ipynb` and updated README terminology/documentation.
+- Corrected the validator to match the repository cache convention (`image.jpg` maps to `image.pt`).
+- Full validation passes: 16,740 captions, 16,540 train images, 200 test images, complete caches/statistics, and sample tensor dimensions verified.
+- Focused tests pass (2/2), and the report notebook executes successfully.
+
+Conclusion:
+- The existing artifacts are internally consistent for the current `t5_base` Text Alignment configuration.
+- Qwen generation provenance is incomplete in the JSONL artifact because model/prompt metadata is not stored per record; the current generation config remains the documented source of truth.
+- No regeneration is required for the artifact-validation milestone. The next separate task is to prepare/run Text Alignment using the verified `t5_base` target.
+
+[2026-09-01 20:55] Regenerate Qwen caption and text artifacts
+
+Request summary:
+- Regenerate the caption artifacts with the configured Qwen model so the current handover has a fresh, explicit generation run.
+- Rebuild downstream text embeddings and normalization statistics from the regenerated captions.
+- Preserve the existing artifacts as a baseline; do not overwrite them.
+
+Implementation steps:
+1. Use a versioned caption path, such as `data/things-eeg2/captions/qwen2.5-vl-7b-instruct.jsonl`, with the current Qwen model and prompt from `generate_text_captions_local.yaml`.
+2. Verify the regenerated JSONL has complete train/test coverage, unique paths, non-empty captions, and recorded generation metadata alongside the artifact documentation.
+3. Generate `t5_base` embeddings from the new caption file into a separate cache directory.
+4. Generate matching train/test `t5_base` statistics into a separate statistics directory.
+5. Run the artifact validator against the regenerated caption/cache/statistics set, including tensor dimensions.
+6. Update the Qwen report and README with the versioned paths, model/prompt settings, counts, and validation result.
+
+Feature list:
+- Reproducible Qwen caption regeneration.
+- Isolated downstream embedding/statistics artifacts.
+- Provenance-aware handover documentation.
+
+Function/interface contracts:
+- Existing `local.jsonl`, shared `tensorcache`, and shared `statistics` remain unchanged.
+- The regenerated caption path is passed explicitly to embedding generation.
+- The regenerated cache/statistics paths are passed explicitly to all validation and later Text Alignment commands.
+
+Edge cases:
+- Qwen weights or required packages may be unavailable, or GPU memory may be insufficient.
+- Caption generation is append/resume-oriented; a pre-existing versioned target must not be mixed with a different model/prompt.
+- Qwen can produce malformed or empty output; validation must fail loudly.
+- The generated text embedding cache must use the exact same image-path key convention as the training dataset.
+
+Tests to add:
+- Extend artifact validation to check optional provenance metadata and split consistency.
+- Run the validator with tensor-shape checks on the regenerated artifacts.
+
+TODOs:
+- Use `qwen2.5-vl-7b-instruct.jsonl` plus a matching YAML sidecar for the regenerated caption artifact.
+
+Notes / risks / suggestions:
+- Regeneration is expected to be expensive for 16,740 images; run it in a user-visible terminal/tmux session, not a hidden background process.
+- Rebuilding only `t5_base` is sufficient for the next Text Alignment experiment; optional CLIP/Gemma regeneration can remain deferred.
+
+README updates:
+- Document the versioned regenerated artifact paths and exact commands.
+- Distinguish the regenerated, provenance-aware artifacts from the legacy `local.jsonl` baseline.
+
+Implementation iteration status:
+- Added caption-generation provenance sidecar support. The generator now records model, prompt, decoding limit, batch size, dtype, device, splits, and caption path before generation.
+- Existing caption generation behavior and legacy artifacts are unchanged.
+- GPU-dependent generation is paused by user request before launch. No Qwen model was loaded and no versioned artifacts were created.
+
+Implementation status:
+- Created `notebooks/comm_report.ipynb` with artifact-backed protocol, checkpoint, primary metric table, visualization, and interpretation.
+- Linked the report from README.
+- Notebook validation completed successfully: the notebook parsed as nbformat 4 and all four code cells executed against the final CSV/YAML artifacts.
