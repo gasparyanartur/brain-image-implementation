@@ -64,11 +64,7 @@ def main(cfg: DictConfig):
         trainer.load_checkpoint(checkpoint_path)
 
     trainer.train()
-    test_metrics = trainer.test()
-
-    logging.info(f"Finished training with test metrics:")
-    for key, value in test_metrics.items():
-        logging.info(f"  {key}: {value}")
+    logging.info("Finished CoMM training. Run the separate CoMM evaluation script to compute test metrics.")
 
 
 if __name__ == "__main__":

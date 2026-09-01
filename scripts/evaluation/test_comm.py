@@ -1,31 +1,37 @@
-import datetime
 import argparse
+import csv
 import logging
 from pathlib import Path
 
 from typing import Literal
 from pydantic import BaseModel
-import json
-
 import torch
+import yaml
 
 from brain_image.eval import find_checkpoint_in_run
-from brain_image.metrics import METRIC_LOOKUP, MetricType
+from brain_image.metrics import METRIC_LOOKUP
 from brain_image.utils import flatten_configs, setup, setup_logging
 from brain_image.model.comm_alignment import CommAlignmentModel
-import os
-
-from torchvision.utils import save_image
 
 
 class Args(BaseModel):
     run_path: Path
     checkpoint_path: Path | None = None
     hyperparameters_path: Path | None = None
-    checkpoint_selection: Literal["last", "max", "min"] = "min"
-    checkpoint_metric: str = "val-loss"
+    checkpoint_selection: Literal["last", "max", "min"] = "max"
+    checkpoint_metric: str = "val/acc_eeg_to_img"
     output_dir: Path | None = None
     disable_cache: bool = False
+
+
+def write_metrics_csv(output_path: Path, metrics: dict[str, object]) -> None:
+    with output_path.open("w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(("metric", "value"))
+        for metric_name, metric_value in metrics.items():
+            if isinstance(metric_value, torch.Tensor):
+                metric_value = metric_value.detach().cpu().item()
+            writer.writerow((metric_name, metric_value))
 
 
 def main(args: Args):
@@ -67,6 +73,9 @@ def main(args: Args):
         strict=False
     )
     model.eval()
+    # Train against cached target latents, then evaluate the trained CoMM
+    # with generated latents from the frozen diffusion prior.
+    model.config.use_generated_prior = True
     logging.info(f"Finished loading model.")
 
     logging.info(f"Running full test...")
@@ -88,11 +97,22 @@ def main(args: Args):
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(output_dir / "config.json", "w") as f:
-        json.dump(args.model_dump_json(indent=4), f)
+    write_metrics_csv(output_dir / "test_metrics.csv", metrics)
 
-    with open(output_dir / "metrics.json", "w") as f:
-        json.dump(metrics, f)
+    evaluation_config = {
+        "evaluator": args.model_dump(mode="json"),
+        "model": {
+            "prior_checkpoint_path": str(model.config.prior_checkpoint_path),
+            "prior_img_encoder": model.config.prior_img_encoder,
+            "prior_generation_steps": model.config.prior_generation_steps,
+            "prior_guidance_scale": model.config.prior_guidance_scale,
+            "prior_generation_batch_size": model.config.prior_generation_batch_size,
+            "use_generated_prior": model.config.use_generated_prior,
+            "eeg_encoder_path": str(model.config.eeg_encoder_path),
+        },
+    }
+    with (output_dir / "evaluation_config.yaml").open("w") as file:
+        yaml.safe_dump(evaluation_config, file, sort_keys=False)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -109,12 +129,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint_selection",
         choices=["last", "max", "min"],
-        default="min",
+        default="max",
         help="How to select the checkpoint",
     )
     parser.add_argument(
         "--checkpoint_metric",
-        default="val-loss",
+        default="val/acc_eeg_to_img",
         help="Metric used to find best checkpoint",
     )
     parser.add_argument(

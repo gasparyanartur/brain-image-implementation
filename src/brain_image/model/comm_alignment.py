@@ -1,5 +1,4 @@
 import datetime
-import json
 import logging
 from pathlib import Path
 from typing import Literal, cast
@@ -15,6 +14,7 @@ import tqdm
 from brain_image.augment import EEGAugmentationPipeline, ImageAugmentationPipeline, LatentAugmentationPipeline
 from brain_image.data.io import batch_load_images
 from brain_image.data.datamodule import EEGDataModule
+from brain_image.data.data import load_stats
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
 from brain_image.data.dataset.union import resolve_dataset_config
 from brain_image.metrics import get_retrieval_accuracy, get_top1_acc
@@ -26,20 +26,51 @@ from brain_image.model.encoder.eeg_encoder.union import (
     EEGEncoderConfigType,
     create_eeg_encoder,
 )
-from brain_image.model.encoder.encoder import EncoderName
 from brain_image.model.encoder.img_encoder.union import (
     ImageEncoderName,
 )
 from brain_image.model.encoder.img_encoder.union import IMAGE_ENCODER_DIM, load_image_encoder
 from brain_image.model.loss import CLIPSimLoss
 from brain_image.model.model import TrainingModule, TrainingModuleConfig
+from brain_image.model.prior import DiffusionPriorConfig, SimpleDiffusionPrior
 from brain_image.optimizer import OptimizerConfig, get_optimizer_options
-from brain_image.utils import gather_dataloader, prep_batch_for_logs
+from brain_image.utils import gather_dataloader, get_submodules_with_pattern, prep_batch_for_logs
+
+
+@torch.no_grad()
+def generate_prior_latents(
+    prior: SimpleDiffusionPrior,
+    eeg_latent: Tensor,
+    num_steps: int,
+    guidance_scale: float,
+    batch_size: int,
+    seed: int,
+) -> Tensor:
+    generator = torch.Generator(device=eeg_latent.device).manual_seed(seed)
+    generated_chunks = []
+    for start in range(0, eeg_latent.size(0), batch_size):
+        generated_chunks.append(
+            prior.generate(
+                conditioning=eeg_latent[start : start + batch_size],
+                num_steps=num_steps,
+                guidance_scale=guidance_scale,
+                generator=generator,
+                unscale=True,
+            )
+        )
+    return torch.cat(generated_chunks, dim=0)
 
 
 class CommAlignmentConfig(TrainingModuleConfig):
     img_encoder: ImageEncoderName = "unaligned_synclr_vitb16"
     eeg_encoder: EEGEncoderConfigType
+
+    prior_checkpoint_path: Path
+    prior_img_encoder: ImageEncoderName = "clip_vith14"
+    prior_generation_steps: int = 100
+    prior_guidance_scale: float = 10.0
+    prior_generation_batch_size: int = 32
+    use_generated_prior: bool = False
 
     debug: bool = False
 
@@ -130,22 +161,31 @@ class CommAlignmentModel(TrainingModule):
 
         dataset_config = resolve_dataset_config(dataset_config)
 
+        prior = self._load_prior(
+            config.prior_checkpoint_path,
+            dataset_config,
+            config.prior_img_encoder,
+        )
+
         config.eeg_encoder.d_channels = dataset_config.num_channels
         config.eeg_encoder.d_time = dataset_config.time_length
-        config.eeg_encoder.d_output = config.eeg_encoder.d_output or IMAGE_ENCODER_DIM[config.img_encoder]
-
-        embeddings_map: dict[str, EncoderName | None] = {}
-        if not config.use_img_encoder:
-            embeddings_map["align_img_latent"] = config.img_encoder
+        config.eeg_encoder.d_output = config.eeg_encoder.d_output or prior.config.d_cond
 
         data_module = EEGDataModule(
             dataset_config,
-            embeddings_key_to_name=embeddings_map,
+            # Training uses cached target latents. Evaluation switches to
+            # generated prior latents through use_generated_prior.
+            embeddings_key_to_name={"align_img_latent": config.prior_img_encoder},
         )
 
         super().__init__(config, data_module, **kwargs)
         self.config = config
         self.automatic_optimization = False  # Disable automatic optimization, we will handle it manually
+
+        if config.use_img_encoder:
+            raise ValueError("CoMM requires cached or generated latent inputs; set model.use_img_encoder=false")
+
+        self.prior = prior
 
 
         if self.config.use_img_encoder:
@@ -197,7 +237,7 @@ class CommAlignmentModel(TrainingModule):
         input_adapters = []
         input_adapters.insert(
             config.img_idx,
-            FeaturesInputAdapter(IMAGE_ENCODER_DIM[self.config.img_encoder], self.config.comm_embed_dim),
+            FeaturesInputAdapter(self.prior.config.d_input, self.config.comm_embed_dim),
         )
         input_adapters.insert(
             config.eeg_idx,
@@ -280,6 +320,41 @@ class CommAlignmentModel(TrainingModule):
 
         logging.info(f"Finished initializing model")
 
+    @staticmethod
+    def _load_prior(
+        checkpoint_path: Path,
+        dataset_config: EEGDatasetConfig,
+        prior_img_encoder: ImageEncoderName,
+    ) -> SimpleDiffusionPrior:
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"CoMM prior checkpoint does not exist: {checkpoint_path}")
+
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        checkpoint_config = checkpoint["hyper_parameters"]["config"]
+        prior_config = DiffusionPriorConfig(**checkpoint_config["prior"])
+        if prior_config.d_input != IMAGE_ENCODER_DIM[prior_img_encoder]:
+            raise ValueError(
+                "Prior output dimension does not match prior_img_encoder: "
+                f"{prior_config.d_input} != {IMAGE_ENCODER_DIM[prior_img_encoder]}"
+            )
+
+        stats = load_stats(
+            dataset_config.stats_path,
+            checkpoint["hyper_parameters"]["dataset_config"]["dataset"],
+            "train",
+            prior_img_encoder,
+        )
+        prior = SimpleDiffusionPrior(prior_config, embedding_stats=stats)
+        prior_state_dict = get_submodules_with_pattern(
+            checkpoint["state_dict"], r"prior\.", get_full_name=False
+        )
+        if not prior_state_dict:
+            raise ValueError(f"No prior weights found in checkpoint: {checkpoint_path}")
+        prior.load_state_dict(prior_state_dict)
+        prior.eval()
+        prior.requires_grad_(False)
+        return prior
+
     def get_name(self, timestamp: bool = False) -> str:
         name_components = []
 
@@ -322,6 +397,16 @@ class CommAlignmentModel(TrainingModule):
 
         if self.config.use_img_encoder:
             imgs = self.get_images(img_paths).to(device)
+        elif self.config.use_generated_prior:
+            eeg_latent = F.normalize(self.eeg_encoder(eeg), dim=-1)
+            imgs = generate_prior_latents(
+                self.prior,
+                eeg_latent,
+                num_steps=self.config.prior_generation_steps,
+                guidance_scale=self.config.prior_guidance_scale,
+                batch_size=self.config.prior_generation_batch_size,
+                seed=self.config.seed,
+            )
         else:
             imgs = batch["align_img_latent"].to(device)
 

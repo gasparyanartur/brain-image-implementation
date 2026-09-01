@@ -198,4 +198,123 @@ Full-run status:
 
 23. Document the prior-only baseline separately from the EEG-Guided Diffusion paper comparison. Add a notebook that loads the measured CSV, shows the exact protocol and metrics, and visualizes the nine reconstruction/ground-truth pairs. State clearly that the current implementation omits paper-specific reconstruction components, so the paper's reported scores are not direct acceptance targets.
    Completed: README updated with the baseline interpretation and measured values; `notebooks/eeg_prior_reconstruction_report.ipynb` added and executed against the full-run artifacts.
-- Verified Python compilation, composed Hydra config, and existence of the configured alignment checkpoint. No training run has been launched yet.
+
+24. Add a separate historical notebook for the second-prior experiment. Reference commit `44f8854` where the second latent/prior path was introduced and commit `2cca62a` where it was removed. Summarize the concatenated second-latent design, its additional losses/metrics, the recorded `prior_second` results, and why it is not maintained.
+   Completed: `notebooks/second_prior_history.ipynb` added and executed; README links to it and labels the approach historical/non-working.
+
+[2026-09-01 00:00] Identify the next historical experiment track
+
+Request summary:
+- Reconstruct the actual order of work from the current README and git history.
+- Determine whether CoMM was the next track after the maintained EEG alignment/prior work, rather than assuming the next implementation step from the handover sequence.
+- Do not modify production code until the evidence and proposed next step are reviewed.
+
+Feature list:
+- Evidence-backed track chronology.
+- Current-checkout inventory of the CoMM training config, training script, evaluator, model code, and existing report notebook.
+- Explicit distinction between historical order and maintenance priority.
+
+Implementation steps:
+1. Read README track descriptions and current workflow sections.
+2. Inspect dated git history and commits touching CoMM, text alignment, and low-level code.
+3. Inspect current CoMM config, model/training/evaluation entrypoints, and artifacts/notebooks.
+4. Report whether CoMM was historically next and identify the smallest verification task before any cleanup or rewrite.
+5. After approval, add only the agreed CoMM verification/maintenance changes in a small iteration. Completed in the first implementation iteration.
+
+Function/interface contracts:
+- No production interface changes in this audit iteration.
+- Candidate maintained path, subject to review: a simple CoMM train-then-evaluate launcher with CSV metrics and a documented checkpoint-selection rule, matching the alignment/prior handover conventions.
+
+Edge cases:
+- README ordering may differ from chronological commit order.
+- Current CoMM scripts may still use JSON metrics, in-process testing, or stale config names.
+- Existing notebooks are historical evidence, not automatically valid acceptance tests.
+- `docs/project.md` and `docs/architecture.md` are absent despite AGENTS.md requiring them; do not silently invent architecture changes during this audit.
+
+Tests to add:
+- Added `tests/test_comm_evaluation.py` for scalar metric CSV serialization.
+- Verified config composition and a minimal train/evaluate artifact smoke test on the dummy dataset.
+
+TODOs:
+- Decide whether to run a full Things-EEG2 CoMM experiment or first document the existing historical results in a clean report.
+- Audit the separate low-level and text-alignment paths after CoMM.
+
+Notes / risks / suggestions:
+- History currently shows CoMM implementation/evaluation commits in February 2026 and text alignment implementation in March 2026, after the main refactor.
+- The README describes CoMM before text alignment and low-level work, but chronology and current readiness must be reported separately.
+
+README updates:
+- Added the CoMM local launcher, batch-size, checkpoint-selection, artifact, TensorBoard, and historical-status documentation.
+
+Implementation iteration 1 status:
+- Updated `train_comm.yaml` to use batch size 32 for all splits, four workers, and max-mode checkpointing on `val/acc_eeg_to_img`.
+- Changed `train_comm.py` to train only; test execution is now separate.
+- Updated `test_comm.py` to write `test_metrics.csv` and `evaluation_config.yaml`, with max-mode EEG-to-image checkpoint selection by default.
+- Added `scripts/run_comm.sh` for sequential local train-then-evaluate execution.
+- Added and passed `tests/test_comm_evaluation.py`.
+- Passed Python compilation, shell syntax, Hydra composition, and dummy end-to-end smoke test. Smoke output: `experiments/comm_smoke/20260901_004749/train_comm-20260901_004757`.
+
+Implementation iteration 2 status:
+- Started the full Things-EEG2 CoMM train-then-evaluate run in tmux session `comm_full`.
+- Run root: `experiments/comm/20260901_082138`.
+- Environment is activated inside tmux; `BRAIN_IMAGE_TENSORCACHE_MAXSIZE=1024` is set.
+- Stopped before completion after confirming that the current path consumes `align_img_latent` directly; this run is invalid for the intended post-prior CoMM protocol and must not be reported.
+
+Implementation iteration 3 plan (pending review): post-prior CoMM protocol
+
+Request summary:
+- CoMM must fuse the EEG latent with the image latent generated by the trained diffusion prior, not the ground-truth/precomputed image latent.
+- Do not launch another run until the prior checkpoint, conditioning path, generated latent dimensionality, and evaluation protocol are wired and smoke-tested.
+
+Feature list:
+- Explicit prior checkpoint/config inputs for CoMM.
+- Per-batch frozen diffusion-prior generation from the EEG latent.
+- CoMM fusion using `[EEG latent, generated prior image latent]`.
+- Separate evaluation that reports retrieval metrics and records the exact prior-generation settings.
+
+Implementation steps:
+1. Trace the historical `notebooks/comm_prior.ipynb` setup and current prior checkpoint/model loading APIs.
+2. Add a config contract for the finished prior checkpoint and generation parameters; keep batch size 32 and avoid loading the ground-truth image latent as the CoMM image modality.
+3. Add the smallest testable model helper that maps EEG to a generated prior latent and feeds that latent into CoMM; freeze the prior during CoMM training unless the historical protocol explicitly says otherwise.
+4. Update the local launcher/evaluator to use the post-prior path and write CSV/YAML artifacts.
+5. Run a dummy or one-batch smoke test that proves the CoMM image input is generated by the prior, then run the full experiment sequentially in tmux.
+
+Function/interface contracts:
+- CoMM training requires a prior checkpoint path and prior generation settings in the effective config.
+- Evaluation artifacts must include those settings and retrieval metrics in `test_metrics.csv`/`evaluation_config.yaml`.
+- The invalid run at `experiments/comm/20260901_082138` is not an acceptance result.
+
+Edge cases:
+- A prior-generated latent may have a different encoder/normalization contract than `align_img_latent`; validate dimensions and normalization explicitly.
+- Prior generation is stochastic and may be expensive; generation seed/steps/guidance must be fixed for comparable runs.
+- The prior must not receive ground-truth image latents as conditioning or targets during CoMM evaluation.
+- The current CoMM data module still loads `align_img_latent`; remove that dependency from the post-prior path or isolate it to optional diagnostic metrics.
+
+Tests to add:
+- Config/checkpoint existence and dimensionality test.
+- Unit or smoke assertion that the CoMM image branch receives prior output rather than `batch["align_img_latent"]`.
+- One-batch dummy train/evaluate artifact test after the prior path is wired.
+
+TODOs:
+- Confirm the canonical completed prior checkpoint and whether the prior EEG encoder should be shared with or separate from the trainable CoMM EEG encoder.
+- Decide whether the generated prior latent is used directly or normalized exactly as in `comm_prior.ipynb`.
+
+Notes / risks / suggestions:
+- The current full run was stopped at approximately epoch 3 and is retained only as an invalid-protocol artifact.
+- Historical notebook code generated `clip_pred = prior.generate(conditioning=eeg_latent, ...)` and fused `eeg_latent` with `clip_pred`; this is the protocol to reproduce.
+
+README updates:
+- Correct the CoMM description and launcher documentation after the post-prior implementation is verified; do not present the current precomputed-latent path as the intended experiment.
+
+Implementation iteration 3 status:
+- Added frozen prior loading from the completed prior checkpoint, including checkpoint-derived prior configuration and matching Things-EEG2 statistics.
+- CoMM can generate post-prior image latents from the aligned EEG encoder in chunks and uses the generated 1024-dimensional `clip_vith14` latent as its image modality.
+- The historical-faithful default trains from cached target `clip_vith14` latents and switches to generated prior latents for evaluation.
+- Added deterministic generation settings to evaluation YAML metadata.
+- Added and passed generation-helper tests; corrected model smoke completed at `experiments/comm_postprior_smoke/20260901_084015`.
+- The full corrected run has not yet been launched. Historical `comm_prior.ipynb` trains CoMM from cached image latents and applies the generated prior latent during post-training evaluation.
+- The full corrected run is now launched sequentially in tmux session `comm_full_correct` at `experiments/comm/20260901_084821`.
+
+Follow-up decision required:
+- Preferred historical-faithful option: train CoMM on cached `clip_vith14` latents, then evaluate the trained CoMM with generated post-prior `clip_vith14` latents and record both protocols explicitly. Approved and implemented.
+- Alternative: precompute and cache generated prior latents before CoMM training, which is a new data-generation step and must be benchmarked separately.

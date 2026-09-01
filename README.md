@@ -348,6 +348,29 @@ The completed baseline run is reported in [`notebooks/eeg_prior_reconstruction_r
 
 Measured baseline results from the full run (`experiments/eeg_prior/20260831_134809`) are: prior cosine `0.63396`, PixCorr `0.09722`, SSIM `0.30855`, AlexNet-2 `0.72222`, AlexNet-5 `0.88889`, Inception `0.63889`, CLIP `0.79167`, EfficientNet `0.90044`, and SwAV `0.58795`. These values are a baseline for this implementation and should not be judged against the paper's reported numbers until the missing paper-specific components are implemented.
 
+The historical second-prior experiment is documented separately in [`notebooks/second_prior_history.ipynb`](notebooks/second_prior_history.ipynb). It was introduced around commit `44f8854` and later removed in commit `2cca62a`; the recorded experiments did not establish a working improvement, so it is not part of the maintained path.
+
+For the historical CoMM track, use the maintained local train-then-evaluate wrapper:
+
+```bash
+source .venv/bin/activate
+./scripts/run_comm.sh
+```
+
+The default `train_comm` config uses batch size 32 for train, validation, and test, four DataLoader workers, and the finished alignment EEG encoder. It loads cached target `clip_vith14` latents for efficient CoMM training. Evaluation then switches to the frozen diffusion prior, generates `clip_vith14` latents from EEG, and fuses those generated latents with EEG. Training selects checkpoints by maximum validation `acc_eeg_to_img`; evaluation loads that checkpoint separately and writes `test_metrics.csv` and `evaluation_config.yaml` under the run's `test/` directory. The YAML records the prior checkpoint and generation settings. TensorBoard contains training logs only:
+
+```bash
+tensorboard --logdir experiments/comm/<timestamp>/<run_name>/version_0
+```
+
+Hydra overrides can be appended, for example:
+
+```bash
+./scripts/run_comm.sh model.max_epochs=1 dataset.limit_train_size=0.01
+```
+
+The cached-training/post-prior-evaluation split has been smoke-tested with the real prior and alignment checkpoints on the dummy dataset. Its historical reports remain in [`notebooks/comm.ipynb`](notebooks/comm.ipynb) and [`notebooks/comm_prior.ipynb`](notebooks/comm_prior.ipynb); it is not currently the primary maintained experiment track.
+
 For the existing parameter-file workflow, use:
 
 ```bash

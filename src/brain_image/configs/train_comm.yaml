@@ -11,7 +11,8 @@ resume_training: false
 model:
   seed: 42
   max_epochs: 200
-  eeg_encoder_path: null
+  eeg_encoder_path: experiments/eeg_alignment_sweep/20260830_231325_task4/train_eeg-20260830_231357/version_0/checkpoints/epoch_0089-val_align_top1_0.7650.ckpt
+  prior_checkpoint_path: experiments/eeg_prior/20260831_134809/train_eeg-20260831_134844/version_0/checkpoints/epoch_0289-eval_val_prior_pred_cos_0.6340.ckpt
 
   encoder_lr: 3e-4
   encoder_min_lr: 1e-5
@@ -25,7 +26,12 @@ model:
   comm_proj_dim: 256
 
   use_img_encoder: false
-  img_encoder: aligned_synclr_vitb16
+  prior_img_encoder: clip_vith14
+  prior_generation_steps: 100
+  prior_guidance_scale: 10.0
+  prior_generation_batch_size: 32
+  img_encoder: clip_vith14
+  use_generated_prior: false
 
   modules_to_train:
   - comm
@@ -33,6 +39,11 @@ model:
 
 
 dataset:
-  batch_size: 128
-  val_batch_size: 256
-  test_batch_size: 256
+  batch_size: 32
+  val_batch_size: 32
+  test_batch_size: 32
+  num_workers: 4
+
+trainer:
+  checkpoint_monitor: "val/acc_eeg_to_img"
+  checkpoint_monitor_mode: "max"
