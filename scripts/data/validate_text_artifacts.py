@@ -83,8 +83,10 @@ def main() -> None:
     parser.add_argument("--cache-dir", type=Path, default=Path("tensorcache"))
     parser.add_argument("--stats-dir", type=Path, default=Path("statistics"))
     parser.add_argument("--image-dir", type=Path, default=Path("data/things-eeg2/imgs"))
+    parser.add_argument("--models", nargs="+", default=list(DEFAULT_MODELS))
     parser.add_argument("--check-tensor-shapes", action="store_true")
     args = parser.parse_args()
+    args.models = tuple(args.models)
     summary = validate_text_artifacts(**vars(args))
     print("Text artifacts are valid:", summary)
 

@@ -5,15 +5,13 @@ defaults:
 
 model_names:
   - t5_base
-  - clip_vitl14_text
-  - gemma_embedding_300m
 
 splits:
   - train
   - test
 
-stat_path: statistics
-cache_dir: tensorcache
+stat_path: statistics/qwen3.5-0.8b
+cache_dir: tensorcache/qwen3.5-0.8b
 batch_size: 512
 
 dataset:

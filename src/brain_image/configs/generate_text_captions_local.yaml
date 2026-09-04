@@ -7,12 +7,13 @@ splits:
   - train
   - test
 
-caption_path: data/things-eeg2/captions/local.jsonl
-model_name: Qwen/Qwen2.5-VL-7B-Instruct
-batch_size: 32
+caption_path: data/things-eeg2/captions/qwen3.5-0.8b.jsonl
+model_name: Qwen/Qwen3.5-0.8B
+batch_size: 4
 dtype: bfloat16
 device: null
-max_new_tokens: 512
+device_map: null
+max_new_tokens: 128
 
 system_prompt: >
   You are given an image, followed by a label. 

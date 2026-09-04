@@ -11,8 +11,7 @@ import tqdm
 from omegaconf import DictConfig
 
 from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
-from brain_image.data.datamodule import EEGDataModule
-from brain_image.data.dataset.union import EEGDatasetConfigType
+from brain_image.data.io import get_image_paths
 from brain_image.data.tensorcache import TensorCache
 from brain_image.model.encoder.text_encoder.text_encoder import BaseTextEncoder
 from brain_image.model.encoder.text_encoder.union import TextEncoderName, load_text_encoder
@@ -20,7 +19,7 @@ from brain_image.utils import get_dtype, setup
 
 
 class TextEmbeddingGenerationConfig(BaseConfig):
-    dataset: EEGDatasetConfigType
+    dataset: dict
     model_names: list[TextEncoderName] = ["t5_base", "clip_vitl14_text"]
     caption_path: Path = Path("data/things-eeg2/captions/local.jsonl")
     batch_size: int = 256
@@ -86,12 +85,6 @@ def generate_all_text_embeddings(config: TextEmbeddingGenerationConfig) -> None:
     captions = load_captions(config.caption_path)
     logging.info(f"Loaded {len(captions)} captions from {config.caption_path}")
 
-    dataset_module = EEGDataModule(config.dataset)
-    datasets = {
-        split: dataset_module.create_dataset(split, preload_cache=False, compute_stats=False)
-        for split in config.splits
-    }
-
     device = config.device or get_device_str()
     logging.info(f"Using device: {device}")
 
@@ -104,7 +97,8 @@ def generate_all_text_embeddings(config: TextEmbeddingGenerationConfig) -> None:
         )
 
         for split in config.splits:
-            img_paths = datasets[split].get_image_paths()
+            image_dir = Path(config.dataset["data_path"]) / config.dataset.get("img_dir", "imgs")
+            img_paths = get_image_paths(image_dir, split, extensions=(".jpg",))
             run_text_generation(
                 img_paths=img_paths,
                 captions=captions,

@@ -15,7 +15,8 @@ dependencies = [
     "triton",
     "wandb",
     "diffusers",
-    "transformers",
+    "peft>=0.20.0",
+    "transformers @ git+https://github.com/huggingface/transformers.git@dd35e077078d9aebbdbc8f64a138a5951aa79ffc",
 
     "numpy",
     "einops",

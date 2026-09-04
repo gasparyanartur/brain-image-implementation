@@ -530,8 +530,497 @@ Implementation iteration status:
 - Added caption-generation provenance sidecar support. The generator now records model, prompt, decoding limit, batch size, dtype, device, splits, and caption path before generation.
 - Existing caption generation behavior and legacy artifacts are unchanged.
 - GPU-dependent generation is paused by user request before launch. No Qwen model was loaded and no versioned artifacts were created.
+- Regeneration is now running in tmux session `qwen_caption_regen` with the activated `.venv`, using `Qwen/Qwen2.5-VL-7B-Instruct`, the configured 512-token prompt, and the versioned output paths.
+- At the latest check, model files were still being fetched; no regenerated caption records had been written yet.
+- The initial launch was cancelled before model loading completed. The exact process was stopped, and the configured Qwen caption batch size was reduced from 32 to 1 for the next launch.
+- Relaunched the versioned regeneration in tmux session `qwen_caption_regen`; effective Hydra configuration confirms `batch_size: 1`. The job is currently loading Qwen and has not written caption records yet.
+- The batch-size-1 launch failed during model loading with CUDA OOM: another Python process occupied approximately 12.3 GiB of the 23.5 GiB GPU, leaving approximately 146 MiB free. No caption records were generated; the existing artifacts remain untouched.
+- Added `device_map: auto` to the local Qwen configuration and passed it to model loading; input placement remains controlled separately by `device`.
+- CPU-offloaded relaunch succeeded in loading all five Qwen checkpoint shards with `device_map=auto` and batch size 1. The process advanced to train-dataset preparation; caption generation has not started yet.
+- The first offloaded run stopped before captioning because the script used the stale `embeddings_to_compute_stats` dataset keyword. Updated it to the current `load_embedding_stats` interface; no partial captions were created.
+- The next run exposed that `EEGDataModule.create_dataset()` already injects `load_embedding_stats`, so the explicit empty override caused a duplicate keyword. Removed the redundant argument; no partial captions were created.
+- Captioning is now active: 2/16,540 train images completed at roughly 7.6 seconds per image, implying approximately 35 hours for the train split. CPU offloading works but is too slow for an efficient full regeneration at batch size 1.
+- Switched the approved regeneration target to `google/gemma-4-E2B-it`; added a model-specific Gemma multimodal loader/chat-template path and changed the default caption config accordingly. Existing Qwen partial artifacts remain preserved.
+- Gemma smoke startup exposed an incompatibility between Transformers 5.16 development code and the repository's older `peft`/`diffusers` imports. Simplified caption generation to enumerate image paths directly, avoiding unnecessary EEG/diffusion imports and preloading.
+- Removed the remaining dataset-union type annotation import, which transitively loaded the diffusion encoder stack. The caption script now imports only the image-path utility and treats the dataset config as an opaque field container.
+- Gemma model loading succeeded with offloading, but the smoke test exposed that the opaque Hydra dataset config is a dict. Updated image-path and limit-size access to use dictionary keys; no caption records were created.
+- Added persistent Hugging Face cache exports to `/home/gasparyanartur/.bashrc`, pointing `HF_HOME`, `HF_HUB_CACHE`, and `TRANSFORMERS_CACHE` to `/storage/huggingface`; existing home-cache contents were not removed.
+
+[2026-09-02 19:00] Switch caption regeneration to Gemma 4 E2B
+
+Request summary:
+- Replace the impractically slow Qwen 7B caption regeneration with Google's multimodal Gemma 4 E2B checkpoint.
+- Preserve the versioned artifact workflow and provenance metadata.
+
+Implementation steps:
+1. Use checkpoint `google/gemma-4-E2B` and verify the local Transformers version exposes its multimodal loader.
+2. Adapt the caption-generation loader and processor call to Gemma 4's `AutoModelForMultimodalLM` interface and chat template.
+3. Run a one-image or five-image smoke test at batch size 1 before full generation.
+4. If the smoke test succeeds, generate the full train/test caption set into a new Gemma-specific JSONL and YAML provenance sidecar; do not mix it with the partial Qwen output.
+5. Rebuild only the `t5_base` embeddings and statistics from the Gemma captions after caption generation completes.
+6. Validate and document model name, prompt, counts, cache/statistics paths, and the fact that the caption generator changed from Qwen to Gemma.
+
+Feature list:
+- Gemma 4 E2B image-caption generation.
+- Separate provenance-aware Gemma caption artifacts.
+- Rebuilt downstream `t5_base` artifacts.
+
+Function/interface contracts:
+- Caption generation remains image-plus-label to one text caption per image.
+- Model placement uses `device_map=auto`; input placement follows the loaded model's device contract.
+- Existing Qwen, legacy captions, embeddings, and statistics remain unchanged.
+
+Edge cases:
+- `google/gemma-4-E2B` requires a Transformers version with Gemma 4 support and may require model access acceptance/authentication.
+- Gemma's chat-template and image-input format may differ from Qwen's processor API.
+- The two partial Qwen records are not reused or mixed into Gemma output.
+- Gemma output quality is a methodological change and must be recorded in the report.
+
+Tests to add:
+- Unit-test the model-agnostic caption message construction/response trimming where practical.
+- Smoke-test Gemma loading and one-image generation before full execution.
+
+TODOs:
+- Confirm exact local Transformers compatibility and the model's output format.
+
+Notes / risks / suggestions:
+- The Qwen job was stopped at exactly two records; its partial file is retained for debugging but is not a valid dataset.
+- Gemma 4 E2B is documented by Google as multimodal and supports `AutoModelForMultimodalLM` with automatic device mapping.
+
+README updates:
+- Update the regenerated-artifact documentation only after the Gemma smoke/full run is verified.
+
+[2026-09-02 09:40] Enable CPU offloading for Qwen caption generation
+
+Request summary:
+- Allow Qwen caption regeneration to run while another process occupies GPU memory.
+- Use automatic device mapping/offloading rather than requiring the full 7B model on CUDA.
+- Keep caption batch size at 1 and preserve the versioned output/provenance paths.
+
+Implementation steps:
+1. Add an explicit `device_map` setting to the local caption-generation config, defaulting to `auto`.
+2. Pass `device_map=auto` to Qwen model loading while keeping processor inputs on the configured execution device.
+3. Run a startup/small-scope validation in the existing tmux session and inspect GPU/CPU placement before full generation.
+4. If model loading succeeds, resume the versioned full caption generation and validate the resulting artifacts.
+
+Feature list:
+- CPU/GPU offloaded Qwen loading.
+- Batch-size-1 memory-safe caption generation.
+
+Function/interface contracts:
+- `device` controls input placement; `device_map` controls model placement.
+- Existing CUDA-only behavior can be restored with `device_map=cuda` if desired.
+- Existing caption artifacts remain unchanged.
+
+Edge cases:
+- Automatic offloading may be very slow and requires sufficient host RAM and an Accelerate-compatible Transformers installation.
+- If the model cannot fit across available CPU/GPU memory, use a smaller or quantized model instead.
+- A failed startup must not leave partial caption records mixed with the versioned output.
+
+Tests to add:
+- Config/composition check that `device_map=auto` is accepted and passed to the loader boundary.
+- Keep existing caption parser/artifact validation tests.
+
+TODOs:
+- Run the offloaded generation and validate its completion.
+
+Notes / risks / suggestions:
+- The current OOM occurred during model loading, so lowering batch size alone cannot solve it.
+
+README updates:
+- Document the optional `device_map=auto` CPU-offloading override after successful verification.
 
 Implementation status:
 - Created `notebooks/comm_report.ipynb` with artifact-backed protocol, checkpoint, primary metric table, visualization, and interpretation.
 - Linked the report from README.
 - Notebook validation completed successfully: the notebook parsed as nbformat 4 and all four code cells executed against the final CSV/YAML artifacts.
+[2026-09-02 19:20] Relocate experiment logs and outputs to /storage
+
+Request summary:
+- Move the brain-image-implementation logs and experiments out of the nearly-full home filesystem.
+- Store them at `/storage/logs/brain-image-implementation` and `/storage/experiments/brain-image-implementation`.
+- Preserve the existing repository paths as symlinks.
+- Apply the same storage convention to `~/dev/pose-graph-diff/external/diffusionregpose/logs` if that checkout/path exists.
+
+Implementation steps:
+1. Confirm no active training/evaluation process is writing the two source directories.
+2. Verify destination paths do not already contain unrelated data and create only the required `/storage/logs` and `/storage/experiments` parents.
+3. Move each source directory to its exact `/storage` destination, preserving contents and metadata as far as `mv` permits.
+4. Create symlinks at the original brain-image paths pointing to the new absolute destinations.
+5. Locate the diffusionregpose checkout; if the requested logs directory exists, move it to `/storage/logs/diffusionregpose` and link the original path. Do not create a fabricated link for a missing checkout.
+6. Verify symlink resolution, directory sizes, representative files, and that the source filesystem has reclaimed the expected space.
+7. Update README storage/layout guidance and append concise migration evidence to `.log` and this plan.
+
+Feature list:
+- Storage-backed brain-image experiment logs.
+- Storage-backed brain-image experiment artifacts.
+- Backward-compatible repository paths through symlinks.
+- Storage-backed diffusionregpose logs when the checkout is present.
+
+Function/interface contracts:
+- Existing code continues to use `logs/` and `experiments/` without changes.
+- Canonical data locations become `/storage/logs/brain-image-implementation` and `/storage/experiments/brain-image-implementation`.
+- The assumed canonical diffusionregpose log location is `/storage/logs/diffusionregpose`; confirm against the actual checkout before moving it.
+
+Edge cases:
+- A running process could write during migration and invalidate size/file-count checks; migration must stop if relevant writers are found.
+- Existing non-empty destinations must never be merged or overwritten implicitly.
+- A missing diffusionregpose path is not an error in this checkout; report it and leave unrelated paths untouched.
+- Symlink creation must not replace a real directory or file.
+- If validation fails, remove only the newly created symlink and move the exact directory back to its original path.
+
+Side effects:
+- Approximately 54 GB will move from `/home` to `/storage`.
+- Existing absolute paths and shell commands remain usable through symlinks.
+- Directory inode/device identities will change because the data is relocated.
+
+Tests to add:
+- No production-code test is needed for the filesystem migration.
+- Run shell-level assertions for source symlink state, destination existence, resolved paths, and matching file counts/byte totals.
+
+Possible refactors or suggestions:
+- Keep future large checkpoints, logs, and experiment outputs under `/storage`; avoid adding repository-specific symlink logic to Python code.
+
+TODOs:
+- Identify the actual diffusionregpose checkout before attempting its migration.
+- Confirm whether `/storage/logs/diffusionregpose` is the desired canonical destination if that checkout is found elsewhere.
+
+Notes / risks / suggestions:
+- The requested brain-image paths are ordinary directories, not symlinks. The pose path `/home/gasparyanartur/dev/pose-graph-diff/external/diffusionregpose` is currently absent.
+- `/home` is at 99% usage with about 5.8 GB free; `/storage` is at 74% usage with about 303 GB free.
+- This plan intentionally uses explicit moves and symlinks; no recursive deletion or overwrite is authorized.
+
+README updates:
+- Add a short canonical storage-location note and state that the repository paths are compatibility symlinks.
+- Do not add a long Slurm or operational section as part of this migration.
+
+Implementation status:
+- Moved the brain-image `logs` directory to `/storage/logs/brain-image-implementation` and `experiments` to `/storage/experiments/brain-image-implementation`.
+- Replaced both original paths with absolute symlinks and verified they resolve to populated directories.
+- The requested diffusionregpose checkout/path is absent, so it was left untouched; no fabricated link was created.
+- `/home` free space increased from approximately 5.8 GB to approximately 60 GB after the migration.
+- The cross-filesystem move printed transient `mv` warnings for entries that had already disappeared during traversal; final source paths are symlinks and canonical destinations contain the migrated trees. A deeper file-count reconciliation remains a follow-up if required.
+- During caption resumption, the existing Gemma smoke session exposed a stale `img_dir` assumption. The caption script now uses the dataset's configured `data_path` directly, and the Gemma default output is versioned separately from the legacy `local.jsonl`.
+- The dataset inspection showed that `things-eeg2` stores images under `imgs/`; the script now uses the configured `img_dir` when present and otherwise honors the dataset class default `imgs`.
+
+Continuation status:
+- Gemma smoke completed successfully and wrote one caption record for the `aardvark` image in 2 minutes 20 seconds.
+- Full Gemma train+test generation is active in tmux session `gemma_caption_smoke`, writing resumable records to `data/things-eeg2/captions/gemma-4-E2B-it.jsonl` with provenance in the adjacent YAML file.
+- The full run has loaded the offloaded model and enumerated 16,540 training images; its first inference is in progress. It uses batch size 1 and `device_map=auto`.
+
+[2026-09-02 20:05] Switch caption regeneration to Qwen3.5 0.8B
+
+Request summary:
+- Cancel the impractically slow Gemma caption regeneration.
+- Try the multimodal instruction-tuned `Qwen/Qwen3.5-0.8B` checkpoint instead.
+- Preserve the partial Gemma and older Qwen artifacts.
+
+Implementation steps:
+1. Stop only the active Gemma caption process and verify its partial JSONL remains intact.
+2. Reuse the multimodal `AutoModelForMultimodalLM` and chat-template path for Qwen3.5.
+3. Write Qwen3.5 output to a separate versioned JSONL/YAML pair.
+4. Run a one-image smoke test, then start the full train+test generation only after the smoke test writes a valid caption.
+
+Feature list:
+- Qwen3.5 0.8B multimodal caption generation.
+- Separate versioned output and provenance artifacts.
+
+Function/interface contracts:
+- Model IDs beginning with `Qwen/Qwen3.5` use the same image chat-template interface as Gemma 4.
+- Existing Qwen 2.5 processing remains available for older model IDs.
+- Output paths are model-specific and resumable through existing-path detection.
+
+Edge cases:
+- Qwen3.5 0.8B can enter thinking loops; disable thinking and cap generation length for captioning.
+- The competing diffusionregpose process still occupies GPU memory; automatic placement may be needed until it finishes.
+- A failed smoke test must not overwrite any existing caption artifact.
+
+Tests to add:
+- Smoke-test model loading, image processing, generation, and one-record JSONL serialization.
+
+TODOs:
+- Complete the smoke test and launch full generation if it succeeds.
+
+Notes / risks / suggestions:
+- The official Qwen3.5 model card documents `AutoModelForMultimodalLM` and `processor.apply_chat_template` for this checkpoint.
+- Gemma generation was cancelled after producing four full-run records; those records remain preserved.
+
+Implementation status:
+- Cancelled the Gemma process cleanly; its four generated records remain in `gemma-4-E2B-it.jsonl`.
+- Qwen3.5 smoke loaded all 473 shards and generated one caption in approximately 22 seconds.
+- Full Qwen3.5 train+test generation is active in tmux `gemma_caption_smoke`, with one full-run record written to `qwen3.5-0.8b.jsonl`.
+- The active Qwen3.5 process uses approximately 2 GB GPU memory with the competing diffusionregpose job still present; observed throughput is approximately 24 seconds per image.
+
+[2026-09-02 20:15] Increase Qwen3.5 caption batch size and make CUDA placement explicit
+
+Request summary:
+- Confirm whether the Qwen3.5 run is actually CPU-offloaded.
+- Increase the caption batch size modestly to reduce the approximately 4.6-day estimate.
+
+Implementation steps:
+1. Stop only the active Qwen3.5 caption process, preserving its 125 generated records.
+2. Set the maintained caption configuration to batch size 4 and `device_map: null`.
+3. Move the loaded caption model to the selected CUDA device when no device map is configured.
+4. Run a batch-4 smoke test and inspect memory/throughput.
+5. Resume the versioned full JSONL, relying on existing-path skipping for already generated records.
+
+Feature list:
+- Explicit full-CUDA placement for the small Qwen3.5 model.
+- Batch-size-4 caption generation.
+
+Function/interface contracts:
+- `device_map: null` means load normally and explicitly move the model to `device`.
+- `device_map: auto` remains available for larger multimodal models such as Gemma.
+- Existing versioned caption files remain append-only/resumable.
+
+Edge cases:
+- Batch size 4 must fit alongside the active diffusionregpose process.
+- If the smoke test OOMs, revert only the batch override to 1 while retaining explicit CUDA placement.
+- The first batch-4 smoke was blocked at Pydantic validation because `device_map` was typed as non-nullable; the local config model now accepts `str | None`.
+
+Tests to add:
+- Batch-4 smoke test must generate one JSONL record and exit successfully.
+
+TODOs:
+- Measure the new full-run throughput and update the ETA.
+
+Notes / risks / suggestions:
+- `device_map=auto` was not causing meaningful offloading: Qwen3.5 occupied approximately 2 GB GPU memory while the competing process occupied approximately 12.6 GB.
+
+README updates:
+- Update the caption configuration description after the batch-4 smoke test is verified.
+
+Verification status:
+- The initial batch-4 full run stopped after 129 records on variable-length tokenizer input; all 129 records pass JSON parsing, unique-path, existing-path, non-empty-caption, and label/path consistency checks.
+- Mixed-label batch-4 smoke passed with 16/16 records and exited cleanly after explicit padding was added.
+- The full Qwen3.5 run has been resumed in tmux `gemma_caption_smoke`; it is loading the model and will continue from the 129 preserved records.
+- README now records Qwen3.5, batch size 4, and explicit CUDA placement.
+
+Completion status:
+- Full Qwen3.5 captioning completed successfully with 16,540 train and 200 test records (16,740 total).
+- Final validation passed: 16,740 unique existing image paths, zero JSON parse errors, zero empty captions, and exact expected schema.
+- Provenance records `Qwen/Qwen3.5-0.8B`, batch size 4, CUDA placement, and the train/test split configuration.
+
+[2026-09-03] Rebuild T5 text artifacts from Qwen3.5 captions
+
+Request summary:
+- Use the completed Qwen3.5 captions as input for the downstream text-alignment artifacts.
+- Keep the maintained target as `t5_base`; Qwen is only the caption generator.
+- Preserve old caption-derived caches and statistics through versioned output directories.
+
+Implementation steps:
+1. Configure text embedding generation for `t5_base`, Qwen3.5 captions, and `tensorcache/qwen3.5-0.8b`.
+2. Configure text statistics generation for `t5_base`, the same cache, and `statistics/qwen3.5-0.8b`.
+3. Point `train_eeg_align_text` at the versioned cache and statistics paths.
+4. Generate embeddings and statistics sequentially in tmux, with the environment activated by the agent.
+5. Validate all train/test captions, embeddings, dimensions, and statistics before any text-alignment training.
+
+Feature list:
+- Versioned T5 embeddings derived from Qwen3.5 captions.
+- Matching versioned T5 statistics.
+- Text-alignment config provenance tied to those artifacts.
+
+Function/interface contracts:
+- Caption path: `data/things-eeg2/captions/qwen3.5-0.8b.jsonl`.
+- Embedding cache: `tensorcache/qwen3.5-0.8b`.
+- Statistics root: `statistics/qwen3.5-0.8b`.
+- Alignment target: `t5_base`, 768 dimensions.
+
+Edge cases:
+- Do not overwrite old `tensorcache` or `statistics` artifacts.
+- Validate that every image path has exactly one caption and one T5 embedding.
+- Confirm the statistics generator consumes the versioned cache and writes both train/test files.
+
+Tests to add:
+- Run the existing artifact validator against the Qwen3.5 caption file and versioned T5 cache.
+- Check representative embedding shapes and statistics files before training.
+
+TODOs:
+- Execute embedding generation and statistics generation.
+- Decide whether to run a text-alignment training smoke test after validation.
+
+Implementation note:
+- The first embedding launch failed before execution because `generate_text_embeddings.py` imported the full EEG/diffusion dataset union, triggering a `diffusers`/Transformers `HybridCache` incompatibility. The script now enumerates configured image paths directly, matching the caption generator's lightweight path.
+- The statistics launch exposed the same union import through `EEGDataModule`; `generate_stats.py` now uses the concrete `ThingsEEG2DatasetConfig` for the maintained Things-EEG2 text-statistics command while still loading EEG and cached embeddings.
+- The retry also exposed an image-side encoder registry import in `generate_stats.py`; replaced it with the text-only `TEXT_ENCODER_DIM` registry, leaving the stats algorithm unchanged.
+
+README updates:
+- Document the Qwen3.5 caption input and versioned T5 cache/statistics paths.
+
+Validation note:
+- The artifact validator API accepted a model subset but its CLI did not; added `--models` so versioned T5-only artifacts can be validated without requiring unrelated legacy caches.
+
+Completion status:
+- Generated 16,540 train and 200 test `t5_base` embeddings from the Qwen3.5 captions under `tensorcache/qwen3.5-0.8b`.
+- Generated matching train/test EEG and T5 statistics under `statistics/qwen3.5-0.8b`.
+- Validator passed with `--models t5_base --check-tensor-shapes`: 16,740 captions, zero missing paths/embeddings, and matching tensor/statistics dimensions.
+
+Text-alignment smoke status:
+- The first training config composition is blocked before Hydra execution because the installed Qwen3.5-compatible Transformers development build does not export `HybridCache`, while the repository's locked `peft 0.17.1` and Diffusers import path require it.
+- No training process was started and no text-alignment experiment artifacts were created.
+- Resolution requires either a compatible package set/isolated training environment or a deliberate import isolation refactor for the alignment model; do not change package versions implicitly.
+
+Update:
+- Upgraded PEFT to `0.20.0`; Diffusers and training-module imports now succeed.
+- The first smoke after that upgrade exposed a duplicate `trainer` YAML mapping introduced while adding the versioned cache path. Merged `trainer.cache_dir` into the existing block; no training artifacts were created.
+
+Requirements update:
+- Declared `peft>=0.20.0` and pinned Transformers to the verified Qwen3.5-compatible commit `dd35e077078d9aebbdbc8f64a138a5951aa79ffc` so a fresh environment does not recreate the `HybridCache` conflict.
+
+Completion status:
+- Text-alignment smoke training completed for one epoch on 1% of the training data with batch size 32.
+- Separate evaluation loaded `last.ckpt` and wrote `test_metrics.csv` plus `evaluation_config.yaml`.
+- Smoke metrics: `brain_acc=0.01`, `image_acc=0.0`, `sim=0.0486275`.
+- `uv lock --check` passed; training imports pass with PEFT 0.20.0, Transformers 5.16.0.dev0, and Diffusers 0.35.2.
+- Focused text-artifact tests pass: 2 tests.
+
+Follow-up:
+- The full batch-4 run stopped on a mixed-label batch because the Qwen3.5 chat-template tokenizer received variable-length text without explicit padding. Added `padding=True` at the shared multimodal processor boundary; the 129 valid records already written remain preserved.
+
+README updates:
+- Update the current regeneration model and output path after the Qwen3.5 smoke test is verified.
+[2026-09-04 00:00] Launch full Qwen3.5-caption T5 EEG alignment training
+
+Request summary:
+- Train the maintained text-alignment experiment now that Qwen3.5 captions, T5 embeddings, and statistics have been generated and validated.
+- Use the pure alignment contract: no EEG augmentation, symmetric InfoNCE, no MSE, and accuracy-based checkpoint selection.
+
+Implementation steps:
+- Update `src/brain_image/configs/train_eeg_align_text.yaml` to inherit the no-augmentation preset, explicitly configure pure symmetric InfoNCE, use batch size 32 and four workers, and monitor `val/align/top1` in max mode.
+- Compose the config and inspect the effective values before launch.
+- Launch the full 200-epoch run sequentially in a new tmux session with `BRAIN_IMAGE_TENSORCACHE_MAXSIZE=1024`, the environment activated by the agent, and W&B disabled.
+- After training completes, run `scripts/evaluation/test_eeg.py` against the best `val/align/top1` checkpoint and record both `brain_acc` and `image_acc` from the CSV.
+
+Feature list:
+- Reproducible text-alignment training run using versioned Qwen3.5-derived T5 artifacts.
+- Best-checkpoint selection by validation alignment top-1 accuracy.
+- Training TensorBoard and separate evaluation CSV/YAML artifacts.
+
+Function/interface contracts:
+- Config: `train_eeg_align_text`.
+- Target encoder: `t5_base`.
+- Cache: `tensorcache/qwen3.5-0.8b`; statistics: `statistics/qwen3.5-0.8b`.
+- Evaluation selection: `--checkpoint_selection max --checkpoint_metric val/align/top1`.
+
+Edge cases:
+- A full run is long; interruption must leave resumable Lightning artifacts.
+- Validation checkpoints are created every five epochs, so the one-epoch smoke's `last.ckpt` is not representative of best-checkpoint selection.
+- Text-alignment evaluation must preserve both retrieval directions and write CSV/YAML without adding TensorBoard output.
+
+Tests to add:
+- Validate the composed config has no augmentation, no MSE, InfoNCE, batch size 32, four workers, and max accuracy checkpointing.
+- Run the existing text-artifact validator before training.
+- Run the separate evaluator after training and verify the expected CSV columns.
+
+TODOs:
+- Record the final run path, selected checkpoint, and measured metrics after completion.
+
+Status:
+- Effective config verified and full training launched sequentially in tmux session `eeg_text_full`.
+- Run root: `experiments/eeg_alignment_text/20260904_002351`.
+- Training completed by early stopping at epoch 129.
+- Best checkpoint selected by `val/align/top1`: `epoch_0029-val_align_top1_0.5250.ckpt`.
+- Separate evaluation completed and wrote `test_metrics.csv` and `evaluation_config.yaml`.
+- Test metrics: `brain_acc=0.215`, `image_acc=0.170`, `sim=0.21608`.
+
+Notes / risks / suggestions:
+- The full run is intentionally sequential and isolated in tmux; no parallel sweep is being launched.
+- The missing `docs/project.md` and `docs/architecture.md` remain a repository documentation debt from the earlier handover work.
+
+README updates:
+- Add or correct the maintained text-alignment launch/evaluation command after the run path is known.
+[2026-09-04 09:00] Document text-target alignment progress
+
+Request summary:
+- Write up the completed Qwen3.5-caption to T5 text-target alignment progress in a clean standalone report notebook under `notebooks/`.
+- Make the report concrete and reproducible, with the maintained objective, artifact provenance, training/evaluation paths, and measured metrics.
+
+Implementation steps:
+- Inspect the current text-alignment run metadata, effective configuration, training metrics, evaluation CSV, and validated caption/cache/statistics artifacts.
+- Create an executed notebook, likely `notebooks/text_alignment_report.ipynb`, with sections for pipeline, protocol, artifact validation, run results, and conclusions.
+- Include links to the maintained config, training/evaluation scripts, artifact validator, and saved CSV/YAML outputs.
+- Execute the notebook against the saved artifacts and verify that its tables and plots render without requiring GPU training.
+- Link the notebook from README if that is not already present.
+
+Feature list:
+- Artifact-backed text-alignment progress report.
+- Reproducible current-run metric table with `brain_acc`, `image_acc`, and similarity.
+- Explicit statement of the intended pure-InfoNCE protocol.
+
+Function/interface contracts:
+- Current run: `experiments/eeg_alignment_text/20260904_002351/train_eeg-20260904_002425/version_0`.
+- Current evaluation source: `test/test_metrics.csv` and `test/evaluation_config.yaml`.
+- Notebook must be executable with repository artifacts only and must not launch training or require GPU.
+
+Edge cases:
+- Evaluation is stored as CSV/YAML and must be read without rewriting the saved artifacts.
+- The report must not imply that any reconstruction metric is part of this alignment-only result.
+
+Tests to add:
+- Execute the notebook with `jupyter nbconvert --execute` or the repository's available notebook runner.
+- Validate that the report contains the expected current metrics and historical T5 comparison row.
+
+TODOs:
+- No remaining implementation TODOs for this report.
+
+Completion status:
+- Created and executed `notebooks/text_alignment_report.ipynb` against the saved caption, cache, statistics, checkpoint, and CSV/YAML evaluation artifacts.
+- The notebook contains seven cells, four executed code cells, and six rendered outputs; no GPU work was performed.
+- README now links the standalone report and documents the current Qwen3.5 caption path.
+
+Notes / risks / suggestions:
+- The current result is `brain_acc=0.215`, `image_acc=0.170`, `sim=0.21608`.
+
+README updates:
+- Add a link and one-sentence description for the text-alignment progress report.
+[2026-09-04 10:00] Run joint EEG alignment and diffusion-prior experiment
+
+Request summary:
+- Recreate the joint alignment-plus-reconstruction experiment using the existing `train_eeg_alignprior.yaml` path.
+- Use the finished EEG alignment model as the initialization where the existing configuration supports it, then train and evaluate the joint model sequentially.
+
+Implementation steps:
+- Audit `train_eeg_alignprior.yaml`, `train_eeg.py`, `EEGAlignmentModel`, and `test_eeg.py` to verify the effective alignment target, prior target/statistics, loss factors, initialization checkpoint, validation cadence, and checkpoint monitor.
+- Confirm the intended comparison scope: joint alignment and prior training, with reconstruction validation kept separate/cheap during training and full reconstruction metrics produced by evaluation.
+- Add or update only the dedicated joint local launcher if the existing prior launcher cannot express the joint config; keep environment activation outside the launcher.
+- Run a one-epoch or minimal-data smoke test with batch size 32, four workers, cache maxsize 1024, W&B disabled, and explicit checkpoint initialization. Verify checkpoint creation and CSV/YAML evaluation.
+- Launch the full joint run sequentially in a new tmux session after the smoke passes.
+- Evaluate the best checkpoint using the configured validation prior metric and record alignment (`brain_acc`, `image_acc`, `sim`) plus reconstruction metrics.
+- Write a standalone report notebook and update README with the exact command, artifact paths, and measured results.
+
+Feature list:
+- Reproducible joint alignment/prior training path.
+- Explicit reuse of the finished EEG alignment checkpoint.
+- Separate training TensorBoard and evaluation CSV/YAML/reconstruction artifacts.
+- Artifact-backed report comparing joint results with the already documented prior-only baseline.
+
+Function/interface contracts:
+- Config: `src/brain_image/configs/train_eeg_alignprior.yaml`.
+- Training entrypoint: `scripts/training/train_eeg.py` unless the audit proves a dedicated wrapper is required.
+- Evaluation entrypoint: `scripts/evaluation/test_eeg.py`.
+- Training defaults: batch size 32, four workers, cache maxsize 1024, W&B disabled for local execution.
+- Evaluation must select the best checkpoint using the config's monitored validation metric, not `last.ckpt`.
+
+Edge cases:
+- The joint config may not initialize from the finished alignment checkpoint unless `checkpoint_path`/`eeg_encoder_path` is explicitly wired.
+- Alignment and prior targets require distinct encoder/statistics keys; changing either target requires matching caches and stats.
+- The joint objective may include alignment, prior prediction, and prior simulation losses; record all effective factors rather than assuming prior-only behavior.
+- Full reconstruction evaluation is expensive and may require optional metric networks; a smoke may use explicit reduced metrics/reconstruction indices.
+- An interrupted tmux run must leave its checkpoint and TensorBoard artifacts resumable.
+
+Tests to add:
+- Config-composition assertions for joint `do_align`/`do_recon`, initialization checkpoint, target/statistics keys, batch/worker settings, and checkpoint monitor.
+- Minimal smoke verification that the selected alignment checkpoint loads and both alignment/prior paths execute.
+- Regression check that evaluation selects the intended best checkpoint and writes expected CSV columns.
+
+TODOs:
+- Complete the config audit and decide whether a small config/launcher correction is required before the smoke.
+- Record the final run, selected checkpoint, and measured metrics after completion.
+
+Notes / risks / suggestions:
+- This is a new joint experiment, not a re-run of the prior-only baseline.
+- Preserve the existing prior-only artifacts and report unchanged.
+- The repository has no `docs/project.md` or `docs/architecture.md`; do not block the experiment on that unrelated documentation debt.
+
+README updates:
+- Add the joint launch/evaluation command and link its standalone report after verification.

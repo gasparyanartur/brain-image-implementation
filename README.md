@@ -19,7 +19,7 @@ We have two pipelines: The one from [Reconstructing the Mind's Eye](https://gith
 
 **CoMM Model**: We tried generating a CLIP-latent using our diffusion prior, and jointly encoding that with EEG to get a multimodal representation. We then tried to decode the images using this representation, but it didn't work better than just using the EEG latents, so we have not focused on this track. This part of the code should mostly be working. See `src/brain_image/model/comm_alignment.py` for the model code, and `src/brain_image/configs/train_comm.yaml` for the training config. 
 
-**Text Alignment**: We tried generating text from the dataset using QWEN and aligning the EEG latents to that instead of the image latents. This didn't work much better than the image alignment. The code currently works as a simple plug-in to the alignment pipeline. See `src/brain_image/configs/train_eeg_align_text.yaml` for the training config.
+**Text Alignment**: We generate captions with Qwen3.5, embed them with frozen T5, and align EEG latents to those text embeddings using pure symmetric InfoNCE. The completed run and its artifacts are documented in [`notebooks/text_alignment_report.ipynb`](notebooks/text_alignment_report.ipynb). See `src/brain_image/configs/train_eeg_align_text.yaml` for the training config.
 
 **Low Level Pipeline**: We implement a low-level pipeline which takes the EEG latent and trues to directly reconstruct a blurry image. This is then passed through the frozen Stable Diffusion VAE-decoder to get an initial image for the img-to-img. This code is currently out of date, and needs to be fixed and cleaned up. Especially the training script is completely incompatible with the current codebase, and needs to be rewritten. See `src/brain_image/model/low_level.py` for the model code, and `src/brain_image/configs/train_low_level.yaml` for the training config.
 
@@ -47,15 +47,15 @@ The launcher uses the alignment-specific config, trains only the EEG encoder, an
 
 ### 1. Directory structure
 
-The project expects several large-data directories to exist at the repo root. If you are working on a cluster, symlink these to your storage volume — they will hold datasets, cached tensors, model weights, and logs that are too large to keep in the repo.
+The project expects several large-data directories to exist at the repo root. Large outputs should live on the storage volume, with compatibility symlinks at the paths expected by the code. In the current handover environment, experiment logs and outputs are stored at `/storage/logs/brain-image-implementation` and `/storage/experiments/brain-image-implementation`.
 
 ```bash
 ln -s /path/to/storage/data        data
 ln -s /path/to/storage/tensorcache tensorcache
-ln -s /path/to/storage/logs        logs
+ln -s /storage/logs/brain-image-implementation logs
 ln -s /path/to/storage/models      models
 ln -s /path/to/storage/.cache      .cache
-ln -s /path/to/storage/experiments experiments
+ln -s /storage/experiments/brain-image-implementation experiments
 ln -s /path/to/storage/.cache/huggingface/hub ~/.cache/huggingface/
 mkdir -p logs/slurm
 ```
@@ -219,9 +219,11 @@ python scripts/data/generate_text_captions_local.py --config-name=generate_text_
 SBATCH_GROUP=gpu ssub generate_captions python scripts/data/generate_text_captions_local.py --config-name=generate_text_captions_local
 ```
 
-Captions are written to `data/things-eeg2/captions/local.jsonl` (one JSON line per image with `path` and `caption` fields). Already-captioned images are skipped on re-runs. The model name and other settings are in `src/brain_image/configs/generate_text_captions_local.yaml`.
+Captions are written to `data/things-eeg2/captions/qwen3.5-0.8b.jsonl` (one JSON line per image with `path` and `caption` fields). Already-captioned images are skipped on re-runs. The model name and other settings are in `src/brain_image/configs/generate_text_captions_local.yaml`.
 
-Qwen is only the caption generator. The caption file does not contain Qwen model/prompt provenance per record, so the current config is the source of truth for those settings. The verified artifact audit is in [`notebooks/qwen_text_embedding_report.ipynb`](notebooks/qwen_text_embedding_report.ipynb).
+The caption generator is configurable; the current regeneration uses the multimodal instruction-tuned `Qwen/Qwen3.5-0.8B` checkpoint. The local generation config uses batch size 4 and explicit CUDA placement (`device_map: null`). The matching YAML sidecar records model/prompt provenance for regenerated artifacts. The verified artifact audit is in [`notebooks/qwen_text_embedding_report.ipynb`](notebooks/qwen_text_embedding_report.ipynb). Older Gemma and Qwen caption outputs remain versioned separately.
+
+Hugging Face caches should point to `/storage`: `~/.bashrc` exports `HF_HOME=/storage/huggingface`, `HF_HUB_CACHE=/storage/huggingface/hub`, and `TRANSFORMERS_CACHE=/storage/huggingface/hub`. Start a new shell or run `source ~/.bashrc` before launching model downloads.
 
 ### 8. Generate text embeddings (optional)
 
@@ -230,23 +232,34 @@ Once captions exist, encode them with one or more text encoders and cache the re
 ```bash
 # Local (all encoders in the config):
 python scripts/data/generate_text_embeddings.py --config-name=generate_text_embeddings
-# or for specific encoders only:
-python scripts/data/generate_text_embeddings.py model_names=[t5_base]
+# The maintained default uses Qwen3.5 captions and writes versioned T5 caches.
+# For the maintained text-alignment target, this is equivalent to:
+python scripts/data/generate_text_embeddings.py model_names=[t5_base] \
+  caption_path=data/things-eeg2/captions/qwen3.5-0.8b.jsonl \
+  cache_dir=tensorcache/qwen3.5-0.8b
 
 # SLURM:
 SBATCH_GROUP=gpu ssub generate_text_embeddings python scripts/data/generate_text_embeddings.py --config-name=generate_text_embeddings
 ```
 
-The default encoder list and caption path are in `src/brain_image/configs/generate_text_embeddings.yaml`.
+The default encoder list, caption path, and versioned cache directory are in `src/brain_image/configs/generate_text_embeddings.yaml`.
 
-For the maintained Text Alignment config, `t5_base` is the actual target embedding (`768` dimensions), not a Qwen embedding. Validate the complete caption/cache/statistics contract with:
+For the maintained Text Alignment config, `t5_base` is the actual target embedding (`768` dimensions), not a Qwen embedding. Generate matching statistics with:
+
+```bash
+python scripts/data/generate_stats.py --config-name=generate_text_stats
+```
+
+Then validate the complete caption/cache/statistics contract with:
 
 ```bash
 source .venv/bin/activate
 python scripts/data/validate_text_artifacts.py --check-tensor-shapes
 ```
 
-The current verified artifacts contain 16,540 train and 200 test records for each of `t5_base`, `clip_vitl14_text`, and `gemma_embedding_300m`. The Qwen/text-embedding artifact report is [`notebooks/qwen_text_embedding_report.ipynb`](notebooks/qwen_text_embedding_report.ipynb).
+The current Qwen3.5 caption artifact contains 16,540 train and 200 test records. The Qwen/text-embedding artifact report is [`notebooks/qwen_text_embedding_report.ipynb`](notebooks/qwen_text_embedding_report.ipynb).
+
+The completed text-target alignment run is reported in [`notebooks/text_alignment_report.ipynb`](notebooks/text_alignment_report.ipynb). It records the exact training protocol, artifact checks, and CSV metrics.
 
 ### 9. Generate statistics
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import hydra
 import torch
@@ -13,8 +13,7 @@ from omegaconf import DictConfig
 from PIL import Image
 
 from brain_image.configs import BaseConfig, GlobalConfig, get_device_str
-from brain_image.data.datamodule import EEGDataModule
-from brain_image.data.dataset.union import EEGDatasetConfigType
+from brain_image.data.io import get_image_paths
 from brain_image.utils import setup
 
 
@@ -37,7 +36,7 @@ def load_existing_paths(caption_path: Path) -> set[str]:
 
 
 class LocalCaptionConfig(BaseConfig):
-    dataset: EEGDatasetConfigType
+    dataset: Any
     splits: list[Literal["train", "test"]] = ["train", "test"]
     caption_path: Path = Path("data/things-eeg2/captions/local.jsonl")
     provenance_path: Path | None = None
@@ -45,6 +44,7 @@ class LocalCaptionConfig(BaseConfig):
     batch_size: int = 8
     dtype: str = "bfloat16"
     device: str | None = None
+    device_map: str | None = "auto"
     system_prompt: str = (
         "You are given an image. Generate a single, detailed caption for the image. "
         "The caption must be visually precise, descriptive, and neutral. "
@@ -56,21 +56,18 @@ class LocalCaptionConfig(BaseConfig):
 
 
 def run_captioning(
-    dataset,
+    image_paths: list[Path],
     config: LocalCaptionConfig,
     split: str,
     model,
     processor,
     device: str,
 ) -> None:
-    from qwen_vl_utils import process_vision_info
-
     existing_paths = load_existing_paths(config.caption_path)
-    img_paths = dataset.get_image_paths()
-    pending_paths = [p for p in img_paths if str(p) not in existing_paths]
+    pending_paths = [p for p in image_paths if str(p) not in existing_paths]
 
     if not pending_paths:
-        logging.info(f"[{split}] All {len(img_paths)} images already captioned, skipping.")
+        logging.info(f"[{split}] All {len(image_paths)} images already captioned, skipping.")
         return
 
     logging.info(f"[{split}] Captioning {len(pending_paths)} images ({len(existing_paths)} already done)")
@@ -89,7 +86,6 @@ def run_captioning(
             batch_paths = pending_paths[i : i + config.batch_size]
             pbar.set_postfix(imgs=f"{min(i + config.batch_size, len(pending_paths))}/{len(pending_paths)}", label=extract_label(batch_paths[0]))
 
-            # Build per-image message lists
             batch_messages = [
                 [
                     {"role": "system", "content": config.system_prompt},
@@ -104,23 +100,36 @@ def run_captioning(
                 for p in batch_paths
             ]
 
-            texts = [processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True) for msgs in batch_messages]
+            if config.model_name.startswith(("google/gemma-4", "Qwen/Qwen3.5")):
+                inputs = processor.apply_chat_template(
+                    batch_messages,
+                    tokenize=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                    padding=True,
+                    add_generation_prompt=True,
+                    enable_thinking=False,
+                ).to(model.device)
+                input_lengths = inputs["input_ids"].ne(processor.tokenizer.pad_token_id).sum(dim=-1)
+                generated_ids = model.generate(**inputs, max_new_tokens=config.max_new_tokens)
+                generated_ids_trimmed = [out_ids[input_length:] for input_length, out_ids in zip(input_lengths, generated_ids)]
+                output_texts = [processor.decode(ids, skip_special_tokens=True).strip() for ids in generated_ids_trimmed]
+            else:
+                from qwen_vl_utils import process_vision_info
 
-            # Flatten messages so process_vision_info can collect all images
-            flat_messages = [msg for msgs in batch_messages for msg in msgs]
-            image_inputs, video_inputs = process_vision_info(flat_messages)
-
-            inputs = processor(
-                text=texts,
-                images=image_inputs,
-                videos=video_inputs if video_inputs else None,
-                padding=True,
-                return_tensors="pt",
-            ).to(device)
-
-            generated_ids = model.generate(**inputs, max_new_tokens=config.max_new_tokens)
-            generated_ids_trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)]
-            output_texts = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                texts = [processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True) for msgs in batch_messages]
+                flat_messages = [msg for msgs in batch_messages for msg in msgs]
+                image_inputs, video_inputs = process_vision_info(flat_messages)
+                inputs = processor(
+                    text=texts,
+                    images=image_inputs,
+                    videos=video_inputs if video_inputs else None,
+                    padding=True,
+                    return_tensors="pt",
+                ).to(device)
+                generated_ids = model.generate(**inputs, max_new_tokens=config.max_new_tokens)
+                generated_ids_trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)]
+                output_texts = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)
 
             for path, caption in zip(batch_paths, output_texts):
                 entry = {"path": str(path), "split": split, "label": extract_label(path), "caption": caption.strip()}
@@ -130,7 +139,7 @@ def run_captioning(
 
 
 def generate_local_captions(config: LocalCaptionConfig) -> None:
-    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    from transformers import AutoProcessor
 
     device = config.device or get_device_str()
     provenance_path = config.provenance_path or config.caption_path.with_suffix(".yaml")
@@ -152,25 +161,38 @@ def generate_local_captions(config: LocalCaptionConfig) -> None:
     dtype = dtype_map[config.dtype]
 
     logging.info(f"Loading model {config.model_name} on {device} ({config.dtype})")
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        config.model_name,
-        torch_dtype=dtype,
-        device_map=device,
-    )
+    if config.model_name.startswith(("google/gemma-4", "Qwen/Qwen3.5")):
+        from transformers import AutoModelForMultimodalLM
+
+        model = AutoModelForMultimodalLM.from_pretrained(
+            config.model_name,
+            dtype="auto",
+            device_map=config.device_map,
+        )
+    else:
+        from transformers import Qwen2_5_VLForConditionalGeneration
+
+        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            config.model_name,
+            torch_dtype=dtype,
+            device_map=config.device_map,
+        )
+    if config.device_map is None:
+        model = model.to(device)
     model.eval()
     processor = AutoProcessor.from_pretrained(config.model_name)
-    processor.tokenizer.padding_side = "left"  # Required for correct batch inference with decoder-only models
+    if hasattr(processor, "tokenizer"):
+        processor.tokenizer.padding_side = "left"  # Required for correct batch inference with decoder-only models
 
     for split in tqdm.tqdm(config.splits, desc="Splits", unit="split"):
         logging.info(f"Processing split: {split}")
-        dataset = EEGDataModule(config.dataset).create_dataset(
-            split,
-            preload_cache=False,
-            embeddings_to_compute_stats=[],
-            compute_stats=False,
-        )
-        logging.info(f"Dataset for split '{split}' has {len(dataset)} samples.")
-        run_captioning(dataset, config, split, model, processor, device)
+        image_dir = Path(config.dataset["data_path"]) / config.dataset.get("img_dir", "imgs")
+        image_paths = get_image_paths(image_dir, split, extensions=(".jpg",))
+        limit_size = config.dataset[f"limit_{split}_size"]
+        if limit_size < 1.0:
+            image_paths = image_paths[: max(1, int(len(image_paths) * limit_size))]
+        logging.info(f"Dataset for split '{split}' has {len(image_paths)} images.")
+        run_captioning(image_paths, config, split, model, processor, device)
 
 
 @hydra.main(config_path=str(GlobalConfig.CONFIGS_DIR), config_name="generate_text_captions_local", version_base=None)

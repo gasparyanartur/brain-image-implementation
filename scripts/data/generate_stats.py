@@ -13,11 +13,9 @@ import tqdm
 
 from brain_image.configs import BaseConfig, GlobalConfig
 from brain_image.data.data import get_from_batch
-from brain_image.data.datamodule import EEGDataModule
-from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
-from brain_image.data.dataset.union import EEGDatasetConfigType
+from brain_image.data.dataset.things_eeg2_dataset import ThingsEEG2DatasetConfig
 from brain_image.data.tensorcache import TensorCache
-from brain_image.model.encoder.encoder import ALIGN_ENCODER_DIM, AlignEncoderName
+from brain_image.model.encoder.text_encoder.union import TEXT_ENCODER_DIM, TextEncoderName
 from brain_image.stats import IterativeStats
 from brain_image.utils import setup
 
@@ -25,8 +23,8 @@ from torch import Tensor
 
 
 class GetDataInformationConfig(BaseConfig):
-    dataset: EEGDatasetConfigType
-    model_names: list[AlignEncoderName] = ["clip_vith14", "aligned_synclr_vitb16", "unaligned_synclr_vitb16"]
+    dataset: dict
+    model_names: list[TextEncoderName] = ["t5_base"]
     batch_size: int = 512
     splits: list[Literal["train", "test"]] = ["train", "test"]
     cache_dir: Path = Path("tensorcache")
@@ -36,14 +34,10 @@ class GetDataInformationConfig(BaseConfig):
 def get_data_information(config: GetDataInformationConfig):
     cache = TensorCache(config.cache_dir)
 
-    # Initialise without embeddings so the module doesn't try to load stats
-    # that don't exist yet (we are the ones generating them).
-    data = EEGDataModule(config.dataset, tensor_cache=cache)
+    dataset_config = ThingsEEG2DatasetConfig(**config.dataset)
 
     for split in config.splits:
-        # Bypass EEGDataModule.create_dataset to avoid the duplicate-kwarg issue
-        # and to pass compute_stats=False (stats don't exist yet).
-        dataset = config.dataset.create_dataset(
+        dataset = dataset_config.create_dataset(
             split,
             tensor_cache=cache,
             embeddings_key_to_name={model_name: model_name for model_name in config.model_names},
@@ -56,10 +50,10 @@ def get_data_information(config: GetDataInformationConfig):
             shuffle=False,
             num_workers=min(8, __import__("multiprocessing").cpu_count()),
         )
-        eeg_shape = (data.config.num_channels, data.config.time_length)
+        eeg_shape = (dataset_config.num_channels, dataset_config.time_length)
 
         eeg_stats = IterativeStats(eeg_shape)
-        embeddings_stats = {model_name: IterativeStats((ALIGN_ENCODER_DIM[model_name])) for model_name in config.model_names}
+        embeddings_stats = {model_name: IterativeStats((TEXT_ENCODER_DIM[model_name])) for model_name in config.model_names}
 
         for batch in tqdm.tqdm(dataloader, desc=f"Processing {split} split"):
             eeg = get_from_batch("eeg_data", batch, Tensor)
@@ -68,7 +62,7 @@ def get_data_information(config: GetDataInformationConfig):
                 emb = get_from_batch(model_name, batch, Tensor)
                 embeddings_stats[model_name].update(emb)
 
-        stat_dir = config.stat_path / "datasets" / data.config.dataset / split
+        stat_dir = config.stat_path / "datasets" / dataset_config.dataset / split
         stat_dir.mkdir(parents=True, exist_ok=True)
 
         eeg_stats.save_to_path(stat_dir / "eeg")

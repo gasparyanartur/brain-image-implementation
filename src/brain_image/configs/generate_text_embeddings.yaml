@@ -5,10 +5,8 @@ defaults:
 
 model_names:
   - t5_base
-  - clip_vitl14_text
-  - gemma_embedding_300m
 
-caption_path: data/things-eeg2/captions/local.jsonl
+caption_path: data/things-eeg2/captions/qwen3.5-0.8b.jsonl
 
 splits:
   - train
@@ -18,7 +16,7 @@ batch_size: 256
 dtype: float32
 device: null
 compile: false
-cache_dir: tensorcache
+cache_dir: tensorcache/qwen3.5-0.8b
 
 dataset:
   subs: [1]
