@@ -458,7 +458,7 @@ requires-dist = [
     { name = "seaborn" },
     { name = "sentence-transformers" },
     { name = "sentencepiece" },
-    { name = "setuptools" },
+    { name = "setuptools", specifier = "<81" },
     { name = "tensorboard" },
     { name = "torch" },
     { name = "torch-geometric" },

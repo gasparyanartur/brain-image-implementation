@@ -4,7 +4,7 @@ import hydra
 from omegaconf import DictConfig
 from brain_image.configs import BaseConfig
 from brain_image.model.low_level import LowLevelConfig, LowLevelModule
-from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
+from brain_image.data.dataset.union import EEGDatasetConfigType
 
 from pathlib import Path
 
@@ -14,7 +14,7 @@ from brain_image.utils import flatten_configs, setup
 
 
 class TrainLowLevelConfig(BaseConfig):
-    dataset: EEGDatasetConfig 
+    dataset: EEGDatasetConfigType
     model: LowLevelConfig 
     trainer: TrainerConfig 
 
@@ -58,11 +58,7 @@ def main(cfg: DictConfig):
         trainer.load_checkpoint(checkpoint_path)
 
     trainer.train()
-    test_metrics = trainer.test()
-
-    logging.info(f"Finished training with test metrics:")
-    for key, value in test_metrics.items():
-        logging.info(f"  {key}: {value}")
+    logging.info("Finished training. Run scripts/evaluation/test_low_level.py on the selected checkpoint.")
 
 
 if __name__ == "__main__":

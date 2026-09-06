@@ -72,7 +72,7 @@ def generate_all_embeddings(config: EmbeddingGenerationConfig) -> None:
     )
 
     datasets = {
-        split:  dataset_module.create_dataset(split, preload_cache=False, embeddings_to_compute_stats=[], compute_stats=False)
+        split: dataset_module.create_dataset(split, preload_cache=False, compute_stats=False)
         for split in config.splits
     }
 

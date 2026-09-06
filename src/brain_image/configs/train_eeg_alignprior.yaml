@@ -1,5 +1,6 @@
 defaults:
   - train_eeg
+  - override augmentation: none
   - _self_
 
 model:
@@ -7,7 +8,14 @@ model:
   do_recon: true
   do_recon_low: false
   
-  eeg_encoder_path: null
+  # Initialize the joint model from the best maintained EEG alignment model.
+  eeg_encoder_path: experiments/eeg_alignment_sweep/20260830_231325_task4/train_eeg-20260830_231357/version_0/checkpoints/epoch_0089-val_align_top1_0.7650.ckpt
+
+  align_img_encoder: "aligned_synclr_vitb16"
+  aug_eeg: false
+  align_loss_type: infonce
+  align_loss_factor: 1.0
+  align_mse_loss_factor: 0.0
 
   encoder_lr: 1e-3
   encoder_min_lr: 1e-7
@@ -27,16 +35,24 @@ model:
   prior_warmup_epochs: 5
   prior_delay_epochs: 10
 
+  # Keep training validation focused on latent losses; reconstruction is
+  # evaluated separately by test_eeg.py.
+  skip_reconstruction: true
+  skip_eval_first_epoch: false
+
   max_epochs: 500
   #max_epochs: 150
 
   full_eval_every_epochs: 10
 
 trainer:
+  checkpoint_monitor: "eval/val/prior/pred_cos"
+  checkpoint_monitor_mode: "max"
   checkpoint_monitor_early_stop: 150
   check_val_every_n_epochs: 10
 
 dataset:
-  batch_size: 1024
-  val_batch_size: 256
-  test_batch_size: 256
+  batch_size: 32
+  val_batch_size: 32
+  test_batch_size: 32
+  num_workers: 4

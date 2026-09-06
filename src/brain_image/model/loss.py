@@ -162,11 +162,28 @@ class DreamsimLoss(nn.Module):
             x = x / 255.0
         return x
 
-    def forward(self, pred, gt):
-        pred = self._prep_latent(pred)
-        gt = self._prep_latent(gt)
+    def forward(
+        self,
+        pred: torch.Tensor,
+        gt: torch.Tensor | None = None,
+        target_embedding: torch.Tensor | None = None,
+    ):
+        if target_embedding is not None and gt is not None:
+            raise ValueError("Provide either gt images or target_embedding, not both")
+        if target_embedding is None and gt is None:
+            raise ValueError("DreamsimLoss requires gt images or target_embedding")
 
-        cos = self.dreamsim.model(pred, gt)
+        if target_embedding is not None:
+            pred = self.dreamsim.preprocess(pred)
+            pred_embedding = self.dreamsim.model.embed(pred)
+            target_embedding = target_embedding.to(
+                device=pred_embedding.device, dtype=pred_embedding.dtype
+            )
+            cos = 1 - F.cosine_similarity(pred_embedding, target_embedding, dim=-1)
+        else:
+            pred = self._prep_latent(pred)
+            gt = self._prep_latent(gt)
+            cos = self.dreamsim.model(pred, gt)
         return cos.mean()
 
 

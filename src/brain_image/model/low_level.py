@@ -4,7 +4,7 @@ from brain_image.data.datamodule import EEGDataModule
 from brain_image.data.dataset.eeg_dataset import EEGDatasetConfig
 from brain_image.data.io import batch_load_images
 from brain_image.data.tensorcache import TensorCache
-from brain_image.metrics import get_metric_clip, get_metric_ssim
+from brain_image.metrics import MetricName, evaluate_metrics
 from brain_image.model.encoder.img_encoder.union import DREAMSIM_IMAGE_ENCODER
 from brain_image.model.encoder.img_encoder.union import VAE_ENCODER, load_vae_encoder
 from brain_image.model.loss import DreamsimLoss, LPIPSLoss
@@ -14,7 +14,10 @@ from brain_image.configs import get_device
 from brain_image.utils import batchify_operation
 import logging
 import pytorch_lightning as pl
-from brain_image.model.encoder.eeg_encoder.union import create_eeg_encoder
+from brain_image.model.encoder.eeg_encoder.union import (
+    EEGEncoderConfigType,
+    create_eeg_encoder,
+)
 
 from torch import nn
 from torch.nn import functional as F
@@ -104,12 +107,16 @@ class LowLevelConfig(TrainingModuleConfig):
     low_level_min_lr: float = 1e-5
     lr_warmup_epochs: int = 1
     seed: int = 42
-    eeg_encoder: str = "atms"
+    eeg_encoder: EEGEncoderConfigType
     vae_encoder: VAE_ENCODER = "ip_sdxl_turbo"
 
     eval_batch_size: int = 32
 
     metric_log_epochs: int = 5
+    run_validation_reconstruction_metrics: bool = False
+    test_recon_metrics: list[MetricName] = [
+        "pixcorr", "ssim", "alex2", "alex5", "inceptionv3", "clip", "efficientnet", "swav"
+    ]
     highlighted_recons: list[int] | None = [
         161,  # Seaweed
         143,  # Pug
@@ -136,31 +143,44 @@ class LowLevelModule(TrainingModule):
         dataset_config: EEGDatasetConfig,
         compile: bool = False,
     ):
-        super().__init__(config)
-        self.automatic_optimization = False
-
-        self.config = config
         tensorcache = TensorCache()
         emb_map: dict[str, str | None] = {
-            "low_level_latent": self.config.vae_encoder,
+            "low_level_latent": config.vae_encoder,
             "align_img_latent": None,
             "prior_img_latent": None,
             "prior_img_latent_2": None,
+            "perceptual_target": (
+                config.perceptual_loss_model
+                if config.use_perceptual_loss
+                and config.perceptual_loss_model != "lpips"
+                else None
+            ),
         }
-        logging.info(f"Seeding everything with seed: {self.config.seed}")
-        pl.seed_everything(self.config.seed)
-
-        self.eeg_dim: int = 1024
-
-        self.data_module = EEGDataModule(
+        data_module = EEGDataModule(
             dataset_config,
             tensorcache,
             embeddings_key_to_name=emb_map,
             load_embedding_stats=[],
         )
 
+        super().__init__(config, data_module)
+        self.automatic_optimization = False
+
+        self.config = config
+        logging.info(f"Seeding everything with seed: {self.config.seed}")
+        pl.seed_everything(self.config.seed)
+
+        self.eeg_dim: int = 1024
+
+        eeg_encoder_config = self.config.eeg_encoder.model_copy(
+            update={
+                "d_channels": dataset_config.num_channels,
+                "d_time": dataset_config.time_length,
+                "d_output": self.eeg_dim,
+            }
+        )
         self.eeg_encoder = create_eeg_encoder(
-            self.config.eeg_encoder,
+            eeg_encoder_config,
             output_dim=self.eeg_dim,
         )
 
@@ -253,10 +273,16 @@ class LowLevelModule(TrainingModule):
 
         if self.config.use_perceptual_loss:
             assert self.perceptual_loss is not None
-            img_paths = batch["img_path"]
-            target_imgs = batch_load_images(img_paths).to(device)
             pred_imgs = self.vae_encoder.decode(low_level_latent)
-            perceptual_loss = self.perceptual_loss(pred_imgs, target_imgs)
+            target_embedding = batch.get("perceptual_target")
+            if target_embedding is not None:
+                perceptual_loss = self.perceptual_loss(
+                    pred_imgs, target_embedding=target_embedding
+                )
+            else:
+                img_paths = batch["img_path"]
+                target_imgs = batch_load_images(img_paths).to(device)
+                perceptual_loss = self.perceptual_loss(pred_imgs, target_imgs)
             losses["perceptual_loss"] = perceptual_loss * self.config.perceptual_loss_factor
 
         loss = sum(losses.values())
@@ -311,7 +337,10 @@ class LowLevelModule(TrainingModule):
     def validation_step(self, batch, batch_idx):
         loss = self.run_step(batch, batch_idx, "val")
 
-        if batch_idx == self.data_module.get_num_batches("val") - 1:
+        if (
+            self.config.run_validation_reconstruction_metrics
+            and batch_idx == self.data_module.get_num_batches("val") - 1
+        ):
             if (
                 self.current_epoch > 0
                 and (self.current_epoch + 1) % self.config.metric_log_epochs == 0
@@ -334,7 +363,7 @@ class LowLevelModule(TrainingModule):
 
         prefix = "eval" if stage == "eval" else "test"
 
-        dataloader = self.val_dataloader()
+        dataloader = self.test_dataloader() if stage == "test" else self.val_dataloader()
 
         all_latents = []
         all_paths = []
@@ -366,13 +395,21 @@ class LowLevelModule(TrainingModule):
 
         with torch.no_grad():
             metrics = {
-                f"{prefix}/ssim": get_metric_ssim(
-                    all_imgs.to(device), all_gt_imgs.to(device)
-                ),
-                f"{prefix}/clip": get_metric_clip(all_imgs.to(device), all_gt_imgs.to(device)),
-                f"{prefix}/dreamsim_aligned": dreamsim_loss_aligned(all_imgs.to(device), all_gt_imgs.to(device)),
-                f"{prefix}/dreamsim_unaligned": dreamsim_loss_unaligned(all_imgs.to(device), all_gt_imgs.to(device)),
+                f"{prefix}/{name}": value
+                for name, value in evaluate_metrics(
+                    all_imgs, all_gt_imgs, self.config.test_recon_metrics
+                ).items()
             }
+            metrics.update(
+                {
+                    f"{prefix}/dreamsim_aligned": dreamsim_loss_aligned(
+                        all_imgs.to(device), all_gt_imgs.to(device)
+                    ),
+                    f"{prefix}/dreamsim_unaligned": dreamsim_loss_unaligned(
+                        all_imgs.to(device), all_gt_imgs.to(device)
+                    ),
+                }
+            )
 
         for metric_name, metric_value in metrics.items():
             self.log(metric_name, metric_value, on_step=False, on_epoch=True)

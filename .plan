@@ -1017,6 +1017,16 @@ TODOs:
 - Complete the config audit and decide whether a small config/launcher correction is required before the smoke.
 - Record the final run, selected checkpoint, and measured metrics after completion.
 
+Status:
+- Joint config corrected and composed successfully.
+- Smoke training completed with both alignment and prior paths; monitored checkpoint `epoch_0000-eval_val_prior_pred_cos_0.5996.ckpt` was created.
+- Smoke evaluation passed with SSIM-only metrics after pinning `setuptools<81` to restore `pkg_resources`; the optional CLIP metric had previously failed only because of that environment mismatch.
+- Dedicated sequential launcher added at `scripts/run_eeg_alignprior.sh`.
+- Full run launched in tmux session `eeg_alignprior_full` under `experiments/eeg_alignprior/20260904_100813`.
+- Full joint run completed successfully and the launcher evaluated the selected checkpoint.
+- Selected checkpoint: `epoch_0409-eval_val_prior_pred_cos_0.6420.ckpt`.
+- Test metrics: alignment `brain_acc=0.595`, `image_acc=0.515`, `sim=0.2642`; prior cosine `0.6420`; PixCorr `0.1811`; SSIM `0.3157`; AlexNet-2 `0.9444`; AlexNet-5 `0.9167`; Inception `0.8056`; CLIP `0.8472`; EfficientNet `0.8912`; SwAV `0.5645`.
+
 Notes / risks / suggestions:
 - This is a new joint experiment, not a re-run of the prior-only baseline.
 - Preserve the existing prior-only artifacts and report unchanged.
@@ -1024,3 +1034,467 @@ Notes / risks / suggestions:
 
 README updates:
 - Add the joint launch/evaluation command and link its standalone report after verification.
+[2026-09-04 15:00] Add joint alignment-prior results to prior report
+
+Request summary:
+- Extend the existing prior/reconstruction report notebook with the completed joint EEG alignment + diffusion-prior experiment.
+- Keep the prior-only baseline and joint result clearly separated.
+
+Implementation steps:
+- Inspect `notebooks/eeg_prior_reconstruction_report.ipynb` and identify its result tables and conclusion cells.
+- Add the joint run path, selected checkpoint, effective protocol, and measured alignment/prior/reconstruction metrics using the saved CSV/YAML artifacts.
+- Add a compact comparison table between prior-only and joint runs, clearly labeling metrics that are available for each track.
+- Execute the updated notebook against saved artifacts only; do not retrain or launch GPU work.
+- Update README wording/link if the prior report description currently implies it covers only the prior-only run.
+
+Feature list:
+- Combined prior/reconstruction report covering prior-only and joint experiments.
+- Artifact-backed joint metrics and checkpoint provenance.
+- Explicit distinction between alignment retrieval metrics and reconstruction metrics.
+
+Function/interface contracts:
+- Existing report: `notebooks/eeg_prior_reconstruction_report.ipynb`.
+- Joint run: `experiments/eeg_alignprior/20260904_100813/train_eeg-20260904_100911/version_0`.
+- Joint evaluation source: `test/test_metrics.csv` and `test/evaluation_config.yaml`.
+- Notebook execution must not invoke training, evaluation, or model loading.
+
+Edge cases:
+- Prior-only and joint reports use different run paths and checkpoint criteria; retain both labels.
+- Joint alignment metrics (`brain_acc`, `image_acc`, `sim`) are not reconstruction metrics.
+- The report must preserve the existing prior-only values unchanged.
+
+Tests to add:
+- Execute the notebook with the available notebook runner.
+- Verify the rendered report contains the joint checkpoint and key metrics.
+
+TODOs:
+- No remaining implementation TODOs for this report update.
+
+Completion status:
+- Updated and executed `notebooks/eeg_prior_reconstruction_report.ipynb` with the prior-only and joint alignment+prior runs.
+- Added the joint protocol, checkpoint, alignment metrics, prior metrics, comparison table, and reconstruction visualizations.
+- Notebook execution succeeded from saved artifacts only; no training or evaluation was launched.
+- README now documents the joint launcher and describes the combined report.
+
+Notes / risks / suggestions:
+- Joint run selected `epoch_0409-eval_val_prior_pred_cos_0.6420.ckpt`.
+- Joint test metrics include prior cosine `0.6420`, PixCorr `0.1811`, SSIM `0.3157`, and alignment image top-1 `0.515`.
+
+README updates:
+- Clarify that the prior/reconstruction report now includes both prior-only and joint results.
+[2026-09-04 16:00] Prepare low-level reconstruction at 128px
+
+Request summary:
+- Move to the low-level reconstruction track after completing the joint alignment/prior experiment.
+- Use 128x128 image resolution and a small memory-conscious batch size.
+
+Implementation steps:
+- Audit `scripts/training/train_low_level.py`, `src/brain_image/model/low_level.py`, `src/brain_image/configs/train_low_level.yaml`, `train_low_level_dreamsim.yaml`, and the current data/evaluation interfaces.
+- Identify the stale interfaces and the exact image-size controls used by the low-level model, VAE decoder, dataloader, and evaluator.
+- Update the maintained low-level baseline config and entrypoint to use 128px images, batch size 32 as the initial conservative default, four workers, cache maxsize 1024, and separate evaluation artifacts where compatible.
+- Add or update a simple local train-then-evaluate launcher without embedding environment activation or SLURM behavior.
+- Run a minimal smoke test that verifies tensor/image dimensions, checkpoint creation, TensorBoard output, and evaluation CSV/YAML artifacts.
+- Run the full low-level baseline only after the smoke passes; preserve the DreamSim variant for a later controlled comparison.
+- Document the measured baseline in a standalone notebook and update README.
+
+Feature list:
+- Maintained low-level reconstruction baseline at 128x128.
+- Small-batch local execution path.
+- Separate training and evaluation outputs.
+- Explicitly deferred DreamSim comparison.
+
+Function/interface contracts:
+- Config: `src/brain_image/configs/train_low_level.yaml`.
+- Training entrypoint: existing low-level script if it can be repaired with the current model API; otherwise a small replacement entrypoint.
+- Evaluation: existing evaluator if compatible, otherwise a low-level-specific evaluator that writes CSV/YAML.
+- Default image size: 128.
+- Initial batch size: 32 for train/validation/test; lower if the smoke demonstrates memory pressure.
+
+Edge cases:
+- The old low-level training script may use obsolete dataset/model constructor arguments.
+- Image-size assumptions may be embedded in latent shape, VAE decoding, transforms, or metric code.
+- The low-level path may require a different target cache/statistics set than the prior path.
+- Optional reconstruction metrics may require GPU memory beyond the training budget.
+- Interrupted runs must leave recoverable checkpoints and must not overwrite prior/joint artifacts.
+
+Tests to add:
+- Config composition assertions for image size, batch sizes, workers, target latent dimensions, and checkpointing.
+- Minimal forward/shape test for the low-level model at 128px.
+- Smoke test for training checkpoint/TensorBoard and separate CSV/YAML evaluation artifacts.
+
+TODOs:
+- Launch the full 128px low-level baseline and record its selected checkpoint and reconstruction metrics.
+
+Notes / risks / suggestions:
+- Batch size 32 is an explicit working assumption for “small”; reduce it if the actual low-level memory profile requires it.
+- Do not start the DreamSim comparison until the ordinary low-level baseline is working.
+
+README updates:
+- Added the 128px low-level launch command and artifact layout. Add the measured baseline/report link after the full run.
+
+Completion status so far:
+- Generated the missing `ip_sdxl_turbo_128` train/test latent caches and statistics.
+- Repaired the low-level dataset/config constructor interfaces and injected dataset dimensions into ATMS.
+- Verified one-epoch training, checkpoint creation, TensorBoard output, and separate CSV/YAML evaluation on a 1% smoke run.
+- The full baseline remains pending; DreamSim remains deferred.
+- Full baseline launched sequentially in tmux session `low_level_full`; evaluation will run automatically after training exits.
+
+[2026-09-05 09:00] Prevent low-level training OOM from expensive metrics
+
+Request summary:
+- The full 128px low-level run exhausted GPU memory during in-training CLIP validation. Disable expensive full reconstruction metrics during training while retaining them in standalone evaluation.
+
+Feature list:
+- Training performs only the latent reconstruction loss and lightweight validation needed for checkpoint selection.
+- Standalone `scripts/evaluation/test_low_level.py` remains responsible for SSIM, CLIP, and DreamSim metrics.
+- The low-level full run can resume or restart without changing the target, model, or loss recipe.
+
+Implementation steps:
+- Add an explicit low-level config switch controlling full reconstruction evaluation during validation, defaulting to disabled.
+- Guard `LowLevelModule.validation_step` with that switch; keep `test_step` full evaluation enabled for direct/manual model testing.
+- Set the maintained low-level training config to disable validation-time reconstruction metrics.
+- Add a focused regression test or config assertion, run a short smoke training/evaluation, and restart the full baseline only after verification.
+- Record the failed run and new launch/evaluation behavior in README, `.plan`, and `.log`.
+
+Function/interface contracts:
+- New model/config flag: `run_validation_reconstruction_metrics: bool`, default `false` for the maintained low-level baseline.
+- Test-time evaluation remains unchanged and writes `test_metrics.csv` through the standalone evaluator.
+
+Edge cases:
+- `test_step` must still produce reconstruction metrics when called by the standalone evaluator.
+- Existing checkpoints remain valid; the change affects validation scheduling only.
+- If the failed process still holds GPU memory, terminate only that stale low-level process before relaunching.
+
+Side effects:
+- Training TensorBoard will no longer contain periodic full-image metric scalars; those metrics move exclusively to post-hoc evaluation.
+- A fresh run directory is required to avoid mixing logs from the failed run and the corrected run.
+
+Tests to add:
+- Assert the maintained config disables validation reconstruction metrics.
+- Smoke-test one epoch and verify checkpoint plus standalone CSV output.
+
+TODOs:
+- Add the measured low-level baseline and visualization to a standalone report notebook.
+
+Notes / risks / suggestions:
+- The previous run reached at least epoch 139 and saved `epoch_0089-val_loss_0.5974.ckpt`; it failed in `get_metric_clip` during validation, not in the latent loss.
+
+README updates:
+- Document that low-level training uses latent-loss validation only and that image metrics are post-hoc.
+
+[2026-09-05 10:30] Use batch-one external low-level evaluation
+
+Request summary:
+- Keep reconstruction evaluation outside training and use a very small evaluation batch size; default to one.
+
+Implementation steps:
+- Add a `--batch_size` option to `scripts/evaluation/test_low_level.py`, defaulting to 1.
+- Apply it to train/validation/test dataloaders and low-level VAE decode batching used during evaluation.
+- Rerun the best checkpoint and verify the CSV/YAML records the effective batch-one configuration.
+
+Feature list:
+- Low-memory external evaluation with unchanged metric definitions.
+
+Function/interface contracts:
+- `test_low_level.py RUN_PATH --batch_size N`; default `N=1`.
+
+Edge cases:
+- Batch one reduces peak memory but does not change the full-test metric denominator.
+- The test split remains the only split evaluated by the standalone script.
+
+Tests to add:
+- CLI/config smoke assertion for effective batch size one and successful CSV output.
+
+TODOs:
+- Add the measured low-level baseline and visualization to a standalone report notebook.
+
+Notes / risks / suggestions:
+- Full metric feature extraction still compares all 200 test examples; batch one primarily bounds dataloader and VAE decode memory.
+
+Completion status:
+- External evaluation rerun completed on the explicit best checkpoint with batch size 1 for all loaders and VAE decoding.
+- CSV/YAML artifacts were written successfully; metrics matched the prior full evaluation.
+
+[2026-09-05 11:30] Run the complete low-level perceptual test suite
+
+Request summary:
+- Evaluate the trained low-level pipeline on the full test set using the repository's complete perceptual/reconstruction metrics, externally, with batch size 1.
+
+Implementation steps:
+- Expose the standard `METRIC_LOOKUP` suite through `LowLevelConfig.test_recon_metrics`.
+- Make low-level full evaluation call that suite on generated low-level reconstructions, while retaining DreamSim diagnostics.
+- Run the explicit best checkpoint through `test_low_level.py --batch_size 1` and verify every metric is present in CSV/YAML.
+
+Feature list:
+- Complete low-level test-set perceptual metrics: PixCorr, SSIM, AlexNet-2/5, Inception, CLIP, EfficientNet, SwAV, and DreamSim aligned/unaligned.
+
+Function/interface contracts:
+- `test_low_level.py RUN_PATH --checkpoint_path BEST --batch_size 1` writes one CSV row per metric.
+
+Edge cases:
+- Feature networks may be CPU/GPU memory intensive; batch one bounds reconstruction decoding, while feature metrics still compare all 200 test examples.
+- A missing optional metric dependency or model download must fail explicitly rather than silently omit a metric.
+
+Tests to add:
+- Smoke assertion that the configured metric list is passed to low-level full evaluation.
+- Full test run must contain all requested metric names.
+
+TODOs:
+- None for the complete low-level perceptual evaluation. A future report notebook can visualize low-level reconstructions if requested.
+
+Notes / risks / suggestions:
+- The prior low-level evaluation only ran SSIM, CLIP, and DreamSim; this iteration corrects that incomplete deliverable.
+
+README updates:
+- Documented the complete low-level metric output and measured baseline after the run.
+
+README updates:
+- Document the batch-one default for standalone low-level evaluation.
+
+Completion status:
+- Full external evaluation completed on all 200 test examples with batch size 1.
+- Explicit checkpoint: `experiments/low_level/20260905_025455/train_low_level-20260905_025524/version_0/checkpoints/epoch_0159-val_loss_0.6073.ckpt`.
+- CSV contains PixCorr `0.2431227`, SSIM `0.3669125`, AlexNet-2 `0.7016081`, AlexNet-5 `0.6964573`, InceptionV3 `0.5478895`, CLIP `0.5161558`, EfficientNet `0.9738667`, SwAV `0.7549394`, and DreamSim aligned/unaligned `0.7877225/0.5578544`.
+
+[2026-09-05 11:15] Create a dedicated low-level reconstruction report
+
+Request summary:
+- Create a standalone report notebook for the low-level EEG-to-image-latent pipeline and its completed perceptual evaluation.
+
+Implementation steps:
+- Inspect the maintained low-level config, training/evaluation scripts, checkpoint, CSV, and evaluation YAML to establish exact protocol and provenance.
+- Add `notebooks/low_level_report.ipynb` with a concise pipeline description, training/evaluation artifact references, checkpoint selection, test-set metric table, and interpretation of metric directionality.
+- Include a small visualization of representative low-level reconstructions against ground-truth test images if the run artifacts provide the necessary image tensors; otherwise document that the report is metric-only.
+- Execute the notebook end to end in the project environment and verify that its displayed values match `test_metrics.csv`.
+
+Feature list:
+- Standalone low-level report with reproducible paths and measured test-set results.
+- Complete metric table: loss, PixCorr, SSIM, AlexNet-2/5, InceptionV3, CLIP, EfficientNet, SwAV, and DreamSim diagnostics.
+
+Function/interface contracts:
+- Notebook reads the committed evaluation artifact rather than recomputing GPU metrics.
+- Reported values must be loaded from the CSV and checkpoint/config provenance from the YAML/run path.
+
+Edge cases:
+- EfficientNet and SwAV use the repository's native metric direction and must not be mislabeled as higher-is-better.
+- The report must distinguish the 128x128 low-level reconstruction from the later diffusion-prior pipeline.
+- Missing image artifacts must not be silently fabricated; fall back to a metric-only report with an explicit note.
+
+Side effects:
+- Adds one maintained notebook under `notebooks/`; no training or evaluation behavior changes.
+
+Tests to add:
+- Execute all notebook code cells successfully.
+- Assert the notebook-loaded metric values match the CSV values and the expected metric set is complete.
+
+TODOs:
+- None. The dedicated notebook was created and executed successfully.
+
+Notes / risks / suggestions:
+- The full metric evaluation already completed; this task documents those measured deliverables and does not launch another GPU job.
+- Required `docs/project.md` and `docs/architecture.md` are missing from the checkout; no changes to those absent files are planned for this notebook-only task.
+
+README updates:
+- Add a link to the dedicated low-level report notebook next to the low-level pipeline instructions.
+
+Completion status:
+- Added and executed `notebooks/low_level_report.ipynb`.
+- The notebook loads the evaluation CSV/YAML, verifies the 12 expected rows, confirms batch size 1 and checkpoint existence, and presents the complete metric table plus a summary plot.
+- The run contains no saved reconstruction image files, so the report explicitly documents why it is metric-focused rather than inventing image visualizations.
+
+[2026-09-05 11:30] Compare aligned and unaligned SynCLR low-level training losses
+
+Request summary:
+- Recreate the intended low-level perceptual-loss comparison. The existing completed low-level run is an L2-only control; it must not be treated as the perceptual-loss baseline.
+- Train and evaluate matched unaligned and aligned SynCLR/DreamSim variants using the same maintained low-level pipeline and complete external metric suite.
+
+Implementation steps:
+- Preserve the completed L2-only run as the control and document its role accurately.
+- Create or correct explicit configs for two variants: `use_perceptual_loss: true` with `perceptual_loss_model: unaligned_synclr_vitb16`, and `use_perceptual_loss: true` with `perceptual_loss_model: aligned_synclr_vitb16`.
+- Keep all non-loss settings fixed: ATMS encoder, 128x128 SDXL-Turbo latent target, dataset split, optimizer/schedule, epoch budget, and cheap training validation. Use batch size 16 for perceptual-loss training, retain four workers, and use batch size 1 for external evaluation.
+- Add/adjust a simple local launcher so each variant trains sequentially and then invokes the external evaluator on the selected best checkpoint.
+- Evaluate both best checkpoints with batch size 1 using the complete metric suite and write independent CSV/YAML artifacts.
+- Reuse the existing `tensorcache/{aligned,unaligned}_synclr_vitb16/{train,test}` target embeddings, add the selected target to each dataset sample, and compute only the predicted DreamSim embedding during training.
+- Extend `notebooks/low_level_report.ipynb` with matched L2, unaligned SynCLR, and aligned SynCLR rows, protocol differences, and a comparison plot.
+
+Feature list:
+- Reproducible aligned-vs-unaligned SynCLR/DreamSim low-level loss comparison.
+- Separate checkpoint and evaluation artifacts per loss.
+- Reported comparison against the existing L2-only control.
+
+Function/interface contracts:
+- Training configs select only the loss variant; evaluation remains external through `scripts/evaluation/test_low_level.py`.
+- Each run must identify its loss in its config, output directory, checkpoint provenance, and report table.
+
+Edge cases:
+- `perceptual_loss_model: unaligned_synclr_vitb16` and `aligned_synclr_vitb16` both select `DreamsimLoss` with different model wrappers.
+- Perceptual loss still decodes predictions during training, but fixed target SynCLR embeddings can be loaded from the existing cache. Batch size 32 OOMed during the first VAE decode; batch size 16 is the current training setting.
+- Best-checkpoint selection must use the configured validation criterion consistently across both variants, not the final epoch by default.
+
+Side effects:
+- Adds new experiment runs and evaluation artifacts; no existing L2 artifacts are overwritten.
+- Updates the low-level report and README to distinguish the L2 control from perceptual-loss results.
+
+Tests to add:
+- Config composition assertions for unaligned and aligned SynCLR/DreamSim loss selection.
+- Smoke-train each variant on a small data fraction and verify the selected loss is instantiated.
+- Smoke-evaluate each checkpoint and verify the complete metric CSV is written.
+
+TODOs:
+- Monitor the fresh 100-epoch unaligned run, evaluate its selected checkpoint, and decide on the matched aligned run.
+
+Completion status:
+- Config composition passed for L2 and the corrected DreamSim mode.
+- The previous LPIPS run was stopped before producing a result; no LPIPS comparison will be reported.
+- DreamSim config now uses explicit `unaligned_synclr_vitb16` with batch size 16.
+- Unaligned SynCLR batch-16 one-epoch smoke completed successfully.
+- The first full unaligned run was stopped before producing a result; its partial artifacts are preserved and excluded from results.
+- Existing aligned and unaligned SynCLR caches were verified to contain 16,540 train and 200 test embeddings each, with 768-dimensional tensors.
+- The low-level DreamSim branch now consumes cached target embeddings and no longer loads raw ground-truth images for the perceptual branch.
+- Cache-backed unaligned batch-16 smoke completed successfully; 11 training batches took about 27 seconds versus about 126 seconds before target caching.
+- Fresh 100-epoch unaligned training is now active; external evaluation remains chained after training.
+
+Notes / risks / suggestions:
+- The prior `train_low_level_dreamsim.yaml` was misleadingly configured for LPIPS; it is now explicitly the unaligned SynCLR/DreamSim variant.
+- The existing `tensorcache/{aligned,unaligned}_synclr_vitb16/{train,test}` artifacts contain the fixed target embeddings and will be reused after exact preprocessing parity is verified.
+- Cached-target training retains the cached VAE latent for the L2 term; only the predicted image is decoded and embedded for the DreamSim term.
+- The existing low-level report should be updated only after both matched perceptual runs have measured results.
+
+README updates:
+- Document the L2 control and aligned/unaligned SynCLR/DreamSim comparison once both runs are complete.
+
+[2026-09-06 13:10] Fix and evaluate the completed unaligned DreamSim low-level run
+
+Request summary:
+- Fix the standalone low-level evaluator so it can load the completed checkpoint trained with `train_low_level_dreamsim`.
+- Evaluate the selected best checkpoint and produce the complete test-set CSV metrics.
+
+Implementation steps:
+- Update `scripts/evaluation/test_low_level.py` to compose the same model configuration used by the run, rather than always composing baseline `train_low_level` with perceptual loss disabled.
+- Preserve the evaluator's explicit CLI overrides for batch size, compilation, WandB, output directory, checkpoint path, and test-size limits.
+- Ensure checkpoint selection still uses the configured `trainer.checkpoint_monitor` (`val/loss`, minimum), selecting epoch 89 for the current run unless an explicit checkpoint is supplied.
+- Add a focused configuration/load regression check that confirms a DreamSim checkpoint can be instantiated and loaded without unexpected `perceptual_loss.*` keys.
+- Run `scripts/evaluation/test_low_level.py` on the completed run with batch size 1 and verify the CSV contains the full configured metric set, including reconstruction metrics and aligned/unaligned DreamSim diagnostics.
+- Record the selected checkpoint, effective evaluation configuration, metrics, and any evaluator behavior correction in `.plan`, `.log`, and the relevant README/report documentation if the user-facing invocation changed.
+
+Feature list:
+- Evaluator configuration parity between training and post-hoc evaluation.
+- Successful batch-one evaluation of the completed 100-epoch unaligned SynCLR/DreamSim run.
+- Reproducible CSV/YAML evaluation artifacts tied to the best validation checkpoint.
+
+Function/interface contracts:
+- `test_low_level.py RUN_PATH --batch_size 1` remains the public invocation.
+- The evaluator must derive or accept the training config name; an explicit `--config_name` option is preferred if needed, with the current DreamSim run remaining simple to invoke.
+- Checkpoint loading must be strict for the matching configuration; silently dropping `perceptual_loss.*` weights is not acceptable.
+- Output remains `test/test_metrics.csv` and `test/evaluation_config.yaml` below the selected run version directory.
+
+Edge cases:
+- Baseline L2-only checkpoints must continue to evaluate without constructing a perceptual-loss module.
+- A run may contain both `last.ckpt` and a monitored best checkpoint; default selection must remain the minimum `val/loss` checkpoint.
+- Evaluation must use the test split and batch size 1, while retaining the external raw-image path needed for final image metrics.
+- If the run's stored hyperparameters are sufficient to reconstruct the model, prefer them over fragile directory-name inference.
+
+Side effects:
+- The evaluator will load the frozen DreamSim model during evaluation, increasing startup time and memory relative to the L2-only evaluator.
+- A new test artifact directory will be written under the existing completed run; training artifacts will not be modified.
+- The current failed evaluation attempt must remain documented as a resolved configuration-parity failure.
+
+Tests to add:
+- A no-GPU/config-level regression test or smoke assertion that composes `train_low_level_dreamsim` and verifies `use_perceptual_loss=True` with `unaligned_synclr_vitb16`.
+- A checkpoint-load smoke test using the completed checkpoint and matching config, with strict state-dict loading.
+- Post-evaluation assertion that `test_metrics.csv` contains the expected metric names and `evaluation_config.yaml` records batch size 1 and the selected checkpoint.
+
+TODOs:
+- Update the low-level report and README only after the corrected evaluation produces final metrics.
+- Decide whether to generalize evaluator config selection for future aligned SynCLR runs in this iteration or defer it after the current deliverable.
+
+Notes / risks / suggestions:
+- The training run completed through epoch 99; best validation loss is `0.811389` at epoch 89 and should be the default evaluation checkpoint.
+- The current failure is in model construction/loading, not in the trained checkpoint or the training loss.
+- `docs/project.md` and `docs/architecture.md` are missing from the checkout; do not create them as part of this narrowly scoped fix unless documentation requirements expand.
+
+Analysis addendum after failure audit:
+- The immediate failure is caused by `test_low_level.py` composing baseline `train_low_level`, which sets `use_perceptual_loss=false`; the checkpoint contains 150 `perceptual_loss.*` tensors from the trained unaligned SynCLR model.
+- The checkpoint also contains compiled VAE keys such as `vae_encoder._orig_mod.*` and is approximately 838 MB because frozen VAE and perceptual-model weights are serialized. Evaluation must construct matching modules and retain strict loading; `strict=False` is explicitly disallowed as a workaround.
+- `LowLevelModule` receives `compile=False` from the evaluator, but `load_vae_encoder()` currently uses its own default compilation behavior. This construction detail must be tested because it affects checkpoint key names.
+- The launcher passes `LOW_LEVEL_CONFIG` only to `train_low_level.py`; it invokes the evaluator without a config name. The corrected interface must eliminate this train/eval config drift, preferably by reading the run's stored `hparams.yaml` as the source of truth, with an explicit config-name override only where necessary.
+- `test_low_level.py` first runs `test_step`, which computes the configured latent/perceptual test loss, and then `run_full_eval()`, which reloads the test dataloader and computes raw-image reconstruction metrics plus aligned/unaligned DreamSim. Both stages need successful verification.
+- Checkpoint selection by parsed `val_loss` filename selected epoch 89 (`0.8114`), matching the minimum validation value recorded in `metrics.csv` (`0.8113890290263062`); this selection should be asserted rather than inferred only from the directory listing.
+
+Revised implementation steps:
+- Add a small, testable configuration-loading helper for evaluation that reads the selected run version's `hparams.yaml` and reconstructs the stored model/dataset configuration, while applying only safe runtime overrides (compile flag, WandB, batch sizes, output path, and optional test limit).
+- Preserve an explicit config-name/legacy fallback only for runs without `hparams.yaml`, and ensure baseline L2-only runs continue to work.
+- Ensure runtime compilation choices do not alter state-dict key compatibility; either construct the VAE exactly as training did or make the compile choice explicit and verify strict loading against the completed checkpoint.
+- Keep the evaluator's strict checkpoint load and fail with a concise diagnostic identifying config/checkpoint mismatches.
+- Add tests for: stored-hparams reconstruction, baseline fallback, strict DreamSim checkpoint load, checkpoint selection, and preservation of the test metric configuration.
+- Run the corrected evaluator on the epoch-89 checkpoint with batch size 1; verify both `test_step` loss logging and post-hoc reconstruction metrics complete.
+- Only after successful evaluation, update the run log/README/report with the measured CSV results and corrected invocation.
+
+README updates:
+- Document the corrected evaluator invocation/config parity if the CLI contract changes.
+- Add the measured final metrics only after successful evaluation.
+
+Completion status:
+- Added `--config_name` to `scripts/evaluation/test_low_level.py` and made `scripts/run_low_level.sh` forward the training config name to evaluation.
+- Strictly loaded the completed unaligned DreamSim checkpoint with `train_low_level_dreamsim`; the previous `perceptual_loss.*` mismatch is resolved.
+- Checkpoint selection was verified against `metrics.csv`: epoch 89, validation loss `0.811389`.
+- Full batch-one evaluation completed on all 200 test examples. CSV metrics: test loss `0.8113877`, PixCorr `0.1976007`, SSIM `0.4171051`, AlexNet-2 `0.7315578`, AlexNet-5 `0.7117085`, InceptionV3 `0.5425125`, CLIP `0.5524623`, EfficientNet `0.9868256`, SwAV `0.7211292`, DreamSim aligned `0.7215754`, and DreamSim unaligned `0.5437707`.
+- `evaluation_config.yaml` now records the actual automatically selected checkpoint path rather than `null`.
+- Syntax checks passed; the full evaluation served as the strict checkpoint-load and metric-output smoke test.
+- General automatic reconstruction from arbitrary stored `hparams.yaml` is deferred; the current maintained interface requires the explicit matching config name for direct evaluation and forwards it automatically through the local wrapper.
+
+[2026-09-06 14:00] Train and evaluate the aligned SynCLR low-level variant
+
+Request summary:
+- Run the matched aligned-SynCLR perceptual-loss low-level experiment after the completed unaligned run.
+- Keep the architecture, data, optimizer, epoch budget, cache strategy, and evaluation protocol fixed so the loss target is the only intended change.
+
+Implementation steps:
+- Add `src/brain_image/configs/train_low_level_aligned_dreamsim.yaml`, inheriting the maintained low-level DreamSim settings while selecting `aligned_synclr_vitb16`.
+- Verify the aligned target cache exists for both train and test splits and that the resolved config uses batch size 16, four workers, 128px VAE targets, 100 epochs, and cached perceptual targets.
+- Run a one-epoch/small-fraction aligned smoke test if the cache/config check does not already establish the path.
+- Launch the full aligned run sequentially through `scripts/run_low_level.sh` with `LOW_LEVEL_CONFIG=train_low_level_aligned_dreamsim`, using the existing tensor-cache limit and no parallel experiment launch.
+- Evaluate the automatically selected minimum-`val/loss` checkpoint with the corrected evaluator, explicit `--config_name=train_low_level_aligned_dreamsim`, and batch size 1.
+- Verify strict checkpoint loading, complete CSV metrics, actual selected-checkpoint provenance, and comparison against the MSE and unaligned runs.
+
+Feature list:
+- Maintained aligned-SynCLR low-level training config.
+- Matched aligned-versus-unaligned evaluation artifacts.
+- Comparable full test-set perceptual metrics.
+
+Function/interface contracts:
+- `LOW_LEVEL_CONFIG=train_low_level_aligned_dreamsim ./scripts/run_low_level.sh <run_dir>` trains and evaluates sequentially.
+- Direct evaluation uses `scripts/evaluation/test_low_level.py <run_dir> --config_name=train_low_level_aligned_dreamsim --batch_size 1`.
+- The aligned run must use `perceptual_loss_model=aligned_synclr_vitb16` and retain strict checkpoint loading.
+
+Edge cases:
+- The aligned cache must be used for the training target; accidentally reusing the unaligned cache would invalidate the comparison.
+- The evaluator must select the aligned run's own best checkpoint, not the unaligned or MSE artifact.
+- GPU memory remains constrained by the unrelated diffusionregpose process; batch size 16 is the approved training setting and evaluation remains batch 1.
+
+Side effects:
+- Adds a new aligned experiment directory and large checkpoint artifacts.
+- Adds one maintained config; no existing run or cache is overwritten.
+- TensorBoard is produced for the aligned training run; CSV/YAML are produced by separate evaluation.
+
+Tests to add:
+- Resolve the aligned config and assert model/loss/cache names and fixed training parameters.
+- Verify aligned cache train/test files are present and have the expected 768-dimensional embeddings.
+- Smoke-load the aligned checkpoint strictly and assert the evaluation CSV contains the complete metric set.
+
+TODOs:
+- Update the low-level report notebook with the aligned row and matched comparison after evaluation.
+
+Notes / risks / suggestions:
+- The unaligned run's measured metrics are already available as the direct comparator.
+- No algorithmic changes are planned; only the cached aligned SynCLR target changes.
+
+README updates:
+- Document the aligned config and matched comparison command after the run is verified.
+
+Progress:
+- Added `train_low_level_aligned_dreamsim.yaml` inheriting the unaligned maintained settings and overriding only `perceptual_loss_model` to `aligned_synclr_vitb16`.
+- Resolved-config check passed: 100 epochs, batch size 16 for train/validation/test, four workers, `ip_sdxl_turbo_128`, and aligned loss target.
+- Verified aligned cache: 16,540 train tensors and 200 test tensors, each shape `(768,)`.
+- One-epoch 1% smoke training completed successfully with aligned cached targets.
+- Full sequential run launched in tmux session `low_level_aligned_full`; post-training evaluation is chained through the corrected config-aware evaluator.

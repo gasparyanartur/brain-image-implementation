@@ -1,6 +1,7 @@
 
-#eeg_encoder: "nice"
-eeg_encoder: "atms"
+defaults:
+  - /eeg_encoder@eeg_encoder: atms
+  - _self_
 vae_encoder: "ip_sdxl_turbo_128"
 
 use_perceptual_loss: false
@@ -18,6 +19,8 @@ betas: [0.9, 0.999]
 
 max_epochs: 500
 metric_log_epochs: 10
+run_validation_reconstruction_metrics: false
+test_recon_metrics: [pixcorr, ssim, alex2, alex5, inceptionv3, clip, efficientnet, swav]
 eval_batch_size: 16
 
 highlighted_recons:

@@ -1,0 +1,14 @@
+defaults:
+  - base
+  - dataset: things-eeg2
+  - _self_
+
+model_names:
+  - ip_sdxl_turbo_128
+
+batch_size: 32
+splits:
+  - train
+  - test
+cache_dir: tensorcache
+stat_path: statistics

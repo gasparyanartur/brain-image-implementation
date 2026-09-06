@@ -21,9 +21,9 @@ We have two pipelines: The one from [Reconstructing the Mind's Eye](https://gith
 
 **Text Alignment**: We generate captions with Qwen3.5, embed them with frozen T5, and align EEG latents to those text embeddings using pure symmetric InfoNCE. The completed run and its artifacts are documented in [`notebooks/text_alignment_report.ipynb`](notebooks/text_alignment_report.ipynb). See `src/brain_image/configs/train_eeg_align_text.yaml` for the training config.
 
-**Low Level Pipeline**: We implement a low-level pipeline which takes the EEG latent and trues to directly reconstruct a blurry image. This is then passed through the frozen Stable Diffusion VAE-decoder to get an initial image for the img-to-img. This code is currently out of date, and needs to be fixed and cleaned up. Especially the training script is completely incompatible with the current codebase, and needs to be rewritten. See `src/brain_image/model/low_level.py` for the model code, and `src/brain_image/configs/train_low_level.yaml` for the training config.
+**Low Level Pipeline**: This track maps an EEG representation directly to the latent consumed by the frozen SDXL-Turbo VAE decoder, producing a low-resolution initial reconstruction. The maintained baseline uses the ATMS encoder, 128x128 images, batch size 32, and four DataLoader workers. Training and expensive reconstruction evaluation are separate: use `scripts/run_low_level.sh` for a local train-then-evaluate run, `scripts/training/train_low_level.py` for training only, and `scripts/evaluation/test_low_level.py` for checkpoint evaluation. The evaluator runs the complete test-set suite—PixCorr, SSIM, AlexNet-2/5, InceptionV3, CLIP, EfficientNet, SwAV, and aligned/unaligned DreamSim—and writes `test_metrics.csv` plus `evaluation_config.yaml`. Standalone evaluation defaults to batch size 1; TensorBoard is produced only by training.
 
-We also tried to use Dreamsim to train the low-level pipeline instead, but it didn't help. This part probably still works if the low-level pipeline is working, but currently it is not. See `src/brain_image/configs/train_low_level_dreamsim.yaml` for the training config.
+The low-level perceptual-loss comparison uses the same pipeline with `src/brain_image/configs/train_low_level_dreamsim.yaml`. It starts with unaligned SynCLR/DreamSim (`unaligned_synclr_vitb16`) and can later be matched with the aligned variant; both use 128x128 VAE reconstructions resized to 224x224 for the loss.
 
 **Second-Prior Alignment**: We tried outputting a second EEG aligning with our diffusion prior, and aligning the EEG latents after the prior, rather than before. The idea was to see if EEG alignment was interfering with training the diffusion prior, and if removing this interference would help. Eventually, we abandoned this track, and deleted the code. However, if this is something you want to look at in the future, you can find the code in [this commit](https://github.com/gasparyanartur/brain-image-implementation/blob/6d1cb137caf99b5459b87630a823bdbd6732fd25/src/brain_image/model/eeg_alignment.py).
 
@@ -368,7 +368,22 @@ BRAIN_IMAGE_TENSORCACHE_MAXSIZE=1024 \
 
 `train_eeg_prior.yaml` initializes the EEG encoder from the finished ATMS alignment model, trains the diffusion prior with batch sizes of 32 and four DataLoader workers, and selects checkpoints by maximum `eval/val/prior/pred_cos`. Training validation skips expensive image sampling; the launcher evaluates the selected checkpoint separately and writes reconstruction metrics and image artifacts.
 
-The completed baseline run is reported in [`notebooks/eeg_prior_reconstruction_report.ipynb`](notebooks/eeg_prior_reconstruction_report.ipynb). Its reconstruction scores must be interpreted as a simplified prior-only baseline, not as a direct reproduction of the EEG-Guided Diffusion paper: this checkout does not include all of the paper's reconstruction components and uses its own current reconstruction path and evaluation protocol.
+The joint variant can be launched with `source .venv/bin/activate && BRAIN_IMAGE_TENSORCACHE_MAXSIZE=1024 ./scripts/run_eeg_alignprior.sh`. It uses `train_eeg_alignprior.yaml`, initializes from the finished alignment checkpoint, trains alignment and prior jointly, and uses the same separate evaluator/checkpoint criterion.
+
+For direct low-level reconstruction, activate the environment and run the local wrapper:
+
+```bash
+source .venv/bin/activate
+BRAIN_IMAGE_TENSORCACHE_MAXSIZE=1024 ./scripts/run_low_level.sh
+```
+
+The wrapper uses `train_low_level.yaml` (128x128, batch size 32, four workers), trains sequentially, then evaluates the selected checkpoint with the same config name. Training artifacts, including TensorBoard events, are stored below the configured `experiments/low_level/<timestamp>/` directory. Evaluation writes `test/test_metrics.csv` and `test/evaluation_config.yaml` beneath the Lightning version directory. To run the phases separately, invoke `scripts/training/train_low_level.py` and then pass the resulting run directory and matching config name to `scripts/evaluation/test_low_level.py`; use `--batch_size 1` for the low-memory default explicitly.
+
+The low-level perceptual run uses `LOW_LEVEL_CONFIG=train_low_level_dreamsim` with the DreamSim config. It uses 100 epochs, batch size 16, four workers, 128x128 targets, cached SynCLR targets, and separate batch-one evaluation. For a direct evaluation, pass `--config_name=train_low_level_dreamsim`; `scripts/run_low_level.sh` forwards this automatically from `LOW_LEVEL_CONFIG`.
+
+The completed low-level baseline used checkpoint `epoch_0159-val_loss_0.6073.ckpt` and was evaluated on all 200 test examples with batch size 1. Its measured metrics are: PixCorr `0.24312`, SSIM `0.36691`, AlexNet-2 `0.70161`, AlexNet-5 `0.69646`, InceptionV3 `0.54789`, CLIP `0.51616`, EfficientNet `0.97387`, SwAV `0.75494`, and DreamSim aligned/unaligned `0.78772/0.55785`.
+
+The completed low-level baseline is documented separately in [`notebooks/low_level_report.ipynb`](notebooks/low_level_report.ipynb). The completed prior-only baseline and joint alignment+prior run are reported together in [`notebooks/eeg_prior_reconstruction_report.ipynb`](notebooks/eeg_prior_reconstruction_report.ipynb). Their reconstruction scores must be interpreted as simplified implementation results, not as a direct reproduction of the EEG-Guided Diffusion paper: this checkout does not include all of the paper's reconstruction components and uses its own current reconstruction path and evaluation protocol.
 
 Measured baseline results from the full run (`experiments/eeg_prior/20260831_134809`) are: prior cosine `0.63396`, PixCorr `0.09722`, SSIM `0.30855`, AlexNet-2 `0.72222`, AlexNet-5 `0.88889`, Inception `0.63889`, CLIP `0.79167`, EfficientNet `0.90044`, and SwAV `0.58795`. These values are a baseline for this implementation and should not be judged against the paper's reported numbers until the missing paper-specific components are implemented.
 

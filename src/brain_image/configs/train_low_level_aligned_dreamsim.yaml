@@ -1,0 +1,6 @@
+defaults:
+  - train_low_level_dreamsim
+  - _self_
+
+model:
+  perceptual_loss_model: "aligned_synclr_vitb16"
