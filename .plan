@@ -1498,3 +1498,69 @@ Progress:
 - Verified aligned cache: 16,540 train tensors and 200 test tensors, each shape `(768,)`.
 - One-epoch 1% smoke training completed successfully with aligned cached targets.
 - Full sequential run launched in tmux session `low_level_aligned_full`; post-training evaluation is chained through the corrected config-aware evaluator.
+
+Completion status:
+- Full aligned training completed through epoch 99.
+- Best checkpoint selected by minimum validation loss: epoch 69, `val_loss=0.9002` (recorded metric `0.9002429843`).
+- Full batch-one evaluation completed on all 200 test examples with strict checkpoint loading and matching aligned configuration.
+- Evaluation CSV contains test loss `0.9002430`, L2 `0.6292700`, aligned perceptual loss `0.2709730`, PixCorr `0.1859134`, SSIM `0.4085148`, AlexNet-2 `0.7905025`, AlexNet-5 `0.7314573`, InceptionV3 `0.5613568`, CLIP `0.5380905`, EfficientNet `0.9886433`, SwAV `0.7237262`, DreamSim aligned `0.6886333`, and DreamSim unaligned `0.5583522`.
+- Evaluation provenance records the selected epoch-69 checkpoint and batch size 1 in `test/evaluation_config.yaml`.
+- The aligned config, training/evaluation artifacts, and measured comparison are ready for addition to the low-level report notebook.
+
+Report completion:
+- Added and executed `notebooks/low_level_comparison_report.ipynb` as a separate maintained comparison report.
+- The notebook loads the three saved metric CSVs and evaluation YAMLs, checks batch-one evaluation and checkpoint provenance, and displays the complete image-metric table.
+- It generated five matched examples for each model and embedded the comparison grid.
+- Saved 15 PNGs under the three run-specific `test/reconstructions/` directories.
+- README now links the comparison report and describes its generated artifacts.
+
+[2026-09-07 10:00] Create the matched low-level comparison report with example reconstructions
+
+Request summary:
+- Produce a maintained report notebook comparing the completed MSE-only, unaligned SynCLR, and aligned SynCLR low-level runs.
+- Include example ground-truth and reconstructed images for the same test examples across all three variants.
+
+Implementation steps:
+- Rework `notebooks/low_level_report.ipynb` from the former single-baseline metric report into a three-run comparison report.
+- Load each run's `test_metrics.csv` and `evaluation_config.yaml`, verify the selected checkpoint, config/loss target, test split, and batch-one evaluation settings, and display a side-by-side metric table.
+- Use the selected checkpoints recorded in the evaluation YAMLs to reconstruct a small fixed set of test examples (the existing highlighted indices or an explicit reproducible subset) with the corresponding low-level model configs.
+- Save generated example reconstructions under each run's `test/reconstructions/` directory and render a grid containing ground truth, MSE, unaligned SynCLR, and aligned SynCLR outputs for each example.
+- Include a concise interpretation separating loss values from image metrics and calling out which metrics improve or regress between aligned and unaligned training.
+- Execute the notebook end to end in the project environment and verify that its metric tables match the saved CSVs and that all expected example images are present.
+
+Feature list:
+- Reproducible three-way low-level metric comparison.
+- Visual comparison of matched test examples across MSE, unaligned, and aligned models.
+- Explicit checkpoint/config provenance for every displayed result.
+
+Function/interface contracts:
+- The notebook reads existing CSV/YAML evaluation artifacts and checkpoint paths; it does not retrain models.
+- Reconstruction export uses batch size 1 and evaluation mode, with no changes to training or evaluator scripts.
+- Reported metrics must be loaded from the existing CSV artifacts rather than recomputed silently.
+
+Edge cases:
+- The MSE and perceptual runs use different model configs and checkpoint graphs; each checkpoint must be instantiated with its own matching config.
+- Existing low-level runs did not save predictions, so the notebook must generate and persist them before plotting.
+- Test examples must be indexed by stable dataset/image identity, not by an accidentally different shuffled order.
+- If GPU memory is constrained, reconstruction export must remain batch one and release each model before loading the next.
+
+Side effects:
+- Adds a maintained notebook and a small set of PNG reconstruction artifacts under existing experiment test directories.
+- Notebook execution requires the project environment and GPU because it loads the SDXL-Turbo VAE decoder.
+- No training checkpoints or metric CSVs are modified.
+
+Tests to add:
+- Execute all notebook cells successfully.
+- Assert the three expected run configs/losses and complete metric sets are present.
+- Assert the selected checkpoint paths exist and each image grid has the expected number of variants/examples.
+- Assert displayed metric values equal the source CSV values.
+
+TODOs:
+- None after successful notebook execution.
+
+Notes / risks / suggestions:
+- Use identical test image indices for all variants and show the ground-truth image once per row.
+- Do not interpret total MSE and combined perceptual losses as directly comparable scalar objectives.
+
+README updates:
+- Link the expanded comparison notebook and describe that it includes regenerated example reconstructions.
