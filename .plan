@@ -1,3 +1,91 @@
+[2026-10-25] Reorganize section 3 after approved outline revisions
+
+Request / authorization:
+- User approved execution of the latest outline, with no repeated representation-learning introduction in 3.2.
+- Separate 3.1 motivation, 3.2 reconstruction theory, 3.3 local methodology, and 3.4 results/discussion.
+
+Implementation steps / feature list:
+- Explain the prior-to-generator workflow first; group DALL-E 2 and modality gap into one supporting theory subsection; then cover low-level prediction.
+- Move local objectives/settings and evaluation into methodology; consolidate results and expand BrainBits discussion.
+- Preserve tables, numerical results, figure assets and labels; add modality-gap citation and new theoretical equation labels; remove SDEdit and completed TODOs.
+- Consolidate proposed controls and controlled low-level comparison in Future Ideas.
+
+Contracts / side effects / risks:
+- Documentation and compiled report only; no API, model, experiment or raw metric changes.
+- Preserve unrelated existing edits. docs/project.md and docs/architecture.md are absent.
+- Inspection corrects an outline error: active SimpleDiffusionPrior is an MLP encoder-decoder with skip connections, not the older transformer class. It predicts noise and derives the clean embedding used in the composite loss.
+
+Tests / TODOs:
+- Verify unchanged result tables, figure blocks, labels and content outside authorized sections; compile with LuaLaTeX and inspect affected pages.
+- Update audit and .log after verification. No production tests or README changes needed.
+- Status: implemented and verified; ready for user review.
+- Checks passed: exact table/figure/local-loss preservation, unchanged sections 1/2/4, all original result decimals retained, unique labels, resolved active citations/references, and no new whitespace errors.
+- Final LuaLaTeX build: 18 pages, no undefined citations/references, fatal errors, overfull or underfull boxes. Inspected section 3 on pages 5--13, future-work material on 16--17, and bibliography on 17--18.
+- Existing unrelated trailing whitespace in section 2 was preserved.
+
+[2026-10-25] Correct architecture attribution and focus section 2.2 on human alignment
+
+User-authorized edits:
+- Attribute the published NICE and ATM-S architectures to Song et al. and Li et al.; distinguish inherited architecture from local output configuration and training.
+- Remove internal metric keys; consistently name EEG-to-image and image-to-EEG top-1 retrieval accuracy.
+- Focus results on human-aligned versus unaligned targets for each encoder, removing encoder-ranking commentary.
+- Remove the qualitative-results paragraph and its single-condition retrieval illustration; end with a simple agreement statement about AlignVis.
+
+Evidence:
+- Read Li et al., arXiv:2403.07721v3, especially Section 2.1, Section 3.2 and Appendix B.3; inspected local atms.py and its upstream attribution.
+
+Side effects / checks:
+- Documentation only; retain section 2.1, numerical table, seed summary and unrelated sections. No API/model/experiment changes.
+- Completed: 17-page build and visual checks of pages 3--6 and 14; no undefined references/citations or overfull boxes. Removed two further internal metric-key occurrences in other report summaries; values preserved. Audit and .log updated; no README changes.
+
+[2026-10-25] Complete rewrite of sections 2.1 and 2.2 after user review
+
+Request / approved correction:
+- Rewrite both sections completely. Section 2.1 must describe AlignVis in third person, remain technical, and omit code-specific or index-by-index commentary.
+- Follow the planned content order in 2.2, with explicit scope, models, training, evaluation, quantitative and qualitative results.
+- Keep the method and metric definitions in 2.1; re-read AlignVis Sections 2 and 4.4 rather than infer what the paper reports.
+
+Implementation:
+- Rewrite 2.1 as motivation, formulation, metrics, findings and proposed reconstruction extension.
+- Keep all mathematical equations and labels. Identify loss scaling equivalence without mixing in report-specific implementation prose. Distinguish the paper's EEG-to-image results from the mathematically corresponding reverse score.
+- Rewrite 2.2 with six paragraph headings; preserve all result values, tables and figures and ground local implementation statements in existing evidence.
+
+Contracts / side effects / risks:
+- Documentation only; no API, model, metric or experiment changes. No unrelated refactors or README changes.
+- Do not imply that bidirectional training means the paper reports bidirectional evaluation.
+
+Checks / TODOs:
+- Completed: third-person-only 2.1, no code identifiers there, all equations/tables/figures and subsequent sections preserved.
+- Completed: LuaLaTeX build, no undefined references/citations or overfull boxes; pages 2--6 visually inspected.
+- Audit and .log updated.
+
+[2026-10-25] Reorganize report sections 2.1 and 2.2
+
+Request summary / status:
+- User approved the full plan and requested implementation.
+- Separate the paper and shared method from the subject-8 recreation.
+- Status: implemented; source invariants, compilation and visual inspection passed.
+
+Implementation steps / feature list:
+- Move normalization, symmetric InfoNCE and both retrieval definitions into 2.1, between motivation and findings.
+- Attribute the averaged loss convention to this report; distinguish human perceptual alignment from EEG-image alignment.
+- Keep local architectures, training settings, evaluation protocol and all results in 2.2; remove duplicated settings prose.
+- Preserve labels, figures, numerical results, citations and unrelated content; explain illustrative example selection.
+
+Interface contracts / side effects:
+- Documentation and compiled report only; no API, models, experiments or metrics change.
+
+Edge cases / notes:
+- Preserve downstream equation references and distinguish the paper's retrieval task from reverse local evaluation.
+- docs/project.md and docs/architecture.md requested by AGENTS.md are absent.
+
+Tests / TODOs:
+- Completed: LuaLaTeX compilation, affected-page inspection (2--6), and reference/citation checks; no overfull boxes.
+- Verify equations and results are preserved. No production tests needed.
+
+Documentation updates:
+- Record reorganization and verification in docs/report_comment_audit.md and .log; no README update needed.
+
 [2026-10-25 13:31] Correct the synopsis of Rajabi et al.: Human-Aligned Image Models Improve Visual Decoding from the Brain
 
 Request summary:

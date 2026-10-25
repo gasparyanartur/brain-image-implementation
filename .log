@@ -1,3 +1,18 @@
+[2026-10-25] Corrected section 2.2 attribution and comparison focus
+- Read ATM paper and attributed NICE/ATM-S to their authors.
+- Removed internal metric keys throughout report and qualitative section/illustration; focused on human-aligned versus unaligned targets.
+- Preserved numeric results; compiled and inspected changed pages with no undefined references/citations or overfull boxes.
+
+[2026-10-25] Rewrote sections 2.1 and 2.2 after user review
+- Checked AlignVis method/evaluation directly; kept technical formulation and metrics in 2.1, with third-person paper attribution.
+- Rewrote 2.2 in the six planned stages; preserved numerical results, equations, tables and figures.
+- Verified content invariants, clean compilation and pages 2--6 visually.
+
+[2026-10-25] Reorganized report sections 2.1 and 2.2
+- Moved shared alignment and retrieval definitions into the paper background; retained local setup, settings and results in Our recreation.
+- Preserved equations, citations, figures and numerical results; documented qualitative-example scope.
+- Verified source invariants, compiled with LuaLaTeX and inspected pages 2--6; no undefined references/citations or overfull boxes.
+
 [2026-10-25] Corrected Rajabi paper synopsis
 - Rewrote the human-aligned image encoder subsection using the approved hypothesis, Sundaram-model comparison, frozen-image/contrastive-brain training, retrieval evidence, gradient analysis, conclusion, and reconstruction motivation.
 - Removed the extended DreamSim tutorial and alignment-method comparison; preserved the user comment with an addressed annotation and kept the separate recreation/results unchanged.
@@ -123,3 +138,5 @@
 - 2026-10-14: Applied report scope review: dropped C01 and new-training/evaluation requirements from the completion map; removed its report paragraph. Fixed CoMM notebook directions/archive paths and reran it on CPU using saved artifacts, recording checkpoint SHA256 and phase/internal-diagnostic isolation. Retained nine-image prior scope and documented low-level budget/batch/selected-epoch differences with future-work controls only. No model training, checkpoint inference, raw metric changes, or production-code edits.
 - 2026-10-15: Simplified report_completion_map.md to a short section-by-section writing checklist. Removed priority codes, repeated scope/history, acceptance matrices, and optional experiment plans; retained the existing-results/no-training scope. Report and notebooks unchanged.
 - 2026-10-15: Completed the approved Background/alignment writing pass in place: verified encoder descriptions and all 12 saved sweep configurations, added a compact settings table, clarified loss/retrieval notation, interpreted both alignment comparisons, and documented fixed retrieval-example selection. Preserved original TODOs and left optional observations as LaTeX comments; checked off the four section tasks. The 17-page LuaLaTeX build is clean; affected pages were rendered and inspected, and git diff --check passed. No training or inference performed.
+
+- 2026-10-25: Implemented the approved section-3 rewrite: concise motivation, reconstruction-first theory with a single DALL-E 2/modality-gap subsection, local methodology, and consolidated results/BrainBits discussion. Preserved all original result values, tables, figures and local loss equations; corrected active prior attribution to the MLP encoder-decoder; added Liang et al. citation and future-control details. Final 18-page LuaLaTeX build and visual/source checks passed; no experiment or model changes.

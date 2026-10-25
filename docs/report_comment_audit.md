@@ -1,3 +1,38 @@
+## Section 3 separation of theory, methods and results, 2026-10-25
+
+- Implemented the user-approved four-part outline after removing the repeated representation-learning introduction: 3.1 motivation/questions, 3.2 reconstruction theory, 3.3 local methods/evaluation, and 3.4 results/discussion.
+- Theory starts with the existing brain representation and explains the prior-to-generator workflow. DALL-E 2 and modality gap form one supporting subsubsection, followed by low-level reconstruction. Removed SDEdit discussion and completed drafting TODOs from section 3.
+- Sources read: MindEye Sections 2.1--2.2 and Appendix A.3 (https://arxiv.org/html/2305.18274); Visual EEG Sections 2.3--2.4 and Appendix C (https://arxiv.org/html/2403.07721v5); DALL-E 2 Section 2.2 (https://arxiv.org/html/2204.06125); Mind the Gap (https://arxiv.org/html/2203.02053); BrainBits Sections 3--7 (https://arxiv.org/html/2411.02783v1). Added the Liang et al. bibliography entry.
+- Corrected an outline error using the active code path: EEGAlignmentModel instantiates SimpleDiffusionPrior, an MLP encoder-decoder with skip connections, not the older transformer prior in the same file. Its forward output predicts noise and remove_noise derives the clean estimate used by the three-term objective. Image generation uses SDXL-Turbo with the ViT-H IP-Adapter, as verified in reconstruction.py. No model changes.
+- Preserved the original three tables, two figures, their captions and labels, and both existing local loss equations exactly. All original reported decimal values remain; secondary joint retrieval directions are explicit. Removed duplicate preliminary results and separated 200-target prior evaluation from nine-image reconstruction metrics.
+- Expanded BrainBits discussion to cover 50-dimensional bottlenecks, CLIP/SSIM/PixCorr preservation, Gaussian-input baseline, oracle-latent ceiling and the distinction from shuffled EEG. Kept dimensionality distinct from bits and fMRI findings distinct from local EEG evidence. Consolidated control proposals and added the controlled low-level comparison to Future Ideas.
+- Verification: final 18-page LuaLaTeX build has no undefined citations/references, fatal errors, overfull or underfull boxes. Inspected section 3 on pages 5--13, Future Ideas on 16--17 and references on 17--18. Source checks confirm exact tables/figures/local losses, unchanged sections 1/2/4, unique labels, all active references/citations resolved and no newly introduced whitespace errors. Existing unrelated section-2 trailing whitespace retained.
+- No training, inference, experiment, API or raw evaluation changes; no README changes. The requested docs/project.md and docs/architecture.md remain absent.
+
+## ATM-S attribution and human-alignment comparison, 2026-10-25
+
+- Read Li et al., Visual Decoding and Reconstruction via EEG Embeddings with Guided Diffusion, https://arxiv.org/html/2403.07721v3, especially Section 2.1, Section 3.2 and Appendix B.3. Inspected the local atms.py and its upstream attribution. Attention, spatiotemporal convolution, temporal aggregation and projection are inherited architecture, not a local contribution.
+- Corrected 2.2 to attribute NICE to Song et al. and ATM-S to Li et al.; separated local output configuration, cached targets and training.
+- Removed internal metric keys throughout the report, replacing two additional occurrences in reconstruction and caption-alignment summaries with the correct directional retrieval names. All numerical values retained.
+- Focused results on human-aligned versus unaligned targets within each EEG encoder. Removed encoder-ranking commentary, qualitative-results prose and the single-condition retrieval illustration as requested. Preserved all eight mean/standard-deviation values in the results table and the seed-comparison figure.
+- Closed with the requested agreement statement about AlignVis. Section 2.1 unchanged.
+- Verification: 17-page LuaLaTeX build, no undefined citations/references or overfull boxes; inspected pages 3--6 and 14. Verified absent metric keys/qualitative section and unchanged numerical table values.
+
+## Complete rewrite after section-boundary review, 2026-10-25
+
+- Re-read AlignVis Sections 2 and 4.4: https://arxiv.org/html/2502.03081v3#S2 and https://arxiv.org/html/2502.03081v3#S4.SS4. The paper uses symmetric contrastive training and reports EEG-to-image top-1/top-5 retrieval over all 200 test images. Bidirectional training alone is not evidence that the paper reports reverse retrieval results.
+- Rewrote 2.1 in third person throughout, retaining the technical formulation and metric definitions without local implementation conventions, metric keys or matching-index commentary. Described the loss as equivalent up to constant scaling and explicitly identified the EEG-to-image direction as the paper's reported scores.
+- Rewrote 2.2 in six explicit stages: scope/comparison, implemented models, training, evaluation, quantitative results, qualitative results. All equations, tables and figures are unchanged; subsequent report sections are unchanged. Added the NICE citation and kept all numerical findings.
+- Verified the absence of first-person pronouns and code identifiers in 2.1 and checked structural/content invariants. LuaLaTeX compiled 18 pages without undefined references/citations or overfull boxes. Visually inspected pages 2--6.
+
+## Section 2 reorganization, 2026-10-25
+
+- Implemented the user-approved separation: 2.1 contains the paper motivation, shared embedding/InfoNCE method, retrieval definitions, findings and reconstruction bridge; 2.2 contains the subject-8 scope, local models, training/evaluation choices and results.
+- Preserved every equation and label, all result values, citations, figures and unrelated sections. Explicitly distinguished the report's bidirectional loss averaging from attribution to the paper, and human perceptual alignment from EEG-image alignment.
+- Consolidated repeated settings and added a visible explanation that the three qualitative examples are illustrative.
+- Verified equation bodies and results table/prose against the original source. LuaLaTeX compilation passed with no undefined references/citations, fatal errors or overfull boxes. Visually inspected affected pages 2--6.
+- Environment: redirected the LuaTeX cache to a writable work directory; enabled shell escape required by the existing minted package. No experiment, metric or production code changes.
+
 ## Paper synopsis correction, 2026-10-25
 
 - Replaced the human-aligned image encoder background with the approved two-paragraph synopsis. Removed the extended DreamSim/LoRA tutorial and gLocal/Harmonization comparison from the synopsis; preserved the separate recreation and its results.
