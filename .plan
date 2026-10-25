@@ -1,3 +1,60 @@
+[2026-10-25 13:31] Correct the synopsis of Rajabi et al.: Human-Aligned Image Models Improve Visual Decoding from the Brain
+
+Request summary:
+- Replace the inaccurate paper synopsis under "Human-aligned image encoders" with two short paragraphs following the content outline below.
+- Status: implemented and verified; awaiting user review of the completed correction.
+
+Content to include, in order:
+- Research question:
+  - Does using image representations aligned with human perceptual judgments improve visual decoding from brain activity?
+- Hypothesis and motivation:
+  - Human similarity judgments capture early impressions of images and are more closely aligned with the recorded brain signals.
+  - Rapid stimulus presentation (100 ms per image in the EEG experiment) elicits responses reflecting early perceptual attributes such as shape, orientation, and color.
+  - Image representations aligned with judgments emphasizing these attributes may therefore provide better targets for brain decoding.
+- Approach:
+  - Use image embeddings from vision models aligned to human perceptual judgments by Sundaram et al. (2024).
+  - Compare these embeddings with those from the original pretrained vision models.
+  - Reuse the existing human-aligned image models; keep image encoders frozen during brain-encoder training.
+  - Train brain encoders to align brain and image embeddings through contrastive learning (InfoNCE).
+  - Evaluate top-1 and top-5 retrieval of the corresponding viewed image from 200 unseen test images.
+- Evidence:
+  - Human-aligned targets improve image retrieval across the tested image and EEG encoders in the within-participant comparisons.
+  - Gradient analysis shows greater emphasis on early stimulus responses, particularly 0–200 ms, and Alpha, Beta, and Gamma frequency components associated with visual processing.
+  - Treat these observations as support for the early-perception hypothesis, without presenting the proposed explanation as an established causal mechanism.
+- Conclusion:
+  - Human-aligned image representations improve visual retrieval from brain activity.
+  - The authors highlight the importance of image representations and the experimental design underlying human perceptual judgments.
+- Future work and connection to our project:
+  - Extend retrieval to reconstruction of viewed images by conditioning image generation on a human-aligned representation space.
+  - Explain that this proposed extension motivates our reconstruction work.
+
+Implementation steps / feature list:
+- Convert the content outline into two connected paragraphs in the existing subsection, using the Rajabi and Sundaram bibliography keys at the relevant claims.
+- Remove the extended DreamSim tutorial, the gLocal/Harmonization comparison, and the misleading claim that retrieval directly measures alignment with human perception.
+- Record source sections and supporting facts in docs/report_comment_audit.md. Put the remaining future-work suggestions there: quantifying alignment, other image databases, and fMRI; note that Appendix E already reports an fMRI evaluation although the discussion proposes it as future work.
+- Preserve "Our recreation", local results, unrelated report content, and existing local changes. Retain the user's comment with an addressed annotation after implementation.
+- Update .plan and .log after implementation.
+
+Function/interface contracts and side effects:
+- Documentation only; no API, model, experiment, or metric changes.
+- Implementation changes the synopsis and source notes; existing results and production code are preserved.
+
+Edge cases / notes:
+- Keep human perceptual alignment of image encoders distinct from contrastive EEG–image alignment.
+- Attribute the hypothesis and interpretation to the authors; distinguish paper findings from our subject-8 recreation.
+- Source: https://arxiv.org/html/2502.03081v3, Sections 2, 4.2–4.4, 5.2, 5.5, 6, and Appendix B.
+
+Tests / acceptance checks:
+- Verify each synopsis claim against its paper section.
+- Compile with the existing LuaLaTeX recipe; inspect affected pages and check citations, references, and diff whitespace.
+- No production tests, experiments, or refactors required.
+
+TODOs:
+- Completed: 17-page LuaLaTeX build; final log has no undefined citations/references, fatal errors, or overfull boxes; inspected the complete revised synopsis on page 2; source whitespace checks passed (generated compiler log contains trailing spaces).
+
+README updates:
+- None.
+
 [2026-08-30 00:00] Handover-ready experiment and evaluation workflow
 
 Request summary:

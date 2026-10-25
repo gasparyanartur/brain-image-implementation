@@ -1,3 +1,9 @@
+[2026-10-25] Corrected Rajabi paper synopsis
+- Rewrote the human-aligned image encoder subsection using the approved hypothesis, Sundaram-model comparison, frozen-image/contrastive-brain training, retrieval evidence, gradient analysis, conclusion, and reconstruction motivation.
+- Removed the extended DreamSim tutorial and alignment-method comparison; preserved the user comment with an addressed annotation and kept the separate recreation/results unchanged.
+- Recorded section-level sources and other future-work suggestions in docs/report_comment_audit.md.
+- Verified a 17-page LuaLaTeX build, resolved citations/references, no fatal errors or overfull boxes, inspected revised page 2, and passed source whitespace checks (generated compiler log contains trailing spaces). No experiments or production changes.
+
 [2026-08-30] EEG alignment local workflow
 - Added `scripts/run_eeg_alignment.sh` for local train-then-evaluate execution using `train_eeg_align`.
 - Separated EEG training from test execution in `scripts/training/train_eeg.py`.

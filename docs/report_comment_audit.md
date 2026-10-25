@@ -1,3 +1,13 @@
+## Paper synopsis correction, 2026-10-25
+
+- Replaced the human-aligned image encoder background with the approved two-paragraph synopsis. Removed the extended DreamSim/LoRA tutorial and gLocal/Harmonization comparison from the synopsis; preserved the separate recreation and its results.
+- [Rajabi et al., Sections 1–2](https://arxiv.org/html/2502.03081v3#S2): the hypothesis is that human similarity judgments capture early impressions and align more closely with brain signals. The authors motivate this with rapid presentation (100 ms in EEG) and shape, orientation, and color; this is their proposed explanation.
+- [Sections 4.2–4.4](https://arxiv.org/html/2502.03081v3#S4): use human-aligned vision models from Sundaram et al. (2024), compare against original pretrained versions, freeze image encoders, train brain encoders with InfoNCE, and evaluate top-1/top-5 retrieval against all 200 unseen test images. Appendix B states that aligned image models are obtained from their authors without retraining.
+- [Section 5.2, Table 1](https://arxiv.org/html/2502.03081v3#S5.SS2): human-aligned targets improve within-participant retrieval across the tested image and EEG architectures. This statement does not imply uniform cross-subject benefits: Section 5.3 reports significant cross-subject improvements only for CLIP and OpenCLIP.
+- [Section 5.5](https://arxiv.org/html/2502.03081v3#S5.SS5): gradient analysis emphasizes earlier responses (0–200 ms) and Alpha/Beta/Gamma components for human-aligned models. Both variants use occipital/parietal information, without a significant spatial difference. Treat the temporal/spectral findings as supporting observations, not causal proof of the proposed mechanism.
+- [Section 6](https://arxiv.org/html/2502.03081v3#S6): conclusion emphasizes human-aligned representations and experimental design. Future work proposes reconstruction with human-aligned conditioning, quantifying alignment, validation on brain responses to other image databases, and fMRI with higher spatial resolution/longer presentations. Appendix E of this version already contains an fMRI evaluation, despite the prospective wording in the discussion.
+- The reconstruction proposal supplies the connection to our project. Our implementation and results remain separately attributed under “Our recreation” and the reconstruction sections.
+
 # Report comment iteration, 2026-10-13
 
 ## Scope review, 2026-10-14
