@@ -1564,3 +1564,220 @@ Notes / risks / suggestions:
 
 README updates:
 - Link the expanded comparison notebook and describe that it includes regenerated example reconstructions.
+[2026-09-10 00:00] Build the full report artifact inventory and writing template
+
+Request summary:
+- Determine whether the repository contains enough evidence for a complete project report.
+- Inventory maintained notebooks, scripts, configs, checkpoints, CSV/YAML evaluation artifacts, visual outputs, and relevant historical commits.
+- Produce a bullet-based report outline with explicit placeholders/templates for figures, equations, tables, and explanatory text.
+- Clearly distinguish verified artifacts, storage-backed artifacts that are not currently visible, historical/deprecated material, and missing evidence.
+
+Implementation steps:
+- Re-audit the current checkout, README, `.plan`, `.log`, maintained configs/scripts, notebooks, and experiment/storage links.
+- Classify notebooks into maintained reports, historical reports, exploratory notebooks, and deprecated/scratch material.
+- Map each maintained pipeline to its training config, launcher, evaluator, checkpoint-selection rule, metric CSV/YAML, TensorBoard location, and report notebook.
+- Inventory available visual artifacts and identify which figures can be generated from existing files versus which require rerunning inference or restoring storage-backed outputs.
+- Draft a report-ready inventory document containing section bullets and reusable placeholders for figures, equations, tables, and explanations.
+- Add a completeness matrix with status values: verified in checkout, verified by README/plan history, storage-backed/not currently visible, or missing.
+- Validate all referenced paths and avoid presenting historical or inferred metrics as current measured results.
+
+Feature list:
+- Evidence-backed artifact inventory.
+- Maintained-versus-deprecated notebook classification.
+- Report outline covering motivation, methods, experiments, metrics, results, limitations, and reproducibility.
+- Figure/equation/table/explanation placeholder templates.
+- Explicit gap and follow-up list.
+
+Function/interface contracts:
+- The inventory document links to repository files using relative paths and records external/storage paths separately.
+- Every reported result maps to a source artifact or is labeled as historical/inference.
+- Placeholder templates do not fabricate metric values or images.
+
+Edge cases:
+- `docs/project.md` and `docs/architecture.md` are required by `AGENTS.md` but absent; record them as documentation gaps rather than silently inventing project facts.
+- `experiments/` may be a storage symlink whose target is unavailable in the current checkout; distinguish inaccessible artifacts from nonexistent artifacts.
+- Notebooks may contain stale outputs or exploratory code; execution status must not be inferred from filename alone.
+- Large checkpoint and image artifacts may be intentionally excluded from git; record expected storage locations and provenance where known.
+
+Tests to add:
+- Path/reference validation for every inventory link that claims to exist in the checkout.
+- Notebook JSON validation for maintained report notebooks.
+- A completeness check that every maintained pipeline has a config, launcher, evaluator, report, and artifact status entry.
+
+TODOs:
+- Obtain user approval before creating the inventory/template document.
+- After approval, decide whether the final report should be Markdown, LaTeX, or a notebook-backed report; default to Markdown inventory plus reusable LaTeX/Markdown snippets unless the user specifies otherwise.
+
+Notes / risks / suggestions:
+- The current checkout contains enough documented history to build a report scaffold, but final quantitative claims require restoring or exposing the storage-backed experiment outputs.
+- The report should treat the EEG alignment sweep, prior/reconstruction, CoMM, text alignment, and low-level reconstruction as separate tracks with different objectives and metrics.
+
+README updates:
+- Add a link to the artifact inventory/template only after it is created and reviewed.
+
+Completion status:
+- Added `docs/report_artifact_inventory.md` as the maintained evidence inventory and report-writing scaffold.
+- Re-audited the `experiments` storage symlink rather than treating a non-following file search as missing results.
+- Verified 20 referenced artifact/config/launcher paths and confirmed seven maintained report notebooks are parseable with every code cell executed.
+- The inventory records the full alignment sweep, prior and joint prior, CoMM, text alignment, low-level ablation, and historical second-prior tracks; it distinguishes current evidence from superseded notebooks and archived experiment groups.
+- Included source-backed metric anchors, seven figure templates, five equation templates, a report outline, writing templates, and final publication gaps.
+- The document deliberately retains `docs/project.md` and `docs/architecture.md` as unresolved repository-documentation gaps; it does not invent those missing documents.
+
+Remaining TODOs:
+- Review the inventory before linking it from README or using it as the final report outline.
+- Verify dataset/paper citations and prepare a release manifest before publication.
+
+[2026-09-15 00:00] Expand the EEG-image technical report scaffold
+
+Request summary:
+- Expand `report/69bd47171c8bd99594e793c6/main.tex` from its current outline into an evidence-backed report scaffold.
+- Distill maintained experiment progress from `docs/report_artifact_inventory.md` and the executed report notebooks.
+- Add concise draft prose, expandable bullets, equations, source-verified citations, tables, and figures without fabricating unverified facts.
+
+Implementation steps:
+1. Extract method, protocol, metric, provenance, and qualitative-asset details from the six maintained report notebooks: alignment sweep, prior reconstruction, CoMM, text alignment, low-level comparison, and historical second prior.
+2. Inspect the report bibliography/build assets and reconcile every needed citation key against `ref.bib`. Read each cited primary source, verify that it supports its adjacent claim, and record complete bibliographic metadata; retain an explicit `% TODO(citation)` marker where verification is incomplete.
+3. Rewrite `main.tex` in one reviewable report-drafting iteration: abstract; problem/data; methods; protocol; dedicated results sections for alignment, prior and joint-prior reconstruction, CoMM fusion, text-target alignment, low-level reconstruction, and historical second-prior context; discussion/limitations; and reproducibility appendix bullets. Preserve each track's explicit scope boundaries.
+4. Add LaTeX-native itemized expansion prompts, a primary alignment table populated from the aggregated three-seed results, secondary result tables where provenance is established, and equations for symmetric InfoNCE, retrieval, prior, fusion, and low-level losses.
+5. Create `report/69bd47171c8bd99594e793c6/images/`; copy selected provenance-verified qualitative assets and generated plots into it; and add named figure environments that use report-local paths plus `\IfFileExists` safeguards for any explicitly deferred export.
+6. Run an available LaTeX build/lint command (or static syntax/reference check if no TeX engine is installed), inspect undefined citations/references, update this plan and `.log`, and only update repository-level documentation if report architecture changes require it.
+
+Feature list:
+- Complete experiment narrative covering all maintained tracks, with each track receiving its own method/result subsection, equations, tables, figures, and expansion prompts as supported by its artifacts.
+- Evidence-calibrated interpretation: the alignment study is multi-seed controlled evidence, while the other completed tracks remain first-class report sections with their stated single-run, negative-result, trade-off, or historical limitations.
+- Expandable drafting bullets for incomplete dataset/preprocessing, implementation, and release-manifest details.
+- Formal method and metric equations tied to implementation tracks.
+- Source-verified citations: each source is read, bibliographically complete, and placed only beside a supported claim.
+- Figure/table scaffold tied to evaluated artifacts, with included images copied to the report-local `images/` directory.
+
+Function/interface contracts:
+- No production-code, experiment-config, or evaluation-artifact contract changes.
+- `main.tex` remains a standalone LaTeX source and must compile when an explicitly deferred figure export is absent.
+- Quantitative claims retain their study scope: multi-seed for alignment only; descriptive single-run evidence for secondary tracks; historical status for the second prior.
+
+Edge cases:
+- Required figures may live behind the `experiments` storage symlink rather than inside the report directory.
+- Existing bibliography keys may be missing, malformed, or unsupported by their source; no unverified citation may remain in compiled manuscript text.
+- Dataset citation, subject/split wording, and caption provenance remain unverified and must be visibly marked rather than guessed.
+- Different reconstruction objectives make total-loss comparisons invalid; low-level results must be described as metric trade-offs.
+
+Tests to add:
+- Compile `main.tex` if the local TeX toolchain and bibliography file permit it; otherwise run static checks for balanced environments and local citation/reference consistency.
+- Verify every figure source with symlink-following inspection before copying it into `report/69bd47171c8bd99594e793c6/images/`.
+- Read and verify every cited primary source; run bibliography/reference checks for undefined or unused citation keys.
+
+Possible refactors or suggestions:
+- Consolidate duplicate package imports and replace Markdown-style bullets with LaTeX lists while preserving report content.
+- Add a release-manifest appendix once source commit, environment lock, checkpoint hashes, and final artifact paths have been collected.
+
+TODOs:
+- Verify the Things-EEG2 source citation, preprocessing, subject count, and held-out split.
+- Verify prompt/model provenance before quoting or displaying Qwen captions.
+- Select, copy, and caption final plots and qualitative grids in `report/69bd47171c8bd99594e793c6/images/`.
+- Complete source reading and claim-level verification for every citation before removing citation TODOs.
+- Confirm exact resolved loss weights/temperature for each reported checkpoint before turning equation placeholders into fixed implementation claims.
+
+Notes / risks / suggestions:
+- `docs/project.md` and `docs/architecture.md`, required by `AGENTS.md`, are absent in this checkout; `docs/report_artifact_inventory.md` is the verified substitute for report planning. This documentation gap remains explicit.
+- The 12-run aggregate (three seeds per condition), with aligned SynCLR + ATMS leading at `image_acc=0.5983 +/- 0.0252`, is the only multi-seed controlled comparison. It must not eclipse the other report sections.
+- Prior-only/joint-prior reconstruction, CoMM fusion, text-target alignment, and low-level reconstruction are completed maintained tracks with independent goals, metrics, and available report notebooks/assets. Give each a dedicated method/result narrative and qualify its result appropriately: CoMM is negative for the evaluated configuration; low-level is a metric trade-off; secondary tracks are not matched multi-seed studies. The second-prior material is historical context only.
+
+README updates:
+- None planned: this iteration changes the report draft only. Record any discovery that requires user-facing repository documentation in this plan rather than expanding scope.
+
+Completion status:
+- Extracted and reconciled the maintained alignment, prior/joint-prior, CoMM, text-target, low-level, and historical second-prior notebook narratives with the artifact inventory.
+- Replaced the report skeleton with a compilable nine-page LaTeX draft containing dedicated track sections, scoped interpretation, four equations, four result tables, a TikZ pipeline diagram, and three evaluator-derived qualitative figures.
+- Copied eight selected evaluator outputs into `report/69bd47171c8bd99594e793c6/images/`; the LaTeX `\reportimage` helper provides a readable fallback if an explicitly deferred asset is absent.
+- Read and claim-checked all six citations used in the manuscript: Rajabi et al. (human-aligned decoding), Scotti et al. (MindEye), Gifford et al. (THINGS-EEG2), Fu et al. (DreamSim), Radford et al. (CLIP), and Rombach et al. (latent diffusion). Added complete bibliography records for THINGS-EEG2, CLIP, and latent diffusion.
+- `latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex` completed; the final auxiliary/bibliography scan contains no undefined citations or references. `git diff --check` passed. A visual PDF pass confirmed tables and figures render on the page.
+
+Remaining TODOs:
+- Replace expansion prompts only after verifying the resolved dataset/preprocessing contract, caption provenance, exact loss hyperparameters, and release manifest fields.
+- Export the full seed-level alignment plot and multi-example qualitative grids into the report-local `images/` directory.
+
+Scope correction after review:
+- The prior iteration incorrectly replaced the user-supplied report skeleton with a restructured near-complete report. This is not the requested drafting mode.
+- Restore the original section hierarchy and informal working voice in `main.tex`: Introduction, Background, Reconstructing Visual Data, Retrieval, and Future Ideas, including their existing subsection order.
+- Within that source structure, add only targeted scaffolding: expandable LaTeX bullets, scoped tables/figure blocks, equations, and source-verified citations. Keep incomplete prose as prompts or short bridge text rather than supplying a fully rewritten narrative.
+- Retain the report-local `images/` directory and verified bibliography additions, but attach visual assets to the original relevant sections instead of introducing an independent Results-led structure.
+- Before the correction, present the restored-outline plan for review; do not modify `main.tex` until it is approved.
+
+Restoration status:
+- User directed immediate restoration of every original TODO. Restored the supplied `main.tex` section hierarchy, prose, citation placeholders, inline markers, and all commented TODOs; no prior drafted narrative, tables, equations, or figures remain in the source.
+- Kept the report-local copied `images/` assets and bibliography additions available for a later surgical expansion, but they are intentionally not wired into the restored skeleton.
+
+In-place expansion status:
+
+Reconstruction writing pass (2026-10-15, awaiting review):
+- Request/features: complete the Reconstruction checklist in main.tex in place, following the Background pass; preserve hierarchy and original TODO markers and leave extra thoughts as LaTeX comments.
+- Steps: verify prior-only/joint and low-level pipelines against code, saved configurations, CSVs, and report notebooks; clarify trained/frozen modules, target spaces, generator, losses, and saved sampling settings; expand interpretation of the nine-image prior comparison and 200-image low-level trade-offs, including visible limitations and generator-versus-EEG scope.
+- Contracts/side effects: Reconstruction section only, completion checklist, plan/log; reuse report-local images. No training, inference, expanded evaluation, production changes, or unrelated sections.
+- Edge cases/risks: distinguish 200-target latent metrics from nine-image generation metrics; do not attribute configuration differences solely to losses or claim EEG information content from plausible images. Report missing sampling metadata explicitly rather than infer defaults.
+- Checks/tests: compare claims and values to saved evidence; verify primary sources for any added citation claims; compile existing main.tex and inspect affected layout and references. No production tests, refactors, or README changes.
+- Notes: docs/project.md and docs/architecture.md are absent. Optional future controls stay comments, not new work requirements.
+- TODO/status: await user approval, then implement this single writing iteration and record verification.
+
+Background/alignment writing pass (2026-10-15, approved by user):
+- Request/features: finish the four Background/alignment checklist items in place; keep extra observations as LaTeX comments and mention them in the handoff.
+- Steps: verify saved sweep settings, encoder code, and figure-generation selection; improve Section 2 prose/equation notation, add a compact settings table, interpret existing metrics, and clarify captions; compile and inspect affected pages.
+- Contracts/side effects: Section 2 and checklist status only, plus plan/log. Preserve original TODOs and user structure. No training, new evaluation, notebook inference, or changes to other report sections.
+- Edge cases: distinguish batch size, test-bank size, and seed count; sample selection is fixed/illustrative, not random. Optional statistical/interpretation thoughts stay in comments.
+- Verification: compare prose/table with all 12 saved run hparams and aggregate CSV, compile LuaLaTeX, inspect changed-page layout, whitespace check. No production tests/refactors or README changes. Required project/architecture docs remain absent.
+- Completion: expanded Background/alignment in place with verified encoder descriptions, a saved-settings table, distinct batch/bank/seed notation, both-condition result interpretation, and explicit retrieval-grid selection. Preserved original TODOs as comments and marked the four checklist items complete. Optional thoughts remain LaTeX comments.
+- Validation: checked all 12 saved run configurations and aggregate metrics; LuaLaTeX produced a 17-page PDF with no undefined references/citations, fatal errors, or overfull boxes. Rendered and inspected affected pages 2–5; git diff --check passed. No training, inference, or notebook execution.
+
+Completion-map simplification (2026-10-15, user requested):
+- Request/steps: replace the oversized completion map with a short section-by-section checklist of remaining report work, stating the existing-results/no-training scope once.
+- Features/contracts: concise writing checklist only; no report, notebook, experiment, or interface changes.
+- Edge cases/notes: preserve accepted scope, exclude completed fixes and dropped C01; retain report structure/TODO conventions. Required project/architecture docs remain absent.
+- Checks: review checklist against accepted scope and run git diff --check. No tests, refactors, or README updates needed.
+- Status: implemented; remaining work is listed in the simplified map.
+
+Scope revision (2026-10-14, explicit user direction):
+- Request/features: complete the report from existing results only; no training/retraining or expanded evaluation campaigns. Drop C01. C02 is limited to low-effort notebook direction correction, C03 to archive-path provenance, C04 to existing nine-image scope, C05 to isolating/reporting branch differences, and C06 to documentation plus future-work proposals.
+- Steps: revise completion map and report scope wording; fix and rerun the CPU-only CoMM report notebook using saved CSV/YAML; isolate train/validation/generated-evaluation/reference branches in its protocol table; update inventory/audit and compile affected LaTeX.
+- Contract/side effects: documentation/notebook outputs only; preserve raw metrics/checkpoints and production evaluation code. No GPU inference or new model fits.
+- Edge cases: archived paths differ from recorded provenance; resolve explicitly without overwriting recorded paths. Isolating a protocol difference does not establish its causal effect.
+- Checks: notebook execution, archive/checkpoint existence and direction-value assertions; LuaLaTeX compile; whitespace check. No production tests or refactors.
+- Completion: map now excludes C01 and all new-compute requirements; preserved the user's inline preprocessing response and bounded that section accordingly. Corrected/re-executed the artifact-only CoMM notebook on CPU, checked epoch-24 checkpoint path and SHA256, and added phase/diagnostic separation. Added saved-budget/batch/selected-epoch low-level protocol table and a future-only matched-control suggestion. C04 remains the existing nine-image scope.
+- Verification: CoMM notebook's five code cells completed without errors; direction-value and saved-config/checkpoint assertions passed. Raw CSVs/checkpoints and production code are unchanged. Report compilation and whitespace checks completed; no training or new inference was performed.
+- Notes: required project/architecture docs remain absent. README updates: none. Existing original TODOs remain preserved. Remaining work is report narrative/appendix completion from existing evidence.
+
+Report comment follow-up and completion map (2026-10-13, user-authorized):
+- Request/features: implement five new AGENT points (reconstruction interpretation, delete SigLIP subsection, explain/cite CoMM and fusion intention, add future ideas), then produce a detailed remaining-work map for a comprehensive report.
+- Steps: read CoMM primary paper and local implementation/evaluation; make bounded source/bibliography edits; audit report gaps and protocol provenance; write docs/report_completion_map.md with section-level deliverables, evidence, priorities, dependencies, and completion criteria; compile and inspect changed pages.
+- Contracts/side effects: report/bibliography/docs/plan/log only. Delete only the explicitly requested SigLIP subsection. Preserve other source structure and original TODOs; archive removed experimental notes in the completion map where useful.
+- Edge cases: prior-generated latents are derived from EEG and do not constitute independent neural measurements; distinguish representational complementarity from increased neural information. Verify training-versus-evaluation branches and validation/test protocol before presenting a roadmap.
+- Tests/checks: claim-level paper verification, successful LuaLaTeX build and changed-page review, diff whitespace check. No production tests/refactors.
+- Completion: implemented all five new comments; removed only the requested SigLIP subsection; added verified CoMM source/motivation and future-work bullets. Corrected CoMM mathematical direction labels in source/inventory without changing saved CSVs, and disclosed validation/test bank reuse discovered during the report audit.
+- Deliverables: docs/report_completion_map.md provides detailed section/appendix tasks, six P0 issues, evidence/acceptance criteria, ordered completion passes, and a separate new-compute decision map. docs/report_comment_audit.md records the follow-up source/protocol checks.
+- Validation: LuaLaTeX produced a 15-page report with resolved citations/references; changed pages were rendered and inspected. Final layout check removed the new overfull text; git diff --check passed.
+- Remaining work is fully mapped, including supporting CoMM notebook/path corrections and independent-validation experiments. Notes: docs/project.md and docs/architecture.md remain absent. README updates: none. New experiments remain proposals, with no production changes or launches in this iteration.
+
+Comment-driven report iteration (2026-10-13, authorized by user):
+- Request/features: implement every current AGENT instruction in main.tex: subject-8 scope, verified alignment/reconstruction/BrainBits citations, readable tables/captions, prior and low-level results/figures, SigLIP experiment summary, and expanded text-target explanation.
+- Steps: audit notebooks and CSV/YAML/config/code provenance; read primary papers; apply localized prose/bullet/equation/table/caption additions and report-local figure exports; compile and inspect rendered pages.
+- Interfaces/side effects: report, bibliography, analysis assets, plan/log only; no training or evaluation behavior changes. Preserve headings, existing prose where factually supported, and every original TODO.
+- Edge cases/risks: historical SigLIP artifacts may lack final test evaluation; report that limit explicitly. Paper methods must be distinguished from the implemented path. Subject variation must not be invented from one subject.
+- Verification/tests: check metric values against saved CSVs, confirm citations support adjacent claims, compile LuaLaTeX with no undefined references/citations, inspect changed-page renders. No production tests needed.
+- Refactors: none. Notes: docs/project.md and docs/architecture.md are absent; use the artifact inventory. README updates: none.
+- Completion: implemented all current AGENT comments in place and retained original TODOs. Added six bibliography records after reading primary sources; checked the two already-added reconstruction papers. Added subject scope, readable alignment captions/headings, prior and low-level tables, Huber loss notation and code-matched prior weights, BrainBits discussion, SigLIP exploration/gap summary, and text-target protocol/table/diagram.
+- Executed notebooks/report_reconstruction_figures.ipynb on CPU to export matched prior and low-level saved-output grids to report-local images/. Added docs/report_comment_audit.md with comment outcomes, source sections/URLs, and metric/checkpoint provenance.
+- Validation: all notebook cells executed without errors; selected checkpoint/subject/ground-truth checks passed. LuaLaTeX produced a 14-page report with no undefined citations/references, fatal errors, or overfull boxes. Rendered and inspected all pages; git diff --check passed.
+- Remaining evidence gaps: no archived SigLIP final evaluation was found; text caption records lack per-record generation metadata and caption quality needs an audit. Preserved these limitations and original drafting TODOs. No further implementation required for this comment iteration.
+
+Compile repair continuation (2026-10-13):
+- Request: repair the report's current LaTeX Workshop failure.
+- Steps: move the inline AGENT comment outside the retrieval caption so its closing brace is parsed; run the configured LuaLaTeX/latexmk recipe and check references and citations.
+- Contract and side effects: syntax-only report edit; preserve the caption text and AGENT instruction. No model/code/interface changes.
+- Verification: successful full build and no undefined citations/references in the final log; no additional tests or refactors needed.
+- Notes: docs/project.md and docs/architecture.md remain absent. README updates: none.
+- Result: configured latexmk/LuaLaTeX recipe completed successfully, generated an eight-page main.pdf, and the final log contains no undefined references/citations or fatal errors.
+- Expanded the restored skeleton without changing its section hierarchy or removing any original TODO. Added short evidence bullets, three method equations, two compact result tables, and three figure blocks directly under the relevant existing sections.
+- Active citations are limited to six read/verified sources. Original unverified citation placeholders are retained as explicit TODO comments, rather than compiled citations.
+- Used the report-local evaluator assets for alignment, prior/joint-prior, and low-level figures; deferred full grids and plots remain explicit TODOs.
+- LuaLaTeX is the compatible build path because the original graph-drawing package requires it; `latexmk -lualatex -shell-escape -interaction=nonstopmode -halt-on-error main.tex` completed with no undefined citations or references. `git diff --check` passed.
+- Replaced the preliminary single-pair alignment image with an executed analysis-notebook export containing three held-out targets and the top four image candidates ranked by EEG-to-image cosine similarity. Each candidate has its numerical similarity printed beneath it, and the ground-truth candidate is marked at its observed rank.
+- Added the report-local seed-summary figure. The surrounding Background prose now defines both $\operatorname{Acc}_{E\rightarrow I}$ and $\operatorname{Acc}_{I\rightarrow E}$, describes the controlled $N=3$-seed design without privileging a specific seed, and ties the table and figure captions to those equations.
+- Re-executed `notebooks/alignment_report_figures.ipynb`, visually inspected both exported PNGs, and compiled the nine-page report with `latexmk -g -lualatex -shell-escape -interaction=nonstopmode -halt-on-error main.tex`. Compilation succeeded with existing non-fatal formatting warnings only; `git diff --check` passed.
